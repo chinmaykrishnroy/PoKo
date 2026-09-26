@@ -1,0 +1,353 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <DNSServer.h>
+#include <WebServer.h>
+#include <Preferences.h>
+#include <ArduinoOTA.h>
+#include <esp_task_wdt.h>
+
+#include "PokoPins.h"
+#include "PokoAppState.h"
+#include "ButtonInput.h"
+#include "PokoDrivers.h"
+#include "PokoUI.h"
+#include "InfoApp.h"
+#include "PokoOTA.h"
+#include "PokoAPI.h"
+
+// ─────────────────────────────────────────────────────────────
+//  Poko Core Firmware
+//  Board: Waveshare ESP32-S3-LCD-0.85
+//  Display: 128×128 GC9107 IPS
+//  Codec: ES8311
+//  Controls: BOOT (GPIO 0) = Left, KEY (GPIO 5) = Right
+// ─────────────────────────────────────────────────────────────
+
+WebServer   server(80);
+Preferences prefs;
+DNSServer   dnsServer;
+ButtonInput btnInput;
+
+// UI & Apps
+PokoUI*   pokoUI          = nullptr;
+InfoApp*  infoAppInstance = nullptr;
+PokoAPI*  masterApi       = nullptr;
+
+AppState activeApp = STATE_LAUNCHER;
+
+// ── WiFi State Machine ────────────────────────────────────────
+enum WifiModeState { STATE_WIFI_CONNECTING, STATE_WIFI_CONNECTED, STATE_WIFI_AP };
+WifiModeState wifiState = STATE_WIFI_CONNECTING;
+unsigned long wifiTimer = 0;
+String savedSSID = "";
+String savedPass = "";
+bool webServerStarted = false;
+uint32_t staTimeoutMs = 15000;
+uint32_t apTimeoutMs  = 120000;
+
+void ensureWebServerStarted(const char* reason) {
+    if (webServerStarted) return;
+    server.begin(80);
+    webServerStarted = true;
+    Serial.printf("[web] server started (%s) at %s\n",
+                  reason,
+                  (WiFi.getMode() & WIFI_AP) ? WiFi.softAPIP().toString().c_str() : WiFi.localIP().toString().c_str());
+}
+
+String getNetworkStatusMsg() {
+    if (wifiState == STATE_WIFI_CONNECTED) return "";
+    if (wifiState == STATE_WIFI_AP) return "AP:POKO_SETUP";
+    return "Connecting...";
+}
+
+// ── Central App Switcher (Exclusive Resource Model) ───────────
+void onAppChange(AppState newState) {
+    if (newState == activeApp) return;
+
+    Serial.printf("[app] switch %d -> %d\n", (int)activeApp, (int)newState);
+
+    // Unload previous app resources
+    if (activeApp == STATE_INFO && infoAppInstance) {
+        infoAppInstance->unload();
+    }
+
+    activeApp = newState;
+    prefs.putInt("app_state", (int)activeApp);
+
+    // Blank screen cleanly between apps
+    pokoGfx->fillScreen(BLACK);
+
+    // Load newly active app
+    if (activeApp == STATE_LAUNCHER && pokoUI) {
+        pokoUI->redraw();
+    } else if (activeApp == STATE_INFO && infoAppInstance) {
+        infoAppInstance->load();
+    }
+}
+
+// ── Driver Reset Handler (Combo: Both held 5s) ────────────────
+void handleDriverReset() {
+    Serial.println("[poko] performing driver reset");
+    driverReset(pokoGfx);
+    if (activeApp == STATE_LAUNCHER && pokoUI) {
+        pokoUI->redraw();
+    } else if (activeApp == STATE_INFO && infoAppInstance) {
+        infoAppInstance->load();
+    }
+}
+
+// ── Button & Combo Callbacks ──────────────────────────────────
+void onBtnLeft() {
+    Serial.println("[action] Left (BOOT) Clicked");
+    if (activeApp == STATE_LAUNCHER && pokoUI) {
+        pokoUI->navigateLeft();
+    } else if (activeApp == STATE_INFO && infoAppInstance) {
+        infoAppInstance->onLeft();
+    }
+}
+
+void onBtnRight() {
+    Serial.println("[action] Right (KEY) Clicked");
+    if (activeApp == STATE_LAUNCHER && pokoUI) {
+        pokoUI->navigateRight();
+    } else if (activeApp == STATE_INFO && infoAppInstance) {
+        infoAppInstance->onRight();
+    }
+}
+
+void onBtnLeftDouble() {
+    Serial.println("[action] Left Double-Click -> Exit to launcher");
+    if (activeApp != STATE_LAUNCHER) {
+        onAppChange(STATE_LAUNCHER);
+    }
+}
+
+void onBtnRightDouble() {
+    Serial.println("[action] Right Double-Click -> Enter App");
+    if (activeApp == STATE_LAUNCHER && pokoUI) {
+        pokoUI->enter();
+    } else if (activeApp == STATE_INFO && infoAppInstance) {
+        infoAppInstance->onEnter();
+    }
+}
+
+void onBtnLongRight() {
+    if (activeApp == STATE_INFO && infoAppInstance) {
+        infoAppInstance->onLongRight();
+    }
+}
+
+// ── Dual Button Combos ────────────────────────────────────────
+void onComboBothClick() {
+    // Toggle LED ring ambient lighting
+    static bool ledOn = false;
+    ledOn = !ledOn;
+    if (ledOn) {
+        setAllLEDs(CRGB(0, 160, 220));
+    } else {
+        turnOffLEDs();
+    }
+}
+
+void onComboBothDouble() {
+    // Both double-clicked -> Diagnostics / Info screen directly
+    Serial.println("[combo] both double-click -> Jump to InfoApp");
+    onAppChange(STATE_INFO);
+}
+
+void onComboBothLong() {
+    // Both held 2 seconds -> Cycle brightness: 25% -> 50% -> 100% -> 25%
+    int cur = prefs.getInt("brightness", 80);
+    int next = 80;
+    if (cur <= 30)      next = 60;
+    else if (cur <= 65) next = 100;
+    else                next = 25;
+
+    prefs.putInt("brightness", next);
+    setBacklightPercent(next);
+    Serial.printf("[combo] both held 2s -> brightness %d%%\n", next);
+}
+
+void onComboBothVLong() {
+    // Both held 5 seconds -> Reset hardware drivers
+    Serial.println("[combo] both held 5s -> Driver Reset");
+    handleDriverReset();
+}
+
+void onComboBothUltra() {
+    // Both held 10 seconds -> Reboot
+    Serial.println("[combo] both held 10s -> Rebooting");
+    pokoGfx->fillScreen(RED);
+    delay(500);
+    ESP.restart();
+}
+
+// ── Arduino Setup ─────────────────────────────────────────────
+void setup() {
+    Serial.begin(115200);
+    delay(100);
+    Serial.println("\n\n========================================");
+    Serial.println("           POKO CORE INIT               ");
+    Serial.println("========================================");
+
+    // Preferences & Settings
+    prefs.begin("poko", false);
+
+    // 1. Centralized Display Init
+    createDisplay();
+    if (!initDisplay(pokoGfx)) {
+        Serial.println("[display] init failed!");
+    } else {
+        Serial.println("[display] 128x128 GC9107 ready");
+    }
+
+    // 2. Backlight
+    initBacklight();
+    int savedBr = prefs.getInt("brightness", 80);
+    setBacklightPercent(savedBr);
+
+    // 3. Audio Codec (ES8311)
+    initES8311(44100);
+    int savedVol = prefs.getInt("volume", 75);
+    es8311SetVolume(savedVol);
+
+    // 4. WS2812B LEDs
+    initLEDs();
+
+    // 5. Button Input Setup
+    btnInput.begin();
+    btnInput.onLeft(onBtnLeft);
+    btnInput.onRight(onBtnRight);
+    btnInput.onLeftDouble(onBtnLeftDouble);
+    btnInput.onRightDouble(onBtnRightDouble);
+    btnInput.onLongRight(onBtnLongRight);
+    btnInput.onBothClick(onComboBothClick);
+    btnInput.onBothDouble(onComboBothDouble);
+    btnInput.onBothLong(onComboBothLong);
+    btnInput.onBothVLong(onComboBothVLong);
+    btnInput.onBothUltra(onComboBothUltra);
+
+    // 6. Instantiate UI & Apps
+    pokoUI = new PokoUI(pokoGfx, onAppChange);
+    pokoUI->begin();
+
+    infoAppInstance = new InfoApp(pokoGfx, onAppChange);
+    infoAppInstance->begin();
+
+    // 7. WiFi & Network Services
+    savedSSID = prefs.getString("wifi_ssid", "X");
+    savedPass = prefs.getString("wifi_pass", "the2.4password");
+
+    // Configure NTP time sync for GMT+5:30 (19800s offset)
+    configTime(19800, 0, "pool.ntp.org", "time.google.com");
+
+    if (savedSSID.length() > 0) {
+        WiFi.mode(WIFI_STA);
+        WiFi.setSleep(false);
+        WiFi.begin(savedSSID.c_str(), savedPass.c_str());
+        wifiTimer = millis();
+        wifiState = STATE_WIFI_CONNECTING;
+        Serial.printf("[wifi] connecting to %s...\n", savedSSID.c_str());
+    } else {
+        // No saved WiFi -> start setup AP with password 12345678
+        WiFi.mode(WIFI_AP);
+        WiFi.softAP("POKO_SETUP", "12345678");
+        dnsServer.start(53, "*", WiFi.softAPIP());
+        wifiState = STATE_WIFI_AP;
+        wifiTimer = millis();
+        ensureWebServerStarted("first-time AP");
+        Serial.println("[wifi] no credentials, started POKO_SETUP AP (password: 12345678)");
+    }
+
+    // 8. REST API & Web Dashboard
+    masterApi = new PokoAPI(&server, &prefs);
+    masterApi->begin();
+
+    // Captive portal redirect in AP mode
+    server.onNotFound([]() {
+        if (WiFi.getMode() & WIFI_AP) {
+            server.sendHeader("Location", "http://192.168.4.1/", true);
+            server.send(302, "text/plain", "");
+        } else {
+            server.send(404, "text/plain", "Not found");
+        }
+    });
+
+    // 9. OTA Updates (Web & ArduinoOTA)
+    PokoOTA::begin(&server, onAppChange, pokoGfx);
+
+    // Initial state: Start on Launcher
+    activeApp = STATE_LAUNCHER;
+    pokoUI->redraw();
+
+    Serial.println(">>> POKO CORE READY <<<");
+}
+
+// ── Arduino Main Loop ─────────────────────────────────────────
+void loop() {
+    esp_task_wdt_reset();
+
+    // Process button input and combos
+    btnInput.update();
+
+    // WiFi STA/AP Non-blocking State Machine
+    if (wifiState == STATE_WIFI_CONNECTING) {
+        if (WiFi.status() == WL_CONNECTED) {
+            wifiState = STATE_WIFI_CONNECTED;
+            ensureWebServerStarted("sta connected");
+            Serial.printf("[wifi] connected! IP: %s\n", WiFi.localIP().toString().c_str());
+
+            // Initialize ArduinoOTA once connected
+            static bool otaInit = false;
+            if (!otaInit) {
+                ArduinoOTA.setHostname("Poko");
+                ArduinoOTA.begin();
+                otaInit = true;
+            }
+
+            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
+        } else if (millis() - wifiTimer > staTimeoutMs) {
+            Serial.println("[wifi] connection timeout -> fallback to AP mode");
+            WiFi.disconnect();
+            WiFi.mode(WIFI_AP);
+            WiFi.softAP("POKO_SETUP", "12345678");
+            dnsServer.start(53, "*", WiFi.softAPIP());
+            wifiState = STATE_WIFI_AP;
+            wifiTimer = millis();
+            ensureWebServerStarted("AP fallback (password: 12345678)");
+            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
+        }
+    } else if (wifiState == STATE_WIFI_AP) {
+        dnsServer.processNextRequest();
+        // If no clients connected and timeout elapsed, try reconnecting to STA
+        if (WiFi.softAPgetStationNum() == 0 && (millis() - wifiTimer > apTimeoutMs) && savedSSID.length() > 0) {
+            Serial.println("[wifi] AP timeout -> retrying STA mode");
+            dnsServer.stop();
+            WiFi.mode(WIFI_STA);
+            WiFi.begin(savedSSID.c_str(), savedPass.c_str());
+            wifiState = STATE_WIFI_CONNECTING;
+            wifiTimer = millis();
+            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
+        } else if (WiFi.softAPgetStationNum() > 0) {
+            wifiTimer = millis(); // Keep AP alive while clients are active
+        }
+    } else if (wifiState == STATE_WIFI_CONNECTED) {
+        ArduinoOTA.handle();
+        if (WiFi.status() != WL_CONNECTED) {
+            Serial.println("[wifi] lost connection -> reconnecting");
+            wifiState = STATE_WIFI_CONNECTING;
+            wifiTimer = millis();
+            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
+        }
+    }
+
+    // Web Server requests
+    server.handleClient();
+
+    // Active App execution
+    if (activeApp == STATE_LAUNCHER && pokoUI) {
+        pokoUI->update();
+    } else if (activeApp == STATE_INFO && infoAppInstance) {
+        infoAppInstance->update();
+    }
+}
