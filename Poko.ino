@@ -12,15 +12,21 @@
 #include "PokoDrivers.h"
 #include "PokoUI.h"
 #include "InfoApp.h"
+#include "ClockApp.h"
+#include "SSyncApp.h"
+#include "MusicApp.h"
+#include "VideoApp.h"
+#include "GalleryApp.h"
+#include "SettingsApp.h"
 #include "PokoOTA.h"
 #include "PokoAPI.h"
 
 // ─────────────────────────────────────────────────────────────
-//  Poko Core Firmware
+//  Poko Core Firmware — Complete 7-App Suite
 //  Board: Waveshare ESP32-S3-LCD-0.85
 //  Display: 128×128 GC9107 IPS
-//  Codec: ES8311
-//  Controls: BOOT (GPIO 0) = Left, KEY (GPIO 5) = Right
+//  Codec: ES8311 + PA Amp
+//  Controls: BOOT (GPIO 0) = Left, KEY (GPIO 5 & 4) = Right
 // ─────────────────────────────────────────────────────────────
 
 WebServer   server(80);
@@ -29,9 +35,15 @@ DNSServer   dnsServer;
 ButtonInput btnInput;
 
 // UI & Apps
-PokoUI*   pokoUI          = nullptr;
-InfoApp*  infoAppInstance = nullptr;
-PokoAPI*  masterApi       = nullptr;
+PokoUI*      pokoUI              = nullptr;
+InfoApp*     infoAppInstance     = nullptr;
+ClockApp*    clockAppInstance    = nullptr;
+SSyncApp*    ssyncAppInstance    = nullptr;
+MusicApp*    musicAppInstance    = nullptr;
+VideoApp*    videoAppInstance    = nullptr;
+GalleryApp*  galleryAppInstance  = nullptr;
+SettingsApp* settingsAppInstance = nullptr;
+PokoAPI*     masterApi           = nullptr;
 
 AppState activeApp = STATE_LAUNCHER;
 
@@ -67,52 +79,68 @@ void onAppChange(AppState newState) {
     Serial.printf("[app] switch %d -> %d\n", (int)activeApp, (int)newState);
 
     // Unload previous app resources
-    if (activeApp == STATE_INFO && infoAppInstance) {
-        infoAppInstance->unload();
-    }
+    if (activeApp == STATE_INFO && infoAppInstance)                  infoAppInstance->unload();
+    else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->unload();
+    else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->unload();
+    else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->unload();
+    else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->unload();
+    else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->unload();
+    else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->unload();
 
     activeApp = newState;
     prefs.putInt("app_state", (int)activeApp);
 
     // Blank screen cleanly between apps
-    pokoGfx->fillScreen(BLACK);
+    pokoGfx->fillScreen(RGB565_BLACK);
 
     // Load newly active app
-    if (activeApp == STATE_LAUNCHER && pokoUI) {
-        pokoUI->redraw();
-    } else if (activeApp == STATE_INFO && infoAppInstance) {
-        infoAppInstance->load();
-    }
+    if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->redraw();
+    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->load();
+    else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->load();
+    else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->load();
+    else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->load();
+    else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->load();
+    else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->load();
+    else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->load();
 }
 
 // ── Driver Reset Handler (Combo: Both held 5s) ────────────────
 void handleDriverReset() {
     Serial.println("[poko] performing driver reset");
     driverReset(pokoGfx);
-    if (activeApp == STATE_LAUNCHER && pokoUI) {
-        pokoUI->redraw();
-    } else if (activeApp == STATE_INFO && infoAppInstance) {
-        infoAppInstance->load();
-    }
+    if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->redraw();
+    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->load();
+    else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->load();
+    else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->load();
+    else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->load();
+    else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->load();
+    else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->load();
+    else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->load();
 }
 
 // ── Button & Combo Callbacks ──────────────────────────────────
 void onBtnLeft() {
     Serial.println("[action] Left (BOOT) Clicked");
-    if (activeApp == STATE_LAUNCHER && pokoUI) {
-        pokoUI->navigateLeft();
-    } else if (activeApp == STATE_INFO && infoAppInstance) {
-        infoAppInstance->onLeft();
-    }
+    if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->navigateLeft();
+    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onLeft();
+    else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->onLeft();
+    else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->onLeft();
+    else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->onLeft();
+    else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->onLeft();
+    else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->onLeft();
+    else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->onLeft();
 }
 
 void onBtnRight() {
     Serial.println("[action] Right (KEY) Clicked");
-    if (activeApp == STATE_LAUNCHER && pokoUI) {
-        pokoUI->navigateRight();
-    } else if (activeApp == STATE_INFO && infoAppInstance) {
-        infoAppInstance->onRight();
-    }
+    if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->navigateRight();
+    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onRight();
+    else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->onRight();
+    else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->onRight();
+    else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->onRight();
+    else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->onRight();
+    else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->onRight();
+    else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->onRight();
 }
 
 void onBtnLeftDouble() {
@@ -123,40 +151,39 @@ void onBtnLeftDouble() {
 }
 
 void onBtnRightDouble() {
-    Serial.println("[action] Right Double-Click -> Enter App");
-    if (activeApp == STATE_LAUNCHER && pokoUI) {
-        pokoUI->enter();
-    } else if (activeApp == STATE_INFO && infoAppInstance) {
-        infoAppInstance->onEnter();
-    }
+    Serial.println("[action] Right Double-Click -> Enter / Action");
+    if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->enter();
+    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onEnter();
+    else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->onEnter();
+    else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->onEnter();
+    else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->onEnter();
+    else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->onEnter();
+    else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->onEnter();
+    else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->onEnter();
 }
 
 void onBtnLongRight() {
-    if (activeApp == STATE_INFO && infoAppInstance) {
-        infoAppInstance->onLongRight();
-    }
+    if (activeApp == STATE_INFO && infoAppInstance)                  infoAppInstance->onLongRight();
+    else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->onLongRight();
 }
 
 // ── Dual Button Combos ────────────────────────────────────────
 void onComboBothClick() {
-    // Toggle LED ring ambient lighting
     static bool ledOn = false;
     ledOn = !ledOn;
     if (ledOn) {
-        setAllLEDs(CRGB(0, 160, 220));
+        setAllLEDs(CRGB(0, 180, 255));
     } else {
         turnOffLEDs();
     }
 }
 
 void onComboBothDouble() {
-    // Both double-clicked -> Diagnostics / Info screen directly
     Serial.println("[combo] both double-click -> Jump to InfoApp");
     onAppChange(STATE_INFO);
 }
 
 void onComboBothLong() {
-    // Both held 2 seconds -> Cycle brightness: 25% -> 50% -> 100% -> 25%
     int cur = prefs.getInt("brightness", 80);
     int next = 80;
     if (cur <= 30)      next = 60;
@@ -169,15 +196,13 @@ void onComboBothLong() {
 }
 
 void onComboBothVLong() {
-    // Both held 5 seconds -> Reset hardware drivers
     Serial.println("[combo] both held 5s -> Driver Reset");
     handleDriverReset();
 }
 
 void onComboBothUltra() {
-    // Both held 10 seconds -> Reboot
     Serial.println("[combo] both held 10s -> Rebooting");
-    pokoGfx->fillScreen(RED);
+    pokoGfx->fillScreen(RGB565_RED);
     delay(500);
     ESP.restart();
 }
@@ -227,12 +252,30 @@ void setup() {
     btnInput.onBothVLong(onComboBothVLong);
     btnInput.onBothUltra(onComboBothUltra);
 
-    // 6. Instantiate UI & Apps
+    // 6. Instantiate UI & All 7 Apps
     pokoUI = new PokoUI(pokoGfx, onAppChange);
     pokoUI->begin();
 
     infoAppInstance = new InfoApp(pokoGfx, onAppChange);
     infoAppInstance->begin();
+
+    clockAppInstance = new ClockApp(pokoGfx, onAppChange);
+    clockAppInstance->begin();
+
+    ssyncAppInstance = new SSyncApp(pokoGfx, onAppChange);
+    ssyncAppInstance->begin();
+
+    musicAppInstance = new MusicApp(pokoGfx, onAppChange);
+    musicAppInstance->begin();
+
+    videoAppInstance = new VideoApp(pokoGfx, onAppChange);
+    videoAppInstance->begin();
+
+    galleryAppInstance = new GalleryApp(pokoGfx, onAppChange);
+    galleryAppInstance->begin();
+
+    settingsAppInstance = new SettingsApp(pokoGfx, onAppChange);
+    settingsAppInstance->begin();
 
     // 7. WiFi & Network Services
     savedSSID = prefs.getString("wifi_ssid", "X");
@@ -280,7 +323,7 @@ void setup() {
     activeApp = STATE_LAUNCHER;
     pokoUI->redraw();
 
-    Serial.println(">>> POKO CORE READY <<<");
+    Serial.println(">>> POKO 7-APP SUITE READY <<<");
 }
 
 // ── Arduino Main Loop ─────────────────────────────────────────
@@ -319,7 +362,6 @@ void loop() {
         }
     } else if (wifiState == STATE_WIFI_AP) {
         dnsServer.processNextRequest();
-        // If no clients connected and timeout elapsed, try reconnecting to STA
         if (WiFi.softAPgetStationNum() == 0 && (millis() - wifiTimer > apTimeoutMs) && savedSSID.length() > 0) {
             Serial.println("[wifi] AP timeout -> retrying STA mode");
             dnsServer.stop();
@@ -329,7 +371,7 @@ void loop() {
             wifiTimer = millis();
             if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
         } else if (WiFi.softAPgetStationNum() > 0) {
-            wifiTimer = millis(); // Keep AP alive while clients are active
+            wifiTimer = millis();
         }
     } else if (wifiState == STATE_WIFI_CONNECTED) {
         ArduinoOTA.handle();
@@ -345,9 +387,12 @@ void loop() {
     server.handleClient();
 
     // Active App execution
-    if (activeApp == STATE_LAUNCHER && pokoUI) {
-        pokoUI->update();
-    } else if (activeApp == STATE_INFO && infoAppInstance) {
-        infoAppInstance->update();
-    }
+    if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->update();
+    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->update();
+    else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->update();
+    else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->update();
+    else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->update();
+    else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->update();
+    else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->update();
+    else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->update();
 }

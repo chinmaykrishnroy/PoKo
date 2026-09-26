@@ -16,14 +16,14 @@ enum AppState {
     STATE_COUNT           // Sentinel — keep last
 };
 
-// Maps a state to its tile index in the launcher carousel (order must match PokoUI _apps[])
+// Maps a state to its tile index in the launcher carousel (order must match PokoUI _tiles[])
 inline int stateToTile(AppState s) {
     switch (s) {
         case STATE_INFO:        return 0;
-        case STATE_VIDEO_UI:    return 1;
+        case STATE_CLOCK:       return 1;
         case STATE_SSYNC:       return 2;
-        case STATE_CLOCK:       return 3;
-        case STATE_MUSIC_UI:    return 4;
+        case STATE_MUSIC_UI:    return 3;
+        case STATE_VIDEO_UI:    return 4;
         case STATE_GALLERY_UI:  return 5;
         case STATE_SETTINGS_UI: return 6;
         default:                return -1;

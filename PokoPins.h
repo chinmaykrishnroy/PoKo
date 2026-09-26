@@ -41,3 +41,19 @@
 #define POKO_BL_PWM_CHANNEL 0
 #define POKO_BL_PWM_FREQ    5000
 #define POKO_BL_PWM_RES     8    // 8-bit duty (0–255)
+
+// ── Display Colors (RGB565) ──────────────────────────────────
+#ifndef RGB565_BLACK
+#define RGB565_BLACK    0x0000
+#define RGB565_WHITE    0xFFFF
+#define RGB565_RED      0xF800
+#define RGB565_GREEN    0x07E0
+#define RGB565_BLUE     0x001F
+#define RGB565_CYAN     0x07FF
+#define RGB565_MAGENTA  0xF81F
+#define RGB565_YELLOW   0xFFE0
+#define RGB565_GRAY     0x8410
+#define RGB565_DARKGRAY 0x3186
+#endif
+
+

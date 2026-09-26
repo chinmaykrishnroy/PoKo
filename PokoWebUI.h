@@ -81,10 +81,15 @@ input[type=text],input[type=password]{width:100%;padding:8px 10px;border-radius:
       <span id="volVal" style="font-size:12px;width:35px;text-align:right">75%</span>
     </div>
     <h3 style="margin-top:16px">RGB LED Ring</h3>
-    <div class="actions">
-      <button class="btn" onclick="setLED(0,200,255)">Cyan</button>
-      <button class="btn" onclick="setLED(58,186,125)">Green</button>
-      <button class="btn" onclick="setLED(239,106,115)">Red</button>
+    <div class="control-row">
+      <label>Custom Color</label>
+      <input type="color" id="ledColorPicker" value="#00c8ff" oninput="pickLEDColor(this.value)" style="width:50px;height:32px;padding:2px;border:1px solid var(--line);border-radius:6px;cursor:pointer;background:var(--surface2)">
+    </div>
+    <div class="actions" style="margin-top:8px">
+      <button class="btn" onclick="setLED(255,0,0)">Red</button>
+      <button class="btn" onclick="setLED(0,255,0)">Green</button>
+      <button class="btn" onclick="setLED(0,180,255)">Cyan</button>
+      <button class="btn" onclick="setLED(255,200,0)">Amber</button>
       <button class="btn" onclick="setLED(0,0,0)">Off</button>
     </div>
   </div>
@@ -147,6 +152,12 @@ function setVolume(v){
   volTimer=setTimeout(()=>fetch('/api/sys?volume='+v),100);
 }
 function setLED(r,g,b){fetch(`/api/led?r=${r}&g=${g}&b=${b}`);}
+function pickLEDColor(hex){
+  const r=parseInt(hex.substr(1,2),16);
+  const g=parseInt(hex.substr(3,2),16);
+  const b=parseInt(hex.substr(5,2),16);
+  setLED(r,g,b);
+}
 function setApp(s){fetch('/api/app?state='+s);}
 function resetDrivers(){fetch('/api/reset');alert('Drivers reset');}
 function rebootDevice(){if(confirm('Reboot Poko?')) fetch('/api/reboot');}

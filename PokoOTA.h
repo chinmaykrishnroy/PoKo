@@ -77,13 +77,13 @@ private:
     static void drawProgress(Arduino_GFX* gfx, int pct) {
         if (!gfx) return;
         if (_otaLastPct < 0) {
-            gfx->fillScreen(BLACK);
+            gfx->fillScreen(RGB565_BLACK);
             gfx->setFont(u8g2_font_helvB10_tf);
-            gfx->setTextColor(0x07FF, BLACK);
+            gfx->setTextColor(0x07FF, RGB565_BLACK);
             gfx->setCursor(22, 45);
             gfx->print("OTA UPDATE");
 
-            gfx->drawRect(14, 65, 100, 16, WHITE);
+            gfx->drawRect(14, 65, 100, 16, RGB565_WHITE);
             _otaLastPct = 0;
         }
 
@@ -93,10 +93,10 @@ private:
             gfx->fillRect(16, 67, filled, 12, 0x07FF);
 
             gfx->setFont(u8g2_font_profont10_mf);
-            gfx->setTextColor(WHITE, BLACK);
+            gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
             char buf[12];
             snprintf(buf, sizeof(buf), "%d%%", pct);
-            gfx->fillRect(45, 95, 40, 14, BLACK);
+            gfx->fillRect(45, 95, 40, 14, RGB565_BLACK);
             gfx->setCursor(55, 105);
             gfx->print(buf);
         }
@@ -116,7 +116,7 @@ public:
             if (gfx) {
                 gfx->fillScreen(ok ? 0x07E0 : 0xF800);
                 gfx->setFont(u8g2_font_helvB10_tf);
-                gfx->setTextColor(BLACK);
+                gfx->setTextColor(RGB565_BLACK);
                 gfx->setCursor(20, 68);
                 gfx->print(ok ? "SUCCESS!" : "FAILED!");
             }

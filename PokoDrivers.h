@@ -37,7 +37,7 @@ inline Arduino_GFX* createDisplay() {
 
 inline bool initDisplay(Arduino_GFX* gfx) {
     if (!gfx->begin()) return false;
-    gfx->fillScreen(BLACK);
+    gfx->fillScreen(RGB565_BLACK);
     return true;
 }
 
@@ -170,7 +170,7 @@ inline void deinitI2S() {
 static CRGB _leds[POKO_LED_COUNT];
 
 inline void initLEDs() {
-    FastLED.addLeds<WS2812B, POKO_PIN_LED_DATA, GRB>(_leds, POKO_LED_COUNT);
+    FastLED.addLeds<WS2812B, POKO_PIN_LED_DATA, RGB>(_leds, POKO_LED_COUNT);
     FastLED.setBrightness(30);
     fill_solid(_leds, POKO_LED_COUNT, CRGB::Black);
     FastLED.show();
@@ -204,6 +204,6 @@ inline void driverReset(Arduino_GFX* gfx) {
     initES8311(44100);
     initI2S(44100);
     gfx->begin();
-    gfx->fillScreen(BLACK);
+    gfx->fillScreen(RGB565_BLACK);
     initBacklight();
 }

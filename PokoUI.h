@@ -6,17 +6,9 @@
 #include "PokoPins.h"
 
 // ─────────────────────────────────────────────────────────────
-//  PokoUI — Launcher carousel + status bar for 128×128 display
-//
-//  Layout:
-//    y=0..12    Status bar  (WiFi status, uptime)
-//    y=13..114  Tile area   (rounded box, icon/accent, title, subtitle)
-//    y=115..127 Nav dots / bottom hint
-//
-//  Direct drawing on Arduino_GFX using U8g2 fonts natively.
+//  PokoUI — Launcher carousel (7 tiles) + status bar (128×128)
 // ─────────────────────────────────────────────────────────────
 
-// ── Color palette ─────────────────────────────────────────────
 #define POKO_CLR_BG        0x0000  // black
 #define POKO_CLR_ACCENT    0x07FF  // cyan
 #define POKO_CLR_TEXT      0xFFFF  // white
@@ -31,6 +23,7 @@ struct PokoTile {
     const char* subtitle;
     uint16_t    accentColor;
     AppState    state;
+    const char* emblem;
 };
 
 extern String getNetworkStatusMsg();
@@ -45,11 +38,15 @@ private:
     bool          _dirty    = true;
     uint32_t      _lastStatusMs = 0;
 
-    // Single app tile for now per user instruction:
-    // "I want to create just one app tile for now... and I want info app"
-    static constexpr uint8_t TILE_COUNT = 1;
+    static constexpr uint8_t TILE_COUNT = 7;
     PokoTile _tiles[TILE_COUNT] = {
-        { "Info", "System Info", POKO_CLR_GREEN, STATE_INFO }
+        { "Info",     "System Info",     POKO_CLR_GREEN,   STATE_INFO,         "i"  },
+        { "Clock",    "IST Clock",       POKO_CLR_ACCENT,  STATE_CLOCK,        "12" },
+        { "SSync",    "Snapclient",      0x07E0,           STATE_SSYNC,        "S"  },
+        { "Music",    "Audio Player",    0xF81F,           STATE_MUSIC_UI,     "~"  },
+        { "Video",    "Video Stream",    0x001F,           STATE_VIDEO_UI,     ">"  },
+        { "Gallery",  "Photo Viewer",    0xFD20,           STATE_GALLERY_UI,   "#"  },
+        { "Settings", "Preferences",     0x8410,           STATE_SETTINGS_UI,  "*"  }
     };
 
     void drawStatusBar() {
@@ -98,17 +95,25 @@ private:
         // Accent header line
         _gfx->fillRect(0, 13, 128, 2, t.accentColor);
 
-        // Rounded box for app icon / emblem
+        // Navigation hints (< and >)
+        _gfx->setFont(u8g2_font_helvB10_tf);
+        _gfx->setTextColor(0x18C3, POKO_CLR_BG);
+        _gfx->setCursor(4, 52);
+        _gfx->print("<");
+        _gfx->setCursor(118, 52);
+        _gfx->print(">");
+
+        // Rounded box for app emblem
         _gfx->drawRoundRect(36, 22, 56, 44, 8, t.accentColor);
         _gfx->fillRoundRect(38, 24, 52, 40, 6, 0x0821);
 
-        // Draw "i" emblem or tile graphic
+        // Emblem symbol
         _gfx->setFont(u8g2_font_helvB14_tf);
         _gfx->setTextColor(t.accentColor, 0x0821);
         int16_t x1, y1; uint16_t w, h;
-        _gfx->getTextBounds("i", 0, 0, &x1, &y1, &w, &h);
+        _gfx->getTextBounds(t.emblem, 0, 0, &x1, &y1, &w, &h);
         _gfx->setCursor(64 - w / 2, 50);
-        _gfx->print("i");
+        _gfx->print(t.emblem);
 
         // App Name
         _gfx->setFont(u8g2_font_helvB10_tf);
@@ -129,7 +134,7 @@ private:
         // Bottom instruction: ">> Click to open"
         _gfx->setFont(u8g2_font_5x7_tf);
         _gfx->setTextColor(POKO_CLR_DIM, POKO_CLR_BG);
-        const char* hint = "Dbl-Key: Open";
+        const char* hint = "D-Key: Open App";
         _gfx->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _gfx->setCursor(64 - w / 2, 110);
         _gfx->print(hint);
@@ -137,8 +142,16 @@ private:
 
     void drawNavIndicator() {
         _gfx->fillRect(0, 116, 128, 12, POKO_CLR_BG);
-        // Draw 1 active pill in center
-        _gfx->fillRoundRect(60, 120, 8, 4, 2, POKO_CLR_ACCENT);
+        int totalW = TILE_COUNT * 8 + (TILE_COUNT - 1) * 4;
+        int startX = (128 - totalW) / 2;
+        for (uint8_t i = 0; i < TILE_COUNT; i++) {
+            int x = startX + i * 12;
+            if (i == _selected) {
+                _gfx->fillRoundRect(x, 120, 8, 4, 2, POKO_CLR_ACCENT);
+            } else {
+                _gfx->fillCircle(x + 4, 122, 2, 0x18C3);
+            }
+        }
     }
 
 public:
@@ -161,7 +174,7 @@ public:
     }
 
     void flashHighlight() {
-        _gfx->drawRoundRect(34, 20, 60, 48, 10, WHITE);
+        _gfx->drawRoundRect(34, 20, 60, 48, 10, RGB565_WHITE);
         delay(40);
         _gfx->drawRoundRect(34, 20, 60, 48, 10, POKO_CLR_BG);
         _gfx->drawRoundRect(36, 22, 56, 44, 8, _tiles[_selected].accentColor);

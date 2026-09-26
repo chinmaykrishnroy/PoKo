@@ -11,31 +11,34 @@
 
 // ─────────────────────────────────────────────────────────────
 //  InfoApp — System information screen (128×128)
+//  Uses Arduino_Canvas for zero-flicker double-buffered rendering.
 //
-//  Shows: IP, WiFi SSID, RSSI, Free Heap, PSRAM, Uptime, CPU,
-//         Flash Size, Chip Revision, Battery/Voltage (if any).
+//  Shows: IP, SSID, RSSI, Free Heap, PSRAM, Time, Uptime, CPU,
+//         Flash Size, Chip Revision, App Size, MAC address.
 //
-//  LEFT (Boot)  = scroll up
-//  RIGHT (Key)  = scroll down
-//  LEFT double  = back / exit to launcher
-//  LONG RIGHT   = refresh stats
+//  BOOT (Left)  = scroll up
+//  KEY (Right)  = scroll down
+//  BOOT Double  = back / exit to launcher
+//  KEY Long     = refresh stats
 // ─────────────────────────────────────────────────────────────
 
 extern String getNetworkStatusMsg();
 
 class InfoApp {
 private:
-    Arduino_GFX*  _gfx;
-    AppSwitchFn   _exit;
+    Arduino_GFX*    _gfx;
+    AppSwitchFn     _exit;
+    Arduino_Canvas* _canvas = nullptr;
 
     bool          _active     = false;
     bool          _dirty      = true;
     uint8_t       _scroll     = 0;
     uint32_t      _lastDrawMs = 0;
 
-    static constexpr uint8_t ROW_H         = 13;
+    static constexpr uint8_t ROW_H         = 14;
     static constexpr uint8_t TOP_Y         = 14;
-    static constexpr uint8_t ROWS_VISIBLE  = 8;
+    static constexpr uint8_t ROWS_VISIBLE  = 7;
+    static constexpr uint8_t FOOTER_Y      = 114;
 
     struct Row { char label[14]; char value[18]; uint16_t valColor; };
     Row     _rows[14];
@@ -45,7 +48,7 @@ private:
         _rowCount = 0;
         auto add = [&](const char* lbl, String val, uint16_t col = POKO_CLR_TEXT) {
             if (_rowCount >= 14) return;
-            strncpy(_rows[_rowCount].label, lbl,  13);
+            strncpy(_rows[_rowCount].label, lbl, 13);
             _rows[_rowCount].label[13] = '\0';
             strncpy(_rows[_rowCount].value, val.c_str(), 17);
             _rows[_rowCount].value[17] = '\0';
@@ -61,7 +64,7 @@ private:
                             ? (String(WiFi.RSSI()) + " dBm") : "---", POKO_CLR_DIM);
 
         // Memory
-        uint32_t freeH  = ESP.getFreeHeap();
+        uint32_t freeH   = ESP.getFreeHeap();
         uint32_t freePSR = ESP.getFreePsram();
         char buf[20];
         snprintf(buf, sizeof(buf), "%u KB", freeH / 1024);
@@ -69,7 +72,7 @@ private:
         snprintf(buf, sizeof(buf), "%u KB", freePSR / 1024);
         add("PSRAM",    buf,  POKO_CLR_TEXT);
 
-        // Local Time (IST)
+        // Local Time (IST) if synced
         struct tm timeinfo;
         if (getLocalTime(&timeinfo, 0) && timeinfo.tm_year > (2020 - 1900)) {
             char timeBuf[18];
@@ -105,78 +108,112 @@ private:
         add("MAC",      buf,  POKO_CLR_DIM);
     }
 
-    void drawHeader() {
-        _gfx->fillRect(0, 0, 128, 13, 0x0841);
-        _gfx->setFont(u8g2_font_profont10_mf);
-        _gfx->setTextColor(POKO_CLR_ACCENT, 0x0841);
-        _gfx->setCursor(3, 10);
-        _gfx->print("System Info");
+    void renderToCanvas() {
+        if (!_canvas) return;
 
-        char buf[8];
-        snprintf(buf, sizeof(buf), "%d/%d", _scroll + 1, _rowCount);
-        _gfx->setTextColor(POKO_CLR_DIM, 0x0841);
+        // Header (y=0..13)
+        _canvas->fillRect(0, 0, 128, 13, 0x0841);
+        _canvas->setFont(u8g2_font_profont10_mf);
+        _canvas->setTextColor(POKO_CLR_ACCENT, 0x0841);
+        _canvas->setCursor(3, 10);
+        _canvas->print("System Info");
+
+        char countBuf[8];
+        snprintf(countBuf, sizeof(countBuf), "%d/%d", _scroll + 1, _rowCount);
+        _canvas->setTextColor(POKO_CLR_DIM, 0x0841);
         int16_t x1, y1; uint16_t w, h;
-        _gfx->getTextBounds(buf, 0, 0, &x1, &y1, &w, &h);
-        _gfx->setCursor(125 - w, 10);
-        _gfx->print(buf);
-    }
+        _canvas->getTextBounds(countBuf, 0, 0, &x1, &y1, &w, &h);
+        _canvas->setCursor(125 - w, 10);
+        _canvas->print(countBuf);
 
-    void drawRows() {
-        _gfx->fillRect(0, TOP_Y, 128, 128 - TOP_Y, POKO_CLR_BG);
-        _gfx->setFont(u8g2_font_profont10_mf);
+        // Rows (y=14..113)
+        _canvas->fillRect(0, TOP_Y, 128, FOOTER_Y - TOP_Y, POKO_CLR_BG);
+        _canvas->setFont(u8g2_font_profont10_mf);
 
         for (uint8_t i = 0; i < ROWS_VISIBLE; i++) {
             uint8_t ri = _scroll + i;
             if (ri >= _rowCount) break;
-            int16_t y = TOP_Y + i * ROW_H + ROW_H - 2;
+            int16_t rowY = TOP_Y + i * ROW_H;
+            int16_t textY = rowY + ROW_H - 3;
 
-            if (i % 2 == 0) _gfx->fillRect(0, TOP_Y + i * ROW_H, 125, ROW_H, 0x0821);
+            if (i % 2 == 0) {
+                _canvas->fillRect(0, rowY, 124, ROW_H, 0x0821);
+            }
 
-            _gfx->setTextColor(POKO_CLR_DIM, i % 2 == 0 ? 0x0821 : POKO_CLR_BG);
-            _gfx->setCursor(3, y);
-            _gfx->print(_rows[ri].label);
+            _canvas->setTextColor(POKO_CLR_DIM, i % 2 == 0 ? 0x0821 : POKO_CLR_BG);
+            _canvas->setCursor(3, textY);
+            _canvas->print(_rows[ri].label);
 
-            _gfx->setTextColor(_rows[ri].valColor, i % 2 == 0 ? 0x0821 : POKO_CLR_BG);
-            int16_t x1, y1; uint16_t w, h;
-            _gfx->getTextBounds(_rows[ri].value, 0, 0, &x1, &y1, &w, &h);
-            _gfx->setCursor(124 - w, y);
-            _gfx->print(_rows[ri].value);
+            _canvas->setTextColor(_rows[ri].valColor, i % 2 == 0 ? 0x0821 : POKO_CLR_BG);
+            _canvas->getTextBounds(_rows[ri].value, 0, 0, &x1, &y1, &w, &h);
+            _canvas->setCursor(123 - w, textY);
+            _canvas->print(_rows[ri].value);
         }
 
-        // Scroll bar
+        // Scroll indicator bar
         if (_rowCount > ROWS_VISIBLE) {
-            uint8_t barH = (ROWS_VISIBLE * (128 - TOP_Y)) / _rowCount;
-            uint8_t barY = TOP_Y + (_scroll * (128 - TOP_Y)) / _rowCount;
-            _gfx->drawFastVLine(127, TOP_Y, 128 - TOP_Y, POKO_CLR_DIM);
-            _gfx->drawFastVLine(127, barY, barH, POKO_CLR_ACCENT);
+            uint8_t barH = (ROWS_VISIBLE * (FOOTER_Y - TOP_Y)) / _rowCount;
+            uint8_t barY = TOP_Y + (_scroll * (FOOTER_Y - TOP_Y)) / _rowCount;
+            _canvas->drawFastVLine(126, TOP_Y, FOOTER_Y - TOP_Y, POKO_CLR_DIM);
+            _canvas->drawFastVLine(126, barY, barH, POKO_CLR_ACCENT);
         }
+
+        // Footer (y=114..127) - Filled with navigation guide
+        _canvas->fillRect(0, FOOTER_Y, 128, 14, 0x0841);
+        _canvas->drawFastHLine(0, FOOTER_Y, 128, 0x18C3);
+        _canvas->setFont(u8g2_font_5x7_tf);
+        _canvas->setTextColor(POKO_CLR_DIM, 0x0841);
+        const char* footerHint = "Boot:Up  Key:Dn  D-Boot:X";
+        _canvas->getTextBounds(footerHint, 0, 0, &x1, &y1, &w, &h);
+        _canvas->setCursor(64 - w / 2, 124);
+        _canvas->print(footerHint);
+
+        // Single atomic flush -> 100% flicker-free!
+        _canvas->flush();
     }
 
 public:
     InfoApp(Arduino_GFX* gfx, AppSwitchFn exitFn)
         : _gfx(gfx), _exit(exitFn) {}
 
-    void begin() {}
+    void begin() {
+        if (!_canvas) {
+            _canvas = new Arduino_Canvas(128, 128, _gfx, 0, 0);
+            _canvas->begin();
+        }
+    }
 
     void load() {
         _active = true;
         _scroll = 0;
         _dirty  = true;
+        begin();
         buildRows();
+        renderToCanvas();
     }
 
     void unload() {
         _active = false;
+        if (_canvas) {
+            delete _canvas;
+            _canvas = nullptr;
+        }
     }
 
     bool isLoaded() const { return _active; }
 
     void onLeft() {
-        if (_scroll > 0) { _scroll--; _dirty = true; }
+        if (_scroll > 0) {
+            _scroll--;
+            _dirty = true;
+        }
     }
 
     void onRight() {
-        if (_scroll + ROWS_VISIBLE < _rowCount) { _scroll++; _dirty = true; }
+        if (_scroll + ROWS_VISIBLE < _rowCount) {
+            _scroll++;
+            _dirty = true;
+        }
     }
 
     void onBack() {
@@ -203,8 +240,7 @@ public:
         if (!_dirty) return;
         _dirty = false;
         _lastDrawMs = now;
-        drawHeader();
-        drawRows();
+        renderToCanvas();
     }
 
     String apiJson() {
