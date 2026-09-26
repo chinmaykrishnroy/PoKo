@@ -169,7 +169,7 @@ class SyncedAVStreamer:
             ),
         ]
 
-    def start(self, timeout_s: float = 1.25) -> bool:
+    def start(self, timeout_s: float = 3.5) -> bool:
         if self.dry_run:
             self.counters["startup_ready"] = True
             return True
@@ -229,11 +229,11 @@ class SyncedAVStreamer:
             self.counters[f"{channel}_error"] = message[:300]
 
     def _connect(self, port: int) -> socket.socket:
-        deadline = time.monotonic() + 1.0
+        deadline = time.monotonic() + 3.0
         last_error: OSError | None = None
         while not self.stop_event.is_set() and time.monotonic() < deadline:
             try:
-                sock = socket.create_connection((self.config.nexus.ip, port), timeout=0.4)
+                sock = socket.create_connection((self.config.nexus.ip, port), timeout=1.0)
                 sock.settimeout(None)
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 return sock
@@ -535,6 +535,7 @@ class PlaybackManager:
             return {"ok": False, "error": "item is not audio"}
         with self._lock:
             self.stop()
+            time.sleep(0.05)
             device = self.device.switch("audio") if switch_device else None
             command = audio_tcp_command(item.path, self.config, start_s)
             self._process = ProcessHandle(command, dry_run=self.dry_run)
@@ -561,6 +562,7 @@ class PlaybackManager:
             return {"ok": False, "error": "item is not video"}
         with self._lock:
             self.stop()
+            time.sleep(0.05)
             wants_audio = self._resolve_audio_request(audio)
             use_sync = bool(wants_audio and item.has_audio)
             selected_aspect = aspect or self.config.defaults.video_aspect

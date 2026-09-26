@@ -23,43 +23,117 @@ private:
     volatile TaskHandle_t _netTaskHandle;
 
     volatile bool   _clientConnected;
+    volatile bool   _abortStream;
+    volatile bool   _playStarted;
+    volatile uint32_t _disconnectStartMs;
     volatile float  _volume;
 
     class AudioStreamTCP : public AudioFileSource {
     private:
         WiFiClient*     _client;
         volatile bool*  _isRunning;
+        volatile bool*  _abort;
+        uint8_t*        _ring;
+        size_t          _capacity;
+        size_t          _head;
+        size_t          _tail;
+        size_t          _count;
+        bool            _prebuffered;
+
+        void pump() {
+            if (!_client || !_client->connected() || (*_abort)) return;
+            while (_client->available() > 0 && _count < _capacity) {
+                size_t spaceToEnd = _capacity - _head;
+                size_t canRead = min((size_t)_client->available(), _capacity - _count);
+                canRead = min(canRead, spaceToEnd);
+                if (canRead == 0) break;
+                int n = _client->read(_ring + _head, canRead);
+                if (n > 0) {
+                    _head = (_head + n) % _capacity;
+                    _count += n;
+                } else {
+                    break;
+                }
+            }
+        }
+
     public:
-        AudioStreamTCP(WiFiClient* client, volatile bool* isRunning)
-            : _client(client), _isRunning(isRunning) {}
+        AudioStreamTCP(WiFiClient* client, volatile bool* isRunning, volatile bool* abortFlag, size_t bufferBytes = 65536)
+            : _client(client), _isRunning(isRunning), _abort(abortFlag), _capacity(bufferBytes),
+              _head(0), _tail(0), _count(0), _prebuffered(false), _ring(nullptr) {
+            if (psramFound()) {
+                _ring = (uint8_t*)heap_caps_malloc(_capacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            }
+            if (!_ring) {
+                _ring = (uint8_t*)malloc(_capacity);
+            }
+            if (!_ring) {
+                _capacity = 0;
+            }
+        }
+
+        virtual ~AudioStreamTCP() override {
+            close();
+        }
 
         virtual uint32_t read(void *data, uint32_t len) override {
-            if (!_client || !_client->connected()) return 0;
-            uint32_t readBytes = 0;
-            unsigned long startWait = millis();
+            if (!_ring || _capacity == 0 || (*_abort)) return 0;
+            if (!_client || (!_client->connected() && _count == 0)) return 0;
 
-            while (readBytes < len && _client->connected() && *_isRunning) {
-                int avail = _client->available();
-                if (avail > 0) {
-                    int toRead = min((size_t)avail, (size_t)(len - readBytes));
-                    int r = _client->read(((uint8_t*)data) + readBytes, toRead);
-                    if (r > 0) {
-                        readBytes += r;
-                        startWait = millis();
-                    }
-                } else {
-                    if (readBytes > 0) break;
-                    if (millis() - startWait > 3500) break;
+            // Initial pre-buffering (wait for 8KB or timeout)
+            if (!_prebuffered) {
+                uint32_t preStart = millis();
+                while (_client && _client->connected() && *_isRunning && !(*_abort) && _count < 8192) {
+                    pump();
+                    if (_count >= 8192 || millis() - preStart > 1200) break;
+                    vTaskDelay(pdMS_TO_TICKS(5));
+                }
+                _prebuffered = true;
+            }
+
+            // Pump latest TCP packets into ring
+            pump();
+
+            // Wait briefly if ring buffer is empty but client is still streaming
+            if (_count == 0 && _client && _client->connected() && *_isRunning && !(*_abort)) {
+                uint32_t waitStart = millis();
+                while (_count == 0 && _client->connected() && *_isRunning && !(*_abort)) {
+                    pump();
+                    if (_count > 0 || millis() - waitStart > 200) break;
                     vTaskDelay(pdMS_TO_TICKS(2));
                 }
             }
-            return readBytes;
+
+            if (_count == 0 || (*_abort)) return 0;
+
+            // Read from ring buffer into caller data
+            size_t toCopy = min((size_t)len, _count);
+            size_t copied = 0;
+            while (copied < toCopy) {
+                size_t chunk = min(toCopy - copied, _capacity - _tail);
+                memcpy(((uint8_t*)data) + copied, _ring + _tail, chunk);
+                _tail = (_tail + chunk) % _capacity;
+                copied += chunk;
+            }
+            _count -= copied;
+
+            pump();
+            return (uint32_t)copied;
         }
 
         virtual uint32_t readNonBlock(void *data, uint32_t len) override { return read(data, len); }
         virtual bool seek(int32_t pos, int dir) override { return false; }
-        virtual bool close() override { return true; }
-        virtual bool isOpen() override { return _client && _client->connected(); }
+        virtual bool close() override {
+            if (_ring) {
+                if (psramFound()) heap_caps_free(_ring);
+                else free(_ring);
+                _ring = nullptr;
+            }
+            _capacity = 0;
+            _count = 0;
+            return true;
+        }
+        virtual bool isOpen() override { return _client && (_client->connected() || _count > 0); }
         virtual uint32_t getSize() override { return 0; }
         virtual uint32_t getPos() override { return 0; }
     };
@@ -129,15 +203,18 @@ private:
                 Serial.println("[tcpaudio] Client connected, starting MP3 stream decode");
                 ensureAudioOutput(44100);
                 _clientConnected = true;
+                _playStarted = true;
+                _disconnectStartMs = 0;
+                _abortStream = false;
                 client.setNoDelay(true);
 
                 AudioGeneratorMP3* mp3 = new AudioGeneratorMP3();
                 AudioOutputPokoI2S* out = new AudioOutputPokoI2S(&_volume);
-                AudioStreamTCP* file   = new AudioStreamTCP(&client, &_isRunning);
+                AudioStreamTCP* file   = new AudioStreamTCP(&client, &_isRunning, &_abortStream);
 
                 if (mp3->begin(file, out)) {
                     Serial.println("[tcpaudio] MP3 begin OK, streaming...");
-                    while (client.connected() && _isRunning && mp3->isRunning()) {
+                    while (client.connected() && _isRunning && !_abortStream && mp3->isRunning()) {
                         if (!mp3->loop()) {
                             Serial.println("[tcpaudio] MP3 stream ended");
                             mp3->stop();
@@ -157,6 +234,7 @@ private:
 
                 client.stop();
                 _clientConnected = false;
+                _abortStream = false;
                 Serial.println("[tcpaudio] Client disconnected");
             }
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -170,7 +248,8 @@ private:
 public:
     TCPAudio(uint16_t port = 1235, float initialVolume = 1.0f)
         : _port(port), _server(port), _isLoaded(false), _isRunning(false),
-          _netTaskHandle(NULL), _clientConnected(false), _volume(initialVolume) {}
+          _netTaskHandle(NULL), _clientConnected(false), _abortStream(false),
+          _playStarted(false), _disconnectStartMs(0), _volume(initialVolume) {}
 
     void setVolume(float vol) {
         _volume = constrain(vol, 0.0f, 1.0f);
@@ -178,6 +257,34 @@ public:
 
     bool isLoaded() const { return _isLoaded; }
     bool isConnected() const { return _clientConnected; }
+
+    void stopStream() {
+        if (_clientConnected) {
+            _abortStream = true;
+            uint32_t startWait = millis();
+            while (_clientConnected && millis() - startWait < 300) {
+                vTaskDelay(pdMS_TO_TICKS(5));
+            }
+        }
+        _playStarted = false;
+        _disconnectStartMs = 0;
+    }
+
+    bool hasFinished() {
+        if (!_playStarted || _clientConnected) {
+            _disconnectStartMs = 0;
+            return false;
+        }
+        if (_disconnectStartMs == 0) {
+            _disconnectStartMs = millis();
+            return false;
+        }
+        return (millis() - _disconnectStartMs > 600);
+    }
+
+    void reset() {
+        stopStream();
+    }
 
     void load() {
         if (!_isLoaded) {
@@ -205,6 +312,7 @@ public:
 
     void unload() {
         if (_isLoaded) {
+            stopStream();
             _isRunning = false;
             _isLoaded = false;
             uint32_t deadline = millis() + 1500;

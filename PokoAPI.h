@@ -185,9 +185,9 @@ public:
         // Playback stopped notification from streaming backend
         _server->on("/api/ui/playback_stopped", HTTP_GET, [this]() {
             if (activeApp == STATE_VIDEO_UI && videoAppInstance) {
-                videoAppInstance->onBack();
+                videoAppInstance->onPlaybackEnded();
             } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {
-                musicAppInstance->onBack();
+                musicAppInstance->onPlaybackEnded();
             }
             _server->send(200, "application/json", "{\"ok\":true}");
         });

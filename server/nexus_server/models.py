@@ -48,6 +48,7 @@ class MediaItem:
             "extension": self.extension,
             "size_bytes": self.size_bytes,
             "duration_s": self.duration_s,
+            "duration": round(self.duration_s) if self.duration_s is not None else 0,
         }
         if self.kind == "audio":
             data["artist"] = self.artist or "Unknown Artist"

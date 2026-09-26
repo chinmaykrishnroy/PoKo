@@ -26,12 +26,12 @@ private:
     static const uint8_t  PACKET_VIDEO       = 2;
     static const uint16_t AUDIO_RATE         = 22050;
     static const uint16_t AUDIO_CHUNK_BYTES  = 512;
-    static const uint16_t VIDEO_QUEUE_DEPTH  = 4;
+    static const uint16_t VIDEO_QUEUE_DEPTH  = 8;
     static const size_t   VIDEO_BUFFER_SIZE  = 16384;      // Up to 16KB per 128×128 frame
     static const size_t   AUDIO_BUFFER_BYTES = 32768;
-    static const size_t   START_AUDIO_BYTES  = 2000;
+    static const size_t   START_AUDIO_BYTES  = 4410;
     static const int16_t  VIDEO_EARLY_MS     = 14;
-    static const uint16_t VIDEO_LATE_DROP_MS = 150;
+    static const uint16_t VIDEO_LATE_DROP_MS = 250;
 
     struct VideoFrame {
         uint8_t* buffer;
@@ -124,7 +124,7 @@ private:
     }
 
     bool discardBytes(WiFiClient& client, uint32_t len) {
-        uint8_t scratch[256];
+        uint8_t scratch[512];
         while (len > 0 && _isRunning && client.connected()) {
             size_t chunk = min((uint32_t)sizeof(scratch), len);
             if (!readExact(client, scratch, chunk)) return false;
@@ -172,7 +172,6 @@ private:
             client.setNoDelay(true);
             _audioConnected = true;
             _clientConnected = true;
-            resetPlaybackState();
             bool receivedPacket = false;
 
             while (_isRunning && client.connected()) {
@@ -261,7 +260,7 @@ private:
                 }
 
                 uint8_t* buf = nullptr;
-                if (xQueueReceive(_emptyQueue, &buf, pdMS_TO_TICKS(50)) != pdTRUE || !buf) {
+                if (xQueueReceive(_emptyQueue, &buf, pdMS_TO_TICKS(100)) != pdTRUE || !buf) {
                     _videoFramesDropped++;
                     if (!discardBytes(client, length)) break;
                     continue;
@@ -299,12 +298,20 @@ private:
 
         while (_isRunning) {
             if (!_playReleased) {
-                if ((_playStarted && xStreamBufferBytesAvailable(_audioStream) >= START_AUDIO_BYTES && uxQueueMessagesWaiting(_videoQueue) >= 1) ||
-                    (!_audioConnected && _videoConnected && uxQueueMessagesWaiting(_videoQueue) >= 1) ||
-                    (_videoConnected && uxQueueMessagesWaiting(_videoQueue) >= 2)) {
+                if (_audioConnected) {
+                    if (_playStarted && xStreamBufferBytesAvailable(_audioStream) >= START_AUDIO_BYTES &&
+                        (!_videoConnected || uxQueueMessagesWaiting(_videoQueue) >= 1)) {
+                        _samplesPlayed = 0;
+                        _wallClockStartMs = millis();
+                        _playReleased = true;
+                    } else {
+                        vTaskDelay(pdMS_TO_TICKS(5));
+                        continue;
+                    }
+                } else if (_videoConnected && uxQueueMessagesWaiting(_videoQueue) >= 2) {
                     _samplesPlayed = 0;
-                    _playReleased = true;
                     _wallClockStartMs = millis();
+                    _playReleased = true;
                 } else {
                     vTaskDelay(pdMS_TO_TICKS(5));
                     continue;
@@ -414,15 +421,10 @@ public:
 
     uint32_t audioClockMs() const {
         if (!_playReleased) return 0;
-        uint32_t wallClock = _firstAudioTsMs + (millis() - _wallClockStartMs);
         if (_audioConnected && _playStarted && _samplesPlayed > 0) {
-            uint32_t audioClock = _firstAudioTsMs + (uint32_t)(((uint64_t)_samplesPlayed * 1000ULL) / AUDIO_RATE);
-            int32_t diff = (int32_t)(audioClock - wallClock);
-            if (diff > 120) return wallClock + 30;
-            if (diff < -120) return wallClock - 30;
-            return audioClock;
+            return _firstAudioTsMs + (uint32_t)(((uint64_t)_samplesPlayed * 1000ULL) / AUDIO_RATE);
         }
-        return wallClock;
+        return _firstAudioTsMs + (millis() - _wallClockStartMs);
     }
 
     bool hasFinished() {
@@ -438,7 +440,7 @@ public:
             _disconnectStartMs = millis();
             return false;
         }
-        return (millis() - _disconnectStartMs > 1500);
+        return (millis() - _disconnectStartMs > 800);
     }
 
     void reset() {
@@ -558,6 +560,7 @@ public:
             if ((int32_t)f.timestampMs <= (int32_t)clockMs + VIDEO_EARLY_MS) {
                 xQueueReceive(_videoQueue, &f, 0);
                 TJpgDec.setSwapBytes(false);
+                TJpgDec.setCallback(tftOutput);
                 TJpgDec.drawJpg(0, 0, f.buffer, f.length);
                 _videoFramesRendered++;
                 uint8_t* ptr = f.buffer;

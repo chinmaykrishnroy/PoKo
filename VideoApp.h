@@ -61,6 +61,8 @@ private:
 
     uint32_t  _lastDrawMs   = 0;
     uint32_t  _playStartMs  = 0;
+    int       _scrollOffset = 0;
+    uint32_t  _lastScrollMs = 0;
 
     static Arduino_Canvas* _activeCanvas;
 
@@ -107,7 +109,11 @@ private:
                     if (_videoCount >= MAX_VIDEOS) break;
                     const char* id = item["id"] | "";
                     const char* title = item["title"] | "Untitled";
-                    uint32_t dur = (uint32_t)(item["duration_s"] | 0);
+                    float durF = item["duration_s"].as<float>();
+                    if (durF <= 0.0f && item.containsKey("duration")) {
+                        durF = item["duration"].as<float>();
+                    }
+                    uint32_t dur = (durF > 0.0f) ? (uint32_t)(durF + 0.5f) : 0;
 
                     strncpy(_videos[_videoCount].id, id, sizeof(_videos[_videoCount].id) - 1);
                     strncpy(_videos[_videoCount].title, title, sizeof(_videos[_videoCount].title) - 1);
@@ -183,16 +189,17 @@ private:
         ensureAudioOutput(44100);
 
         if (syncPlugin) {
+            syncPlugin->reset();
             if (!syncPlugin->isLoaded()) {
                 syncPlugin->load();
-                delay(100);
+                delay(50);
             }
         }
 
         HTTPClient http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
                      "/api/video/" + String(_videos[idx].id) +
-                     "/play?audio=true&aspect=square&profile=balanced&start=0&switch=false&async=true";
+                     "/play?audio=true&aspect=square&profile=balanced&start=0&switch=false&notify=false&async=true";
         http.begin(url);
         http.setTimeout(3000);
         http.GET();
@@ -201,11 +208,13 @@ private:
         _mode = MODE_PLAYING;
         _playStartMs = millis();
         _dirty = true;
+
+        fetchThumbnail(idx);
     }
 
     void requestStop() {
         HTTPClient http;
-        String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&async=true";
+        String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false&async=true";
         http.begin(url);
         http.setTimeout(1500);
         http.GET();
@@ -254,7 +263,7 @@ private:
         }
 
         // Single Video Card Frame (y=16..84)
-        _canvas->drawRoundRect(14, 16, 100, 68, 6, theme.line);
+        _canvas->drawRoundRect(14, 16, 100, 68, 6, theme.surface2);
 
         if (_thumbSize > 100) {
             // Draw downloaded JPEG thumbnail centered inside the card
@@ -273,13 +282,27 @@ private:
             _canvas->print(">");
         }
 
-        // Title (y=92..101)
+        // Title (y=92..101) - scroll if long, else center
+        _canvas->fillRect(0, 88, 128, 14, theme.bg);
+        _canvas->setTextWrap(false);
         _canvas->setFont(u8g2_font_profont10_mf);
         _canvas->setTextColor(theme.text, theme.bg);
         const char* title = (_videoCount > 0) ? _videos[_selectedIdx].title : (_serverError ? "Start PoKo Server" : "No Videos");
         _canvas->getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
-        _canvas->setCursor(max(4, 64 - w / 2), 94);
-        _canvas->print(title);
+        if (w <= 120) {
+            _canvas->setCursor(max(4, (128 - (int)w) / 2), 94);
+            _canvas->print(title);
+        } else {
+            int loopLen = w + 32;
+            int offset = _scrollOffset % loopLen;
+            int dx = 4 - offset;
+            _canvas->setCursor(dx, 94);
+            _canvas->print(title);
+            if (dx + (int)w < 124) {
+                _canvas->setCursor(dx + loopLen, 94);
+                _canvas->print(title);
+            }
+        }
 
         // Subtitle / Duration (y=102..112)
         _canvas->setFont(u8g2_font_5x7_tf);
@@ -287,7 +310,11 @@ private:
         char subBuf[32];
         if (_videoCount > 0) {
             uint32_t dur = _videos[_selectedIdx].duration_s;
-            snprintf(subBuf, sizeof(subBuf), "%02lu:%02lu  128x128", (unsigned long)(dur / 60), (unsigned long)(dur % 60));
+            if (dur > 0) {
+                snprintf(subBuf, sizeof(subBuf), "%02lu:%02lu  128x128", (unsigned long)(dur / 60), (unsigned long)(dur % 60));
+            } else {
+                snprintf(subBuf, sizeof(subBuf), "--:--  128x128");
+            }
         } else {
             snprintf(subBuf, sizeof(subBuf), "%s:%d", getServerHost().c_str(), getServerPort());
         }
@@ -363,29 +390,27 @@ public:
 
     void onLeft() {
         if (_videoCount <= 0) return;
-        bool wasPlaying = (_mode == MODE_PLAYING);
-        if (wasPlaying) {
-            requestStop();
-        }
         _selectedIdx = (_selectedIdx == 0) ? (_videoCount - 1) : (_selectedIdx - 1);
-        fetchThumbnail(_selectedIdx);
+        _scrollOffset = 0;
+        _lastScrollMs = millis();
         _dirty = true;
-        if (wasPlaying) {
+        if (_mode == MODE_PLAYING) {
             requestPlay(_selectedIdx);
+        } else {
+            fetchThumbnail(_selectedIdx);
         }
     }
 
     void onRight() {
         if (_videoCount <= 0) return;
-        bool wasPlaying = (_mode == MODE_PLAYING);
-        if (wasPlaying) {
-            requestStop();
-        }
         _selectedIdx = (_selectedIdx + 1) % _videoCount;
-        fetchThumbnail(_selectedIdx);
+        _scrollOffset = 0;
+        _lastScrollMs = millis();
         _dirty = true;
-        if (wasPlaying) {
+        if (_mode == MODE_PLAYING) {
             requestPlay(_selectedIdx);
+        } else {
+            fetchThumbnail(_selectedIdx);
         }
     }
 
@@ -402,7 +427,6 @@ public:
     void onBack() {
         if (_mode == MODE_PLAYING) {
             requestStop();
-            return;
         }
         if (_exit) _exit(STATE_LAUNCHER);
     }
@@ -419,6 +443,12 @@ public:
         }
     }
 
+    void onPlaybackEnded() {
+        if (_mode == MODE_PLAYING) {
+            onRight();
+        }
+    }
+
     void update() {
         if (!_active) return;
 
@@ -426,11 +456,24 @@ public:
             if (syncPlugin) {
                 syncPlugin->update();
                 if (syncPlugin->hasFinished()) {
-                    requestStop();
+                    onPlaybackEnded();
+                    return;
+                }
+            }
+            if (_videos[_selectedIdx].duration_s > 0) {
+                if (millis() - _playStartMs > (_videos[_selectedIdx].duration_s + 2) * 1000UL) {
+                    onPlaybackEnded();
                     return;
                 }
             }
             return;
+        } else {
+            uint32_t now = millis();
+            if (now - _lastScrollMs >= 40) {
+                _lastScrollMs = now;
+                _scrollOffset++;
+                _dirty = true;
+            }
         }
 
         if (_dirty) {
