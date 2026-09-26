@@ -60,11 +60,23 @@ inline void setBacklightPercent(int pct) {
 // ── ES8311 Audio Codec ────────────────────────────────────────
 //  I2C: SDA=42, SCL=41
 //  MCLK comes from I2S MCLK pin (pin 8).
-static es8311_handle_t _es8311Handle = nullptr;
+inline es8311_handle_t _es8311Handle = nullptr;
+
+inline esp_err_t initI2S(uint32_t sampleRate = 44100,
+                          uint8_t  channels   = 2,
+                          uint8_t  bitsPerSample = 16);
 
 inline bool initES8311(uint32_t sampleRate = 44100) {
+    // ES8311 internal PLL requires MCLK actively driven on pin 8.
+    // Ensure I2S is initialized and running before codec configuration.
+    initI2S(sampleRate, 2, 16);
+
     Wire.begin(POKO_PIN_I2C_SDA, POKO_PIN_I2C_SCL);
 
+    if (_es8311Handle) {
+        es8311_delete(_es8311Handle);
+        _es8311Handle = nullptr;
+    }
     _es8311Handle = es8311_create(I2C_NUM_0, ES8311_ADDRESS_0);
     if (!_es8311Handle) {
         Serial.println("[ES8311] create failed");
@@ -81,10 +93,18 @@ inline bool initES8311(uint32_t sampleRate = 44100) {
 
     if (es8311_init(_es8311Handle, &clk, ES8311_RESOLUTION_16, ES8311_RESOLUTION_16) != ESP_OK) {
         Serial.println("[ES8311] init failed");
+        es8311_delete(_es8311Handle);
+        _es8311Handle = nullptr;
         return false;
     }
-    es8311_sample_frequency_config(_es8311Handle, sampleRate * 256, sampleRate);
-    es8311_voice_volume_set(_es8311Handle, 75, nullptr);
+    if (es8311_sample_frequency_config(_es8311Handle, sampleRate * 256, sampleRate) != ESP_OK) {
+        Serial.printf("[ES8311] sample-rate setup failed (%lu Hz)\n", (unsigned long)sampleRate);
+        es8311_delete(_es8311Handle);
+        _es8311Handle = nullptr;
+        return false;
+    }
+    es8311_voice_volume_set(_es8311Handle, 85, nullptr);
+    es8311_voice_mute(_es8311Handle, false);
     es8311_microphone_config(_es8311Handle, false); // analog mic
     es8311_microphone_gain_set(_es8311Handle, ES8311_MIC_GAIN_30DB);
 
@@ -92,7 +112,7 @@ inline bool initES8311(uint32_t sampleRate = 44100) {
     pinMode(POKO_PIN_PA_CTRL, OUTPUT);
     digitalWrite(POKO_PIN_PA_CTRL, HIGH);
 
-    Serial.println("[ES8311] ok");
+    Serial.printf("[ES8311] DAC ready at %lu Hz; speaker amp enabled\n", (unsigned long)sampleRate);
     return true;
 }
 
@@ -109,7 +129,7 @@ static int _currentAppVolume  = 75;
 inline void setMasterVolumeLimit(int limit) {
     _masterVolumeLimit = constrain(limit, 0, 100);
     int effectiveVol = (_currentAppVolume * _masterVolumeLimit) / 100;
-    es8311SetVolume(effectiveVol);
+    if (_es8311Handle) es8311SetVolume(effectiveVol);
 }
 
 inline int getMasterVolumeLimit() {
@@ -119,7 +139,7 @@ inline int getMasterVolumeLimit() {
 inline void setScaledVolume(int appVol0to100) {
     _currentAppVolume = constrain(appVol0to100, 0, 100);
     int effectiveVol = (_currentAppVolume * _masterVolumeLimit) / 100;
-    es8311SetVolume(effectiveVol);
+    if (_es8311Handle) es8311SetVolume(effectiveVol);
 }
 
 inline int getCurrentAppVolume() {
@@ -141,9 +161,9 @@ inline bool reinitES8311(uint32_t sampleRate = 44100) {
 // ── I2S Driver (Modern ESP-IDF 5.x / Arduino 3.x) ────────────
 inline i2s_chan_handle_t poko_tx_handle = nullptr;
 
-inline esp_err_t initI2S(uint32_t sampleRate = 44100,
-                          uint8_t  channels   = 2,
-                          uint8_t  bitsPerSample = 16) {
+inline esp_err_t initI2S(uint32_t sampleRate,
+                          uint8_t  channels,
+                          uint8_t  bitsPerSample) {
     if (poko_tx_handle) return ESP_OK;
 
     i2s_chan_config_t chan_cfg = {
@@ -172,12 +192,12 @@ inline esp_err_t initI2S(uint32_t sampleRate = 44100,
         .slot_cfg = {
             .data_bit_width = (i2s_data_bit_width_t)bitsPerSample,
             .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
-            .slot_mode = (channels == 1) ? I2S_SLOT_MODE_MONO : I2S_SLOT_MODE_STEREO,
+            .slot_mode = I2S_SLOT_MODE_STEREO,
             .slot_mask = I2S_STD_SLOT_BOTH,
             .ws_width = (uint32_t)bitsPerSample,
             .ws_pol = false,
             .bit_shift = true,
-            .left_align = true,
+            .left_align = false,
             .big_endian = false,
             .bit_order_lsb = false
         },

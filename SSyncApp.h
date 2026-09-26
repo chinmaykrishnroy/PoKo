@@ -112,7 +112,7 @@ private:
         _canvas->drawFastHLine(0, 114, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(theme.footerText, theme.headerBg);
-        const char* hint = "Boot:V-  Key:V+  D-Key:Mute";
+        const char* hint = "L:V-  R:V+  2R:Mute";
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
         _canvas->print(hint);

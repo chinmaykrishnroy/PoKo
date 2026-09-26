@@ -96,33 +96,33 @@ private:
         const auto& theme = currentTheme();
 
         // Clear main carousel area with theme background
-        _gfx->fillRect(0, 13, 128, 102, theme.bg);
+        _gfx->fillRect(0, 13, 128, 115, theme.bg);
 
-        // Navigation hints (< and >)
+        // Center carousel chevrons lower alongside the tile
         _gfx->setFont(u8g2_font_helvB10_tf);
         _gfx->setTextColor(theme.line, theme.bg);
-        _gfx->setCursor(4, 52);
+        _gfx->setCursor(4, 72);
         _gfx->print("<");
-        _gfx->setCursor(118, 52);
+        _gfx->setCursor(118, 72);
         _gfx->print(">");
 
-        // Rounded box for app emblem
-        _gfx->drawRoundRect(36, 22, 56, 44, 8, t.accentColor);
-        _gfx->fillRoundRect(38, 24, 52, 40, 6, theme.surface);
+        // Rounded box for app emblem, centered lower
+        _gfx->drawRoundRect(36, 46, 56, 44, 8, t.accentColor);
+        _gfx->fillRoundRect(38, 48, 52, 40, 6, theme.surface);
 
         // Emblem symbol
         _gfx->setFont(u8g2_font_helvB14_tf);
         _gfx->setTextColor(t.accentColor, theme.surface);
         int16_t x1, y1; uint16_t w, h;
         _gfx->getTextBounds(t.emblem, 0, 0, &x1, &y1, &w, &h);
-        _gfx->setCursor(64 - w / 2, 50);
+        _gfx->setCursor(64 - w / 2, 74);
         _gfx->print(t.emblem);
 
         // App Name
         _gfx->setFont(u8g2_font_helvB10_tf);
         _gfx->setTextColor(theme.text, theme.bg);
         _gfx->getTextBounds(t.name, 0, 0, &x1, &y1, &w, &h);
-        _gfx->setCursor(64 - w / 2, 80);
+        _gfx->setCursor(64 - w / 2, 104);
         _gfx->print(t.name);
 
         // Subtitle
@@ -130,32 +130,13 @@ private:
             _gfx->setFont(u8g2_font_profont10_mf);
             _gfx->setTextColor(theme.muted, theme.bg);
             _gfx->getTextBounds(t.subtitle, 0, 0, &x1, &y1, &w, &h);
-            _gfx->setCursor(64 - w / 2, 95);
+            _gfx->setCursor(64 - w / 2, 118);
             _gfx->print(t.subtitle);
         }
-
-        // Bottom instruction: standardized Nxt / Prv / Open
-        _gfx->setFont(u8g2_font_5x7_tf);
-        _gfx->setTextColor(theme.footerText, theme.bg);
-        const char* hint = "Prv:Boot  Nxt:Key  D-Key:Open";
-        _gfx->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
-        _gfx->setCursor(64 - w / 2, 110);
-        _gfx->print(hint);
     }
 
     void drawNavIndicator() {
-        const auto& theme = currentTheme();
-        _gfx->fillRect(0, 116, 128, 12, theme.bg);
-        int totalW = TILE_COUNT * 8 + (TILE_COUNT - 1) * 4;
-        int startX = (128 - totalW) / 2;
-        for (uint8_t i = 0; i < TILE_COUNT; i++) {
-            int x = startX + i * 12;
-            if (i == _selected) {
-                _gfx->fillRoundRect(x, 120, 8, 4, 2, theme.accent);
-            } else {
-                _gfx->fillCircle(x + 4, 122, 2, theme.line);
-            }
-        }
+        // No navigation hints/indicators on main screen for a clean, centered aesthetic
     }
 
 public:
@@ -178,10 +159,10 @@ public:
     }
 
     void flashHighlight() {
-        _gfx->drawRoundRect(34, 20, 60, 48, 10, RGB565_WHITE);
+        _gfx->drawRoundRect(34, 44, 60, 48, 10, RGB565_WHITE);
         delay(40);
-        _gfx->drawRoundRect(34, 20, 60, 48, 10, POKO_CLR_BG);
-        _gfx->drawRoundRect(36, 22, 56, 44, 8, _tiles[_selected].accentColor);
+        _gfx->drawRoundRect(34, 44, 60, 48, 10, currentTheme().bg);
+        _gfx->drawRoundRect(36, 46, 56, 44, 8, _tiles[_selected].accentColor);
     }
 
     void navigateLeft() {

@@ -265,8 +265,9 @@ void setup() {
     int savedBr = prefs.getInt("brightness", 80);
     setBacklightPercent(savedBr);
 
-    // 3. Audio Codec (ES8311)
-    initES8311(44100);
+    // 3. Audio Codec (ES8311) & I2S Master Clock
+    initI2S(48000);
+    initES8311(48000);
     int savedMaster = prefs.getInt("master_vol", 100);
     setMasterVolumeLimit(savedMaster);
     int savedVol = prefs.getInt("volume", 75);
