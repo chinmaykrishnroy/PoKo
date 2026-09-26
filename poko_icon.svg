@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#00c8ff"/>
+      <stop offset="100%" stop-color="#0066cc"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <!-- Screen bezel -->
+  <rect x="14" y="16" width="36" height="32" rx="4" fill="#000" opacity="0.7"/>
+  <!-- Screen glow -->
+  <rect x="16" y="18" width="32" height="28" rx="3" fill="#001a2e"/>
+  <!-- Play triangle on screen -->
+  <polygon points="26,24 26,40 42,32" fill="#00c8ff" opacity="0.9"/>
+  <!-- Speaker dot row -->
+  <circle cx="22" cy="54" r="2" fill="#fff" opacity="0.5"/>
+  <circle cx="29" cy="54" r="2" fill="#fff" opacity="0.5"/>
+  <circle cx="36" cy="54" r="2" fill="#fff" opacity="0.5"/>
+  <circle cx="43" cy="54" r="2" fill="#fff" opacity="0.5"/>
+</svg>
