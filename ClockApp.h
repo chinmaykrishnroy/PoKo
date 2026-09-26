@@ -7,6 +7,8 @@
 #include "PokoPins.h"
 #include "PokoUI.h"
 
+#include "PokoTheme.h"
+
 // ─────────────────────────────────────────────────────────────
 //  ClockApp — Digital Clock (128×128) with NTP sync (IST)
 //  Uses Arduino_Canvas for zero-flicker double-buffered display.
@@ -26,8 +28,9 @@ private:
 
     void renderToCanvas() {
         if (!_canvas) return;
+        const auto& theme = currentTheme();
 
-        _canvas->fillScreen(POKO_CLR_BG);
+        _canvas->fillScreen(theme.bg);
 
         struct tm timeinfo;
         bool timeValid = getLocalTime(&timeinfo, 0) && timeinfo.tm_year > (2020 - 1900);
@@ -36,9 +39,9 @@ private:
             // ── Modern Style ──────────────────────────────────────────
 
             // Top Status Bar (y=0..14)
-            _canvas->fillRect(0, 0, 128, 14, 0x0841);
+            _canvas->fillRect(0, 0, 128, 14, theme.headerBg);
             _canvas->setFont(u8g2_font_profont10_mf);
-            _canvas->setTextColor(POKO_CLR_DIM, 0x0841);
+            _canvas->setTextColor(theme.muted, theme.headerBg);
             _canvas->setCursor(3, 10);
             _canvas->print(WiFi.status() == WL_CONNECTED ? "WiFi OK" : "No WiFi");
 
@@ -53,7 +56,7 @@ private:
                 snprintf(dateBuf, sizeof(dateBuf), "Awaiting NTP...");
             }
             _canvas->setFont(u8g2_font_helvB08_tf);
-            _canvas->setTextColor(POKO_CLR_ACCENT, POKO_CLR_BG);
+            _canvas->setTextColor(theme.accent, theme.bg);
             int16_t x1, y1; uint16_t w, h;
             _canvas->getTextBounds(dateBuf, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(64 - w / 2, 34);
@@ -76,26 +79,26 @@ private:
             }
 
             _canvas->setFont(u8g2_font_logisoso24_tf);
-            _canvas->setTextColor(POKO_CLR_TEXT, POKO_CLR_BG);
+            _canvas->setTextColor(theme.text, theme.bg);
             _canvas->getTextBounds(timeBuf, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(56 - w / 2, 74);
             _canvas->print(timeBuf);
 
             // Seconds text
             _canvas->setFont(u8g2_font_helvB10_tf);
-            _canvas->setTextColor(POKO_CLR_ACCENT, POKO_CLR_BG);
+            _canvas->setTextColor(theme.accent, theme.bg);
             _canvas->setCursor(88, 70);
             _canvas->print(secBuf);
 
             // Seconds progress bar (y=84..88)
             int secVal = timeValid ? timeinfo.tm_sec : ((millis() / 1000) % 60);
-            _canvas->drawRect(14, 84, 100, 5, 0x18C3);
+            _canvas->drawRect(14, 84, 100, 5, theme.line);
             int barW = (96 * secVal) / 59;
-            _canvas->fillRect(16, 85, barW, 3, POKO_CLR_ACCENT);
+            _canvas->fillRect(16, 85, barW, 3, theme.accent);
 
             // Subtitle info
             _canvas->setFont(u8g2_font_5x7_tf);
-            _canvas->setTextColor(POKO_CLR_DIM, POKO_CLR_BG);
+            _canvas->setTextColor(theme.muted, theme.bg);
             const char* modeStr = _is24h ? "24-HOUR FORMAT" : "12-HOUR FORMAT";
             _canvas->getTextBounds(modeStr, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(64 - w / 2, 102);
@@ -110,7 +113,7 @@ private:
                 snprintf(timeBuf, sizeof(timeBuf), "--:--");
             }
             _canvas->setFont(u8g2_font_logisoso28_tf);
-            _canvas->setTextColor(POKO_CLR_TEXT, POKO_CLR_BG);
+            _canvas->setTextColor(theme.text, theme.bg);
             int16_t x1, y1; uint16_t w, h;
             _canvas->getTextBounds(timeBuf, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(64 - w / 2, 72);
@@ -123,18 +126,18 @@ private:
                 snprintf(dateBuf, sizeof(dateBuf), "IST Clock");
             }
             _canvas->setFont(u8g2_font_helvB08_tf);
-            _canvas->setTextColor(POKO_CLR_DIM, POKO_CLR_BG);
+            _canvas->setTextColor(theme.muted, theme.bg);
             _canvas->getTextBounds(dateBuf, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(64 - w / 2, 94);
             _canvas->print(dateBuf);
         }
 
         // Footer Navigation Bar (y=114..127)
-        _canvas->fillRect(0, 114, 128, 14, 0x0841);
-        _canvas->drawFastHLine(0, 114, 128, 0x18C3);
+        _canvas->fillRect(0, 114, 128, 14, theme.headerBg);
+        _canvas->drawFastHLine(0, 114, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
-        _canvas->setTextColor(POKO_CLR_DIM, 0x0841);
-        const char* hint = "Boot:12/24  Key:Style  D-Boot:X";
+        _canvas->setTextColor(theme.footerText, theme.headerBg);
+        const char* hint = "Boot:Mode  Key:Style  D-Boot:X";
         int16_t x1, y1; uint16_t w, h;
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);

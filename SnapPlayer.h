@@ -1,18 +1,22 @@
 #pragma once
 #include <WiFi.h>
 #include <Arduino_GFX_Library.h>
-#include <driver/i2s.h>
+#include <driver/i2s_std.h>
 #include <esp_timer.h>
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
 #include <freertos/stream_buffer.h>
+#include "PokoPins.h"
+#include "PokoDrivers.h"
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
+
+#include <ESP8266Audio.h>
 
 extern "C" {
 #include "libflac/FLAC/stream_decoder.h"
@@ -170,7 +174,7 @@ private:
         SNAP_MSG_CLIENT_INFO = 7
     };
 
-    TFT_eSPI* _tft;
+    void* _tft = nullptr;
     Preferences* _prefs;
     String _serverHost;
     uint16_t _serverPort;
@@ -471,33 +475,11 @@ private:
     }
 
     String fitUiText(const String& text, int maxWidth, uint8_t font) {
-        if (!_tft) return text;
-        _tft->setTextFont(font);
-        if (_tft->textWidth(text) <= maxWidth) return text;
-
-        String out = text;
-        const String ellipsis = "...";
-        while (out.length() > 1 && _tft->textWidth(out + ellipsis) > maxWidth) {
-            out.remove(out.length() - 1);
-        }
-        return out + ellipsis;
+        return text;
     }
 
     void drawCachedUiLine(String& cacheKey, const String& text, int x, int y,
                           int width, uint16_t color, uint8_t font = 2) {
-        if (!_tft) return;
-        String key = String((unsigned int)color) + "|" + String((unsigned int)font) + "|" + text;
-        if (cacheKey == key) return;
-
-        // setTextPadding erases the remainder of a previously longer string using
-        // the current background colour, avoiding the old "DKnob/Exitu" ghosts.
-        _tft->setTextDatum(TL_DATUM);
-        _tft->setTextFont(font);
-        _tft->setTextColor(color, TFT_BLACK);
-        _tft->setTextPadding(width);
-        _tft->drawString(text, x, y);
-        _tft->setTextPadding(0);
-        cacheKey = key;
     }
 
     static inline uint16_t readU16LE(const uint8_t* p) {
@@ -531,18 +513,11 @@ private:
     }
 
     void muteI2SPins() {
-        const uint8_t pins[] = {1, 2, 6};
-        for (uint8_t pin : pins) {
-            pinMode(pin, OUTPUT);
-            digitalWrite(pin, LOW);
-        }
+        es8311Mute(true);
     }
 
     bool primeI2SPath(uint32_t sampleRate) {
-        if (!_i2sInstalled || sampleRate == 0) return false;
-
-        // Feed valid all-zero I2S frames while Snapcast is still buffering.
-        // This stabilizes BCLK/WS/DOUT before the first real program sample.
+        if (!_i2sInstalled || sampleRate == 0 || !poko_tx_handle) return false;
         int16_t silence[DMA_BUF_LEN * 2] = {0};
         uint32_t framesRemaining = max((uint32_t)DMA_BUF_LEN,
             (uint32_t)(((uint64_t)sampleRate * I2S_PRIME_MS) / 1000ULL));
@@ -551,17 +526,12 @@ private:
             uint32_t frames = min((uint32_t)DMA_BUF_LEN, framesRemaining);
             size_t bytes = (size_t)frames * 2U * sizeof(int16_t);
             size_t written = 0;
-            esp_err_t err = i2s_write(I2S_NUM_0, silence, bytes, &written, pdMS_TO_TICKS(50));
+            esp_err_t err = i2s_channel_write(poko_tx_handle, silence, bytes, &written, pdMS_TO_TICKS(50));
             if (err != ESP_OK || written != bytes) {
-                Serial.printf("[snap] I2S prime failed: err=%d %u/%u\n",
-                              (int)err, (unsigned)written, (unsigned)bytes);
                 return false;
             }
             framesRemaining -= frames;
         }
-
-        // Keep the peripheral installed and clocks running; leave DMA silent.
-        i2s_zero_dma_buffer(I2S_NUM_0);
         return true;
     }
 
@@ -573,68 +543,28 @@ private:
 
     bool initI2S(uint32_t sampleRate) {
         if (_i2sInstalled) {
-            i2s_zero_dma_buffer(I2S_NUM_0);
-            i2s_driver_uninstall(I2S_NUM_0);
+            ::deinitI2S();
             _i2sInstalled = false;
         }
 
-        muteI2SPins();
-        vTaskDelay(pdMS_TO_TICKS(15));
-
-        i2s_config_t i2s_config = {
-            .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
-            .sample_rate = sampleRate,
-            .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-            .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
-            .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-            .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-            .dma_buf_count = DMA_BUF_COUNT,
-            .dma_buf_len = DMA_BUF_LEN,
-            .use_apll = false,
-            .tx_desc_auto_clear = true
-        };
-
-        esp_err_t err = i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
+        esp_err_t err = ::initI2S(sampleRate, 2, 16);
         if (err != ESP_OK) {
+            Serial.printf("[snap] initI2S failed: %d\n", (int)err);
             _i2sInstalled = false;
-            Serial.printf("[snap] i2s_driver_install failed: %d\n", (int)err);
             return false;
         }
 
+        reinitES8311(sampleRate);
+        setScaledVolume(_serverMuted ? 0 : _serverVolume);
         _i2sInstalled = true;
-
-        i2s_pin_config_t pin_config = {
-            .bck_io_num = 2,
-            .ws_io_num = 1,
-            .data_out_num = 6,
-            .data_in_num = I2S_PIN_NO_CHANGE
-        };
-
-        err = i2s_set_pin(I2S_NUM_0, &pin_config);
-        if (err != ESP_OK) {
-            Serial.printf("[snap] i2s_set_pin failed: %d\n", (int)err);
-            i2s_driver_uninstall(I2S_NUM_0);
-            _i2sInstalled = false;
-            muteI2SPins();
-            return false;
-        }
-
-        i2s_zero_dma_buffer(I2S_NUM_0);
-        if (!primeI2SPath(sampleRate)) {
-            Serial.println("[snap] WARNING: I2S silence prime did not complete");
-        }
+        primeI2SPath(sampleRate);
         return true;
     }
 
     void deinitI2S() {
-        if (!_i2sInstalled) {
-            muteI2SPins();
-            return;
-        }
-        i2s_zero_dma_buffer(I2S_NUM_0);
-        i2s_driver_uninstall(I2S_NUM_0);
+        if (!_i2sInstalled) return;
+        ::deinitI2S();
         _i2sInstalled = false;
-        muteI2SPins();
     }
 
     bool readExact(WiFiClient& client, uint8_t* dest, size_t len, uint32_t timeoutMs = 3000) {
@@ -795,8 +725,8 @@ private:
         String mac = WiFi.macAddress();
         StaticJsonDocument<384> doc;
         doc["Arch"] = "esp32s3";
-        doc["ClientName"] = "NexusSnap";
-        doc["HostName"] = "Nexus";
+        doc["ClientName"] = "PoKo";
+        doc["HostName"] = "PoKo";
         doc["ID"] = mac;
         doc["Instance"] = 1;
         doc["MAC"] = mac;
@@ -894,6 +824,7 @@ private:
         } else if (doc.containsKey("volume")) {
             _volume = constrain(reportedVolume / 100.0f, 0.0f, 1.0f);
         }
+        setScaledVolume(_serverMuted ? 0 : _serverVolume);
     }
 
     void parseCodecHeader(const String& codec, const uint8_t* payload, size_t size) {
@@ -1519,7 +1450,6 @@ private:
                 _playStarted = false;
                 _samplesPlayed = 0;
                 resetPllState();
-                if (_i2sInstalled) i2s_zero_dma_buffer(I2S_NUM_0);
                 continue;
             }
 
@@ -1634,7 +1564,6 @@ private:
                 _playStarted = false;
                 _samplesPlayed = 0;
                 resetPllState();
-                if (_i2sInstalled) i2s_zero_dma_buffer(I2S_NUM_0);
                 continue;
             }
 
@@ -1715,7 +1644,7 @@ private:
             if (outFrames > 0) {
                 const size_t requestedBytes = outFrames * sizeof(int16_t) * 2U;
                 size_t written = 0;
-                esp_err_t err = i2s_write(I2S_NUM_0, pcmOut, requestedBytes, &written, pdMS_TO_TICKS(30));
+                esp_err_t err = poko_tx_handle ? i2s_channel_write(poko_tx_handle, pcmOut, requestedBytes, &written, pdMS_TO_TICKS(30)) : ESP_FAIL;
                 if (err != ESP_OK || written != requestedBytes) {
                     _i2sShortWrites++;
                     Serial.printf("[snap] I2S short write: err=%d %u/%u\n",
@@ -1737,8 +1666,8 @@ private:
     }
 
 public:
-    SnapPlayer(TFT_eSPI* display, Preferences* prefs, float initialVolume = 0.8f)
-        : _tft(display), _prefs(prefs), _serverHost(""), _serverPort(1704), _customLatencyMs(0),
+    SnapPlayer(void* display = nullptr, Preferences* prefs = nullptr, float initialVolume = 0.8f)
+        : _tft(display), _prefs(prefs), _serverHost("192.168.0.20"), _serverPort(1704), _customLatencyMs(0),
           _volume(initialVolume), _isRunning(false), _isLoaded(false), _connected(false),
           _syncing(false), _playStarted(false), _playReleased(false), _netTaskHandle(NULL),
           _audioTaskHandle(NULL), _netTaskDone(nullptr), _audioTaskDone(nullptr),
@@ -1779,10 +1708,10 @@ public:
         }
 
         if (_prefs) {
-            _serverHost = _prefs->getString("snap_host", "192.168.0.5");
+            _serverHost = _prefs->getString("snap_host", "192.168.0.20");
             _serverPort = (uint16_t)_prefs->getInt("snap_port", 1704);
             _customLatencyMs = _prefs->getInt("snap_lat", 0);
-            _volume = constrain(_prefs->getInt("def_vol", 80) / 100.0f, 0.0f, 1.0f);
+            _volume = constrain(_prefs->getInt("volume", 75) / 100.0f, 0.0f, 1.0f);
         }
     }
 
@@ -2033,168 +1962,44 @@ public:
     }
 
     void update() {
-        if (!_isLoaded) return;
-        uint32_t now = millis();
-        if (now - _lastOverlayUpdateMs >= 500) {
-            _lastOverlayUpdateMs = now;
-            redrawOverlay();
-        }
+        // Audio tasks run asynchronously in background FreeRTOS tasks
     }
 
-    void redrawOverlay() {
-        if (!_tft || !_isLoaded) return;
+    void redrawOverlay() {}
 
-        const uint16_t HEADER_BG = 0x8800;
-        const uint16_t SYNC_GOLD = 0xFDA0;
-        const int screenW = _tft->width();
-        const int centerX = screenW / 2;
 
-        // Layout is deliberately non-overlapping. Font 2 is ~16 px high on the
-        // ST7789, so every text row gets an 18 px slot and the volume bar starts
-        // below the label instead of cutting through it.
-        static const int HEADER_H = 36;
-        static const int INFO_X = 12;
-        static const int INFO_W = 216;
-        static const int SERVER_Y = 72;
-        static const int CODEC_Y = 90;
-        static const int SYNC_Y = 108;
-        static const int DRIFT_Y = 126;
-        static const int CLOCK_Y = 144;
-        static const int VOLUME_Y = 164;
-        static const int BAR_X = 16;
-        static const int BAR_Y = 184;
-        static const int BAR_W = 208;
-        static const int BAR_H = 12;
-        static const int FOOTER_Y = 205;
-        static const int FOOTER_H = 35;
+    // ── Public Accessors for SSyncApp & WebUI ──────────────────
+    bool isPlaying() const { return _playStarted && _connected; }
+    bool isSyncing() const { return _syncing; }
+    int  getVolume() const { return (int)lroundf(_volume * 100.0f); }
+    bool isMuted() const { return _serverMuted; }
+    String getCodec() const { return _codec; }
+    uint32_t getSampleRate() const { return _sampleRate; }
+    int32_t getBufferMs() const { return _serverBufferMs; }
+    int32_t getLatencyMs() const { return _serverLatencyMs; }
+    String getServerHost() const { return _serverHost; }
+    uint16_t getServerPort() const { return _serverPort; }
 
-        if (!_overlayStaticDrawn) {
-            _tft->fillScreen(TFT_BLACK);
-            resetOverlayCache();
+    void setVolumePercent(int pct) {
+        pct = constrain(pct, 0, 100);
+        _volume = pct / 100.0f;
+        _serverVolume = pct;
+        setScaledVolume(_serverMuted ? 0 : _serverVolume);
+        _volumePublishPending = true;
+    }
 
-            // Header: use top-centre datum plus the actual font height instead of
-            // assuming MC_DATUM looks optically centred for Font 4.
-            _tft->fillRect(0, 0, screenW, HEADER_H, HEADER_BG);
-            _tft->setTextFont(4);
-            _tft->setTextColor(TFT_WHITE, HEADER_BG);
-            _tft->setTextDatum(TC_DATUM);
-            int titleY = max(0, (HEADER_H - _tft->fontHeight(4)) / 2);
-            _tft->drawString("SNAPCLIENT", centerX, titleY);
+    void toggleMute() {
+        _serverMuted = !_serverMuted;
+        setScaledVolume(_serverMuted ? 0 : _serverVolume);
+        _volumePublishPending = true;
+    }
 
-            // Static volume frame. The label lives at y=164 and the frame starts
-            // at y=184, leaving clear vertical separation between them.
-            _tft->drawRect(BAR_X, BAR_Y, BAR_W, BAR_H, TFT_WHITE);
-
-            _overlayStaticDrawn = true;
-        }
-
-        // -------- Status badge (only repaint when state actually changes) --------
-        uint16_t badgeCol = TFT_RED;
-        String badgeText = "OFFLINE";
-
-        if (_audioFault) {
-            badgeCol = TFT_RED;
-            badgeText = "AUDIO ERROR";
-        } else if (_connected) {
-            if (_syncing && _playReleased) {
-                badgeCol = TFT_GREEN;
-                badgeText = "PLAYING / SYNC";
-            } else if (_syncing) {
-                badgeCol = TFT_YELLOW;
-                badgeText = "BUFFERING";
-            } else {
-                badgeCol = TFT_CYAN;
-                badgeText = "CONNECTED";
-            }
-        }
-
-        String badgeKey = String((unsigned int)badgeCol) + "|" + badgeText;
-        if (_uiBadgeKey != badgeKey) {
-            _tft->fillRect(0, 38, screenW, 30, TFT_BLACK);
-            const int badgeW = 172;
-            const int badgeX = (screenW - badgeW) / 2;
-            _tft->fillRoundRect(badgeX, 41, badgeW, 24, 6, badgeCol);
-            _tft->setTextDatum(MC_DATUM);
-            _tft->setTextFont(2);
-            _tft->setTextColor(TFT_BLACK, badgeCol);
-            _tft->drawString(badgeText, centerX, 53);
-            _uiBadgeKey = badgeKey;
-        }
-
-        // -------- Information rows --------
-        String serverLine = "Server: " + _serverHost + ":" + String(_serverPort);
-        serverLine = fitUiText(serverLine, INFO_W, 2);
-        drawCachedUiLine(_uiServerKey, serverLine, INFO_X, SERVER_Y, INFO_W, TFT_WHITE, 2);
-
-        String codecUpper = _codec;
-        codecUpper.toUpperCase();
-        String codecLine = "Codec: " + codecUpper + " " + String(_sampleRate / 1000) +
-                           "kHz " + (_channels > 1 ? "Stereo" : "Mono");
-        codecLine = fitUiText(codecLine, INFO_W, 2);
-        drawCachedUiLine(_uiCodecKey, codecLine, INFO_X, CODEC_Y, INFO_W, TFT_WHITE, 2);
-
-        int effMs = getEffectiveBufferMs();
-        String syncLine;
-        uint16_t syncColor = TFT_WHITE;
-        if (_knobMode == KNOB_LATENCY) {
-            syncLine = "Sync: " + String(_customLatencyMs) + "ms | Eff: " + String(effMs) + "ms";
-            syncColor = SYNC_GOLD;
-        } else {
-            syncLine = "Buf: " + String(_serverBufferMs) + "ms | Sync: " + String(_customLatencyMs) + "ms";
-        }
-        syncLine = fitUiText(syncLine, INFO_W, 2);
-        drawCachedUiLine(_uiSyncKey, syncLine, INFO_X, SYNC_Y, INFO_W, syncColor, 2);
-
-        String driftLine = "Drift: " + String((float)_lastDriftUs / 1000.0f, 1) + "ms | Und: " + String(_underruns);
-        driftLine = fitUiText(driftLine, INFO_W, 2);
-        drawCachedUiLine(_uiDriftKey, driftLine, INFO_X, DRIFT_Y, INFO_W, TFT_LIGHTGREY, 2);
-
-        String clockLine = "Clock: ";
-        int64_t absDiffUs = llabs(_diffToServerUs);
-        if (_diffToServerUs > 0) clockLine += "+";
-        if (absDiffUs < 1000000LL) {
-            clockLine += String((int32_t)(_diffToServerUs / 1000LL)) + "ms";
-        } else {
-            clockLine += String((int32_t)(_diffToServerUs / 1000000LL)) + "s";
-        }
-        drawCachedUiLine(_uiClockKey, clockLine, INFO_X, CLOCK_Y, INFO_W, TFT_LIGHTGREY, 2);
-
-        // -------- Volume row + bar --------
-        int volumePercent = constrain((int)lroundf(_volume * 100.0f), 0, 100);
-        String volumeText = "Volume: " + String(volumePercent) + "%";
-        if (_serverMuted) volumeText += "  MUTED";
-        volumeText = fitUiText(volumeText, INFO_W, 2);
-        drawCachedUiLine(_uiVolumeKey, volumeText, INFO_X, VOLUME_Y, INFO_W, TFT_WHITE, 2);
-
-        const int innerX = BAR_X + 2;
-        const int innerY = BAR_Y + 2;
-        const int innerW = BAR_W - 4;
-        const int innerH = BAR_H - 4;
-        int fillW = (innerW * volumePercent) / 100;
-        if (_uiVolumeFillW != fillW || _uiVolumeMuted != _serverMuted) {
-            _tft->fillRect(innerX, innerY, innerW, innerH, TFT_DARKGREY);
-            if (fillW > 0) {
-                _tft->fillRect(innerX, innerY, fillW, innerH,
-                               _serverMuted ? TFT_DARKGREY : TFT_GREEN);
-            }
-            _uiVolumeFillW = fillW;
-            _uiVolumeMuted = _serverMuted;
-        }
-
-        // -------- Single-line control footer --------
-        // 36 chars in either mode, so it fits comfortably in 240 px with Font 1.
-        String footerText = (_knobMode == KNOB_LATENCY)
-            ? "Turn:Sync | Click:Vol | D-click:Home"
-            : "Turn:Vol | Click:Sync | D-click:Home";
-        uint16_t footerColor = (_knobMode == KNOB_LATENCY) ? SYNC_GOLD : TFT_SILVER;
-        String footerKey = String((unsigned int)footerColor) + "|" + footerText;
-        if (_uiFooterKey != footerKey) {
-            _tft->fillRect(0, FOOTER_Y, screenW, FOOTER_H, TFT_BLACK);
-            _tft->setTextDatum(MC_DATUM);
-            _tft->setTextFont(1);
-            _tft->setTextColor(footerColor, TFT_BLACK);
-            _tft->drawString(footerText, centerX, FOOTER_Y + FOOTER_H / 2);
-            _uiFooterKey = footerKey;
+    void setServer(const String& host, uint16_t port) {
+        _serverHost = host;
+        _serverPort = port;
+        if (_prefs) {
+            _prefs->putString("snap_host", host);
+            _prefs->putInt("snap_port", port);
         }
     }
 };

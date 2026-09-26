@@ -7,6 +7,8 @@
 #include "PokoPins.h"
 #include "PokoDrivers.h"
 
+#include "PokoTheme.h"
+
 // ─────────────────────────────────────────────────────────────
 //  SettingsApp — On-device settings menu (128×128)
 //  Uses Arduino_Canvas for zero-flicker double-buffered display.
@@ -27,75 +29,83 @@ private:
 
     static constexpr uint8_t ITEM_COUNT = 6;
     const char* _items[ITEM_COUNT] = {
+        "Theme",
+        "Master Vol",
         "Brightness",
-        "Volume",
-        "LED Ring",
-        "WiFi Status",
+        "Slide Timer",
         "Reset Drivers",
-        "Reboot Device"
+        "Reboot"
     };
 
     void renderToCanvas() {
         if (!_canvas) return;
+        const auto& theme = currentTheme();
 
         // Header (y=0..13)
-        _canvas->fillRect(0, 0, 128, 13, 0x0841);
+        _canvas->fillRect(0, 0, 128, 13, theme.headerBg);
         _canvas->setFont(u8g2_font_profont10_mf);
-        _canvas->setTextColor(POKO_CLR_ACCENT, 0x0841);
+        _canvas->setTextColor(theme.headerText, theme.headerBg);
         _canvas->setCursor(3, 10);
         _canvas->print("Settings");
 
         char countBuf[8];
         snprintf(countBuf, sizeof(countBuf), "%d/%d", _selected + 1, ITEM_COUNT);
-        _canvas->setTextColor(POKO_CLR_DIM, 0x0841);
+        _canvas->setTextColor(theme.muted, theme.headerBg);
         int16_t x1, y1; uint16_t w, h;
         _canvas->getTextBounds(countBuf, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(125 - w, 10);
         _canvas->print(countBuf);
 
         // Menu items area (y=14..113)
-        _canvas->fillRect(0, 14, 128, 100, POKO_CLR_BG);
+        _canvas->fillRect(0, 14, 128, 100, theme.bg);
         _canvas->setFont(u8g2_font_profont10_mf);
 
-        int curBr  = prefs.getInt("brightness", 80);
-        int curVol = prefs.getInt("volume", 75);
+        int curBr      = prefs.getInt("brightness", 80);
+        int curMaster  = getMasterVolumeLimit();
+        int curSlide   = prefs.getInt("gallery_timer", 0);
+        bool isDark    = isDarkTheme();
 
         for (uint8_t i = 0; i < ITEM_COUNT; i++) {
             int16_t rowY = 16 + i * 16;
             bool isSel = (i == _selected);
 
             if (isSel) {
-                _canvas->fillRect(0, rowY - 2, 128, 15, 0x18C3);
+                _canvas->fillRect(0, rowY - 2, 128, 15, theme.surface);
+                _canvas->drawFastHLine(0, rowY - 2, 128, theme.accent);
+                _canvas->drawFastHLine(0, rowY + 12, 128, theme.accent);
             }
 
-            _canvas->setTextColor(isSel ? POKO_CLR_TEXT : POKO_CLR_DIM, isSel ? 0x18C3 : POKO_CLR_BG);
+            _canvas->setTextColor(isSel ? theme.text : theme.muted, isSel ? theme.surface : theme.bg);
             _canvas->setCursor(4, rowY + 9);
             _canvas->print(_items[i]);
 
             // Value text on the right
-            char valBuf[14] = "";
-            uint16_t valCol = isSel ? POKO_CLR_ACCENT : POKO_CLR_DIM;
+            char valBuf[16] = "";
+            uint16_t valCol = isSel ? theme.accent : theme.muted;
 
             switch (i) {
-                case 0: snprintf(valBuf, sizeof(valBuf), "%d%%", curBr); break;
-                case 1: snprintf(valBuf, sizeof(valBuf), "%d%%", curVol); break;
-                case 2: snprintf(valBuf, sizeof(valBuf), "Active"); break;
-                case 3: snprintf(valBuf, sizeof(valBuf), WiFi.status() == WL_CONNECTED ? "STA" : "AP"); break;
+                case 0: snprintf(valBuf, sizeof(valBuf), isDark ? "Dark" : "Light"); break;
+                case 1: snprintf(valBuf, sizeof(valBuf), "%d%%", curMaster); break;
+                case 2: snprintf(valBuf, sizeof(valBuf), "%d%%", curBr); break;
+                case 3:
+                    if (curSlide == 0) snprintf(valBuf, sizeof(valBuf), "Off");
+                    else snprintf(valBuf, sizeof(valBuf), "%ds", curSlide);
+                    break;
                 case 4: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
                 case 5: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
             }
 
-            _canvas->setTextColor(valCol, isSel ? 0x18C3 : POKO_CLR_BG);
+            _canvas->setTextColor(valCol, isSel ? theme.surface : theme.bg);
             _canvas->getTextBounds(valBuf, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(124 - w, rowY + 9);
             _canvas->print(valBuf);
         }
 
         // Footer (y=114..127)
-        _canvas->fillRect(0, 114, 128, 14, 0x0841);
-        _canvas->drawFastHLine(0, 114, 128, 0x18C3);
+        _canvas->fillRect(0, 114, 128, 14, theme.headerBg);
+        _canvas->drawFastHLine(0, 114, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
-        _canvas->setTextColor(POKO_CLR_DIM, 0x0841);
+        _canvas->setTextColor(theme.footerText, theme.headerBg);
         const char* hint = "Boot:Up  Key:Dn  D-Key:Set";
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
@@ -106,7 +116,20 @@ private:
 
     void applyAction() {
         switch (_selected) {
-            case 0: { // Cycle Brightness: 25% -> 50% -> 75% -> 100% -> 25%
+            case 0: { // Toggle Theme (Dark <-> Light)
+                bool nextDark = !isDarkTheme();
+                setPokoTheme(nextDark);
+                prefs.putString("ui_theme", nextDark ? "dark" : "light");
+                break;
+            }
+            case 1: { // Cycle Master Volume Limit: 20% -> 40% -> 60% -> 80% -> 100% -> 20%
+                int mv = getMasterVolumeLimit();
+                mv = (mv >= 100) ? 20 : (mv + 20);
+                setMasterVolumeLimit(mv);
+                prefs.putInt("master_vol", mv);
+                break;
+            }
+            case 2: { // Cycle Brightness: 25% -> 50% -> 75% -> 100% -> 25%
                 int b = prefs.getInt("brightness", 80);
                 if (b <= 30)      b = 50;
                 else if (b <= 60) b = 75;
@@ -116,27 +139,17 @@ private:
                 setBacklightPercent(b);
                 break;
             }
-            case 1: { // Cycle Volume: 25% -> 50% -> 75% -> 100%
-                int v = prefs.getInt("volume", 75);
-                if (v <= 30)      v = 50;
-                else if (v <= 60) v = 75;
-                else if (v <= 85) v = 100;
-                else              v = 25;
-                prefs.putInt("volume", v);
-                es8311SetVolume(v);
-                break;
-            }
-            case 2: { // Cycle LED colors
-                static uint8_t c = 0;
-                c = (c + 1) % 5;
-                if (c == 0) turnOffLEDs();
-                else if (c == 1) setAllLEDs(CRGB(0, 180, 255)); // Cyan
-                else if (c == 2) setAllLEDs(CRGB(0, 255, 0));   // Green
-                else if (c == 3) setAllLEDs(CRGB(255, 180, 0)); // Amber
-                else if (c == 4) setAllLEDs(CRGB(255, 0, 0));   // Red
-                break;
-            }
-            case 3: { // No-op info
+            case 3: { // Cycle Slide Timer: 0 -> 3 -> 5 -> 10 -> 15 -> 30 -> 60 -> 0
+                int cur = prefs.getInt("gallery_timer", 0);
+                int next = 0;
+                if (cur == 0)       next = 3;
+                else if (cur <= 3)  next = 5;
+                else if (cur <= 5)  next = 10;
+                else if (cur <= 10) next = 15;
+                else if (cur <= 15) next = 30;
+                else if (cur <= 30) next = 60;
+                else                next = 0;
+                prefs.putInt("gallery_timer", next);
                 break;
             }
             case 4: { // Reset Drivers

@@ -5,6 +5,7 @@
 #include <Preferences.h>
 #include "PokoAppState.h"
 #include "PokoPins.h"
+#include "PokoTheme.h"
 
 // ─────────────────────────────────────────────────────────────
 //  VideoApp — MJPEG / Video Stream UI (128×128)
@@ -28,19 +29,20 @@ private:
 
     void renderToCanvas() {
         if (!_canvas) return;
+        const auto& theme = currentTheme();
 
-        _canvas->fillScreen(POKO_CLR_BG);
+        _canvas->fillScreen(theme.bg);
 
         // Header (y=0..13)
-        _canvas->fillRect(0, 0, 128, 14, 0x0841);
+        _canvas->fillRect(0, 0, 128, 14, theme.headerBg);
         _canvas->setFont(u8g2_font_helvB08_tf);
-        _canvas->setTextColor(0x001F, 0x0841);
+        _canvas->setTextColor(0x001F, theme.headerBg);
         _canvas->setCursor(3, 11);
         _canvas->print("Video");
 
         // Status badge
         _canvas->setFont(u8g2_font_5x7_tf);
-        _canvas->setTextColor(_streaming ? POKO_CLR_GREEN : POKO_CLR_DIM, 0x0841);
+        _canvas->setTextColor(_streaming ? POKO_CLR_GREEN : theme.muted, theme.headerBg);
         const char* st = _streaming ? "STREAMING" : "STANDBY";
         int16_t x1, y1; uint16_t w, h;
         _canvas->getTextBounds(st, 0, 0, &x1, &y1, &w, &h);
@@ -48,32 +50,32 @@ private:
         _canvas->print(st);
 
         // Viewport Frame (y=18..88)
-        _canvas->drawRect(14, 18, 100, 70, 0x18C3);
-        _canvas->fillRect(16, 20, 96, 66, 0x0821);
+        _canvas->drawRect(14, 18, 100, 70, theme.line);
+        _canvas->fillRect(16, 20, 96, 66, theme.surface);
 
         if (_streaming) {
             // Draw animated test pattern / frame representation
             for (int y = 20; y < 86; y += 10) {
-                _canvas->drawFastHLine(16, y, 96, 0x18C3);
+                _canvas->drawFastHLine(16, y, 96, theme.line);
             }
             char frameStr[16];
             snprintf(frameStr, sizeof(frameStr), "%d FPS", _fps);
             _canvas->setFont(u8g2_font_helvB08_tf);
-            _canvas->setTextColor(POKO_CLR_GREEN, 0x0821);
+            _canvas->setTextColor(POKO_CLR_GREEN, theme.surface);
             _canvas->getTextBounds(frameStr, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(64 - w / 2, 58);
             _canvas->print(frameStr);
         } else {
             // Play icon
             _canvas->setFont(u8g2_font_helvB14_tf);
-            _canvas->setTextColor(0x001F, 0x0821);
+            _canvas->setTextColor(theme.accent, theme.surface);
             _canvas->setCursor(58, 58);
             _canvas->print(">");
         }
 
         // Stats (y=92..108)
         _canvas->setFont(u8g2_font_5x7_tf);
-        _canvas->setTextColor(POKO_CLR_DIM, POKO_CLR_BG);
+        _canvas->setTextColor(theme.muted, theme.bg);
         _canvas->setCursor(16, 100);
         _canvas->print("RES: 128x128 TCP");
         _canvas->setCursor(16, 108);
@@ -82,11 +84,11 @@ private:
         _canvas->print(buf);
 
         // Footer (y=114..127)
-        _canvas->fillRect(0, 114, 128, 14, 0x0841);
-        _canvas->drawFastHLine(0, 114, 128, 0x18C3);
+        _canvas->fillRect(0, 114, 128, 14, theme.headerBg);
+        _canvas->drawFastHLine(0, 114, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
-        _canvas->setTextColor(POKO_CLR_DIM, 0x0841);
-        const char* hint = "D-Key:Stream  D-Boot:X";
+        _canvas->setTextColor(theme.footerText, theme.headerBg);
+        const char* hint = "Boot:Prv  Key:Nxt  D-Key:Stream";
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
         _canvas->print(hint);

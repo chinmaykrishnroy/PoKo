@@ -4,6 +4,7 @@
 #include <Arduino_GFX_Library.h>
 #include "PokoAppState.h"
 #include "PokoPins.h"
+#include "PokoTheme.h"
 
 // ─────────────────────────────────────────────────────────────
 //  PokoUI — Launcher carousel (7 tiles) + status bar (128×128)
@@ -40,33 +41,37 @@ private:
 
     static constexpr uint8_t TILE_COUNT = 7;
     PokoTile _tiles[TILE_COUNT] = {
-        { "Info",     "System Info",     POKO_CLR_GREEN,   STATE_INFO,         "i"  },
-        { "Clock",    "IST Clock",       POKO_CLR_ACCENT,  STATE_CLOCK,        "12" },
-        { "SSync",    "Snapclient",      0x07E0,           STATE_SSYNC,        "S"  },
-        { "Music",    "Audio Player",    0xF81F,           STATE_MUSIC_UI,     "~"  },
-        { "Video",    "Video Stream",    0x001F,           STATE_VIDEO_UI,     ">"  },
-        { "Gallery",  "Photo Viewer",    0xFD20,           STATE_GALLERY_UI,   "#"  },
-        { "Settings", "Preferences",     0x8410,           STATE_SETTINGS_UI,  "*"  }
+        { "Info",     "System Info",     0x07E0, STATE_INFO,         "i"  },
+        { "Clock",    "IST Clock",       0x07FF, STATE_CLOCK,        "12" },
+        { "SSync",    "Snapclient",      0x07E0, STATE_SSYNC,        "S"  },
+        { "Music",    "Audio Player",    0xF81F, STATE_MUSIC_UI,     "~"  },
+        { "Video",    "Video Stream",    0x001F, STATE_VIDEO_UI,     ">"  },
+        { "Gallery",  "Photo Viewer",    0xFD20, STATE_GALLERY_UI,   "#"  },
+        { "Settings", "Preferences",     0x8410, STATE_SETTINGS_UI,  "*"  }
     };
 
     void drawStatusBar() {
         if (!_statusCanvas) return;
-        _statusCanvas->fillScreen(0x0841);
-        _statusCanvas->setFont(u8g2_font_profont10_mf);
-        _statusCanvas->setTextSize(1);
+        const auto& theme = currentTheme();
+        _statusCanvas->fillScreen(theme.headerBg);
 
+        // Left: WiFi status dot
         String net = getNetworkStatusMsg();
         if (net.length() == 0) {
-            _statusCanvas->setTextColor(POKO_CLR_GREEN, 0x0841);
-            _statusCanvas->setCursor(2, 9);
-            _statusCanvas->print("WiFi OK");
+            _statusCanvas->fillCircle(7, 6, 2, 0x07E0); // Green
         } else {
-            _statusCanvas->setTextColor(POKO_CLR_WARN, 0x0841);
-            _statusCanvas->setCursor(2, 9);
-            if (net.length() > 13) net = net.substring(0, 12) + "~";
-            _statusCanvas->print(net);
+            _statusCanvas->fillCircle(7, 6, 2, 0xFD20); // Amber
         }
 
+        // Center: "PoKo" branding
+        _statusCanvas->setFont(u8g2_font_helvB08_tf);
+        _statusCanvas->setTextColor(theme.headerText, theme.headerBg);
+        int16_t x1, y1; uint16_t w, h;
+        _statusCanvas->getTextBounds("PoKo", 0, 0, &x1, &y1, &w, &h);
+        _statusCanvas->setCursor(64 - w / 2, 10);
+        _statusCanvas->print("PoKo");
+
+        // Right: Live time
         char buf[12];
         struct tm timeinfo;
         if (getLocalTime(&timeinfo, 0) && timeinfo.tm_year > (2020 - 1900)) {
@@ -77,8 +82,8 @@ private:
             else           snprintf(buf, sizeof(buf), "%lum", (unsigned long)(up / 60));
         }
 
-        _statusCanvas->setTextColor(POKO_CLR_DIM, 0x0841);
-        int16_t x1, y1; uint16_t w, h;
+        _statusCanvas->setFont(u8g2_font_profont10_mf);
+        _statusCanvas->setTextColor(theme.muted, theme.headerBg);
         _statusCanvas->getTextBounds(buf, 0, 0, &x1, &y1, &w, &h);
         _statusCanvas->setCursor(126 - w, 9);
         _statusCanvas->print(buf);
@@ -88,16 +93,14 @@ private:
 
     void drawTile(uint8_t idx) {
         const PokoTile& t = _tiles[idx];
+        const auto& theme = currentTheme();
 
-        // Clear main area
-        _gfx->fillRect(0, 13, 128, 102, POKO_CLR_BG);
-
-        // Accent header line
-        _gfx->fillRect(0, 13, 128, 2, t.accentColor);
+        // Clear main carousel area with theme background
+        _gfx->fillRect(0, 13, 128, 102, theme.bg);
 
         // Navigation hints (< and >)
         _gfx->setFont(u8g2_font_helvB10_tf);
-        _gfx->setTextColor(0x18C3, POKO_CLR_BG);
+        _gfx->setTextColor(theme.line, theme.bg);
         _gfx->setCursor(4, 52);
         _gfx->print("<");
         _gfx->setCursor(118, 52);
@@ -105,11 +108,11 @@ private:
 
         // Rounded box for app emblem
         _gfx->drawRoundRect(36, 22, 56, 44, 8, t.accentColor);
-        _gfx->fillRoundRect(38, 24, 52, 40, 6, 0x0821);
+        _gfx->fillRoundRect(38, 24, 52, 40, 6, theme.surface);
 
         // Emblem symbol
         _gfx->setFont(u8g2_font_helvB14_tf);
-        _gfx->setTextColor(t.accentColor, 0x0821);
+        _gfx->setTextColor(t.accentColor, theme.surface);
         int16_t x1, y1; uint16_t w, h;
         _gfx->getTextBounds(t.emblem, 0, 0, &x1, &y1, &w, &h);
         _gfx->setCursor(64 - w / 2, 50);
@@ -117,7 +120,7 @@ private:
 
         // App Name
         _gfx->setFont(u8g2_font_helvB10_tf);
-        _gfx->setTextColor(POKO_CLR_TEXT, POKO_CLR_BG);
+        _gfx->setTextColor(theme.text, theme.bg);
         _gfx->getTextBounds(t.name, 0, 0, &x1, &y1, &w, &h);
         _gfx->setCursor(64 - w / 2, 80);
         _gfx->print(t.name);
@@ -125,31 +128,32 @@ private:
         // Subtitle
         if (t.subtitle && strlen(t.subtitle) > 0) {
             _gfx->setFont(u8g2_font_profont10_mf);
-            _gfx->setTextColor(POKO_CLR_DIM, POKO_CLR_BG);
+            _gfx->setTextColor(theme.muted, theme.bg);
             _gfx->getTextBounds(t.subtitle, 0, 0, &x1, &y1, &w, &h);
             _gfx->setCursor(64 - w / 2, 95);
             _gfx->print(t.subtitle);
         }
 
-        // Bottom instruction: ">> Click to open"
+        // Bottom instruction: standardized Nxt / Prv / Open
         _gfx->setFont(u8g2_font_5x7_tf);
-        _gfx->setTextColor(POKO_CLR_DIM, POKO_CLR_BG);
-        const char* hint = "D-Key: Open App";
+        _gfx->setTextColor(theme.footerText, theme.bg);
+        const char* hint = "Prv:Boot  Nxt:Key  D-Key:Open";
         _gfx->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _gfx->setCursor(64 - w / 2, 110);
         _gfx->print(hint);
     }
 
     void drawNavIndicator() {
-        _gfx->fillRect(0, 116, 128, 12, POKO_CLR_BG);
+        const auto& theme = currentTheme();
+        _gfx->fillRect(0, 116, 128, 12, theme.bg);
         int totalW = TILE_COUNT * 8 + (TILE_COUNT - 1) * 4;
         int startX = (128 - totalW) / 2;
         for (uint8_t i = 0; i < TILE_COUNT; i++) {
             int x = startX + i * 12;
             if (i == _selected) {
-                _gfx->fillRoundRect(x, 120, 8, 4, 2, POKO_CLR_ACCENT);
+                _gfx->fillRoundRect(x, 120, 8, 4, 2, theme.accent);
             } else {
-                _gfx->fillCircle(x + 4, 122, 2, 0x18C3);
+                _gfx->fillCircle(x + 4, 122, 2, theme.line);
             }
         }
     }

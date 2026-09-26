@@ -24,11 +24,19 @@ private:
     SimpleCb _onRightDouble   = nullptr;
     SimpleCb _onLongLeft      = nullptr;
     SimpleCb _onLongRight     = nullptr;
+    SimpleCb _onLeftHolding   = nullptr;
+    SimpleCb _onRightHolding  = nullptr;
     SimpleCb _onBothClick     = nullptr;
     SimpleCb _onBothDouble    = nullptr;
     SimpleCb _onBothLong      = nullptr;
     SimpleCb _onBothVLong     = nullptr;
     SimpleCb _onBothUltra     = nullptr;
+
+    // Single-button continuous hold tracking (e.g. volume ramping)
+    uint32_t _leftHoldStartMs   = 0;
+    uint32_t _leftLastRepeatMs  = 0;
+    uint32_t _rightHoldStartMs  = 0;
+    uint32_t _rightLastRepeatMs = 0;
 
     // Dual-button combo tracking
     bool     _comboHolding     = false;
@@ -121,6 +129,8 @@ public:
     void onRightDouble(SimpleCb cb)   { _onRightDouble   = cb; }
     void onLongLeft(SimpleCb cb)      { _onLongLeft      = cb; }
     void onLongRight(SimpleCb cb)     { _onLongRight     = cb; }
+    void onLeftHolding(SimpleCb cb)   { _onLeftHolding   = cb; }
+    void onRightHolding(SimpleCb cb)  { _onRightHolding  = cb; }
     void onBothClick(SimpleCb cb)     { _onBothClick     = cb; }
     void onBothDouble(SimpleCb cb)    { _onBothDouble    = cb; }
     void onBothLong(SimpleCb cb)      { _onBothLong      = cb; }
@@ -139,6 +149,8 @@ public:
 
         uint32_t now = millis();
         if (lPressed && rPressed) {
+            _leftHoldStartMs = 0;
+            _rightHoldStartMs = 0;
             if (!_comboHolding) {
                 _comboHolding    = true;
                 _comboStartMs    = now;
@@ -165,6 +177,35 @@ public:
             }
         } else {
             _comboHolding = false;
+
+            // Single button continuous press-and-hold (e.g. volume ramp)
+            if (lPressed && !rPressed) {
+                if (_leftHoldStartMs == 0) {
+                    _leftHoldStartMs = now;
+                    _leftLastRepeatMs = now;
+                } else if (now - _leftHoldStartMs >= 450) {
+                    if (now - _leftLastRepeatMs >= 100) {
+                        _leftLastRepeatMs = now;
+                        if (_onLeftHolding) _onLeftHolding();
+                    }
+                }
+            } else {
+                _leftHoldStartMs = 0;
+            }
+
+            if (rPressed && !lPressed) {
+                if (_rightHoldStartMs == 0) {
+                    _rightHoldStartMs = now;
+                    _rightLastRepeatMs = now;
+                } else if (now - _rightHoldStartMs >= 450) {
+                    if (now - _rightLastRepeatMs >= 100) {
+                        _rightLastRepeatMs = now;
+                        if (_onRightHolding) _onRightHolding();
+                    }
+                }
+            } else {
+                _rightHoldStartMs = 0;
+            }
         }
     }
 };

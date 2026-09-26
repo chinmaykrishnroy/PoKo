@@ -6,10 +6,13 @@
 #include "PokoAppState.h"
 #include "PokoPins.h"
 #include "PokoDrivers.h"
+#include "PokoTheme.h"
+#include "SnapPlayer.h"
 
 // ─────────────────────────────────────────────────────────────
 //  SSyncApp — Direct Snapcast Client UI (128×128)
-//  Shows connection status, volume, server, and audio stream info.
+//  Connects to Snapcast server (default 192.168.0.20:1780 / 1704)
+//  with client name PoKo and full ESP-IDF 5.x I2S audio playback.
 // ─────────────────────────────────────────────────────────────
 
 extern Preferences prefs;
@@ -19,88 +22,97 @@ private:
     Arduino_GFX*    _gfx;
     AppSwitchFn     _exit;
     Arduino_Canvas* _canvas = nullptr;
+    SnapPlayer*     _player = nullptr;
 
-    bool     _active    = false;
-    bool     _dirty     = true;
-    bool     _connected = false;
-    bool     _playing   = false;
-    bool     _muted     = false;
-    int      _volume    = 75;
+    bool     _active     = false;
+    bool     _dirty      = true;
     uint32_t _lastDrawMs = 0;
-
-    String   _serverHost = "192.168.1.100";
-    uint16_t _serverPort = 1704;
-    String   _codec      = "FLAC 48k";
 
     void renderToCanvas() {
         if (!_canvas) return;
+        const auto& theme = currentTheme();
 
-        _canvas->fillScreen(POKO_CLR_BG);
+        bool connected = _player ? _player->isConnected() : false;
+        bool playing   = _player ? _player->isPlaying() : false;
+        bool muted     = _player ? _player->isMuted() : false;
+        int  volume    = _player ? _player->getVolume() : 75;
+        String srvHost = _player ? _player->getServerHost() : "192.168.0.20";
+        String codec   = _player ? _player->getCodec() : "FLAC/Opus";
+        int32_t bufMs  = _player ? _player->getBufferMs() : 1000;
+        int32_t latMs  = _player ? _player->getLatencyMs() : 0;
+
+        _canvas->fillScreen(theme.bg);
 
         // Header (y=0..13)
-        _canvas->fillRect(0, 0, 128, 14, 0x0841);
+        _canvas->fillRect(0, 0, 128, 14, theme.headerBg);
         _canvas->setFont(u8g2_font_helvB08_tf);
-        _canvas->setTextColor(POKO_CLR_ACCENT, 0x0841);
+        _canvas->setTextColor(POKO_CLR_GREEN, theme.headerBg);
         _canvas->setCursor(3, 11);
         _canvas->print("SSync");
 
         // Status badge right side
-        uint16_t badgeCol = _connected ? (_playing ? POKO_CLR_GREEN : POKO_CLR_ACCENT) : POKO_CLR_ERR;
-        const char* badgeText = _connected ? (_playing ? "PLAYING" : "IDLE") : "OFFLINE";
+        uint16_t badgeCol = connected ? (playing ? POKO_CLR_GREEN : theme.accent) : POKO_CLR_ERR;
+        const char* badgeText = connected ? (playing ? "PLAY" : "IDLE") : "OFFLINE";
         _canvas->setFont(u8g2_font_5x7_tf);
-        _canvas->setTextColor(badgeCol, 0x0841);
+        _canvas->setTextColor(badgeCol, theme.headerBg);
         int16_t x1, y1; uint16_t w, h;
         _canvas->getTextBounds(badgeText, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(125 - w, 11);
         _canvas->print(badgeText);
 
-        // Status Card (y=18..44)
-        _canvas->drawRoundRect(6, 18, 116, 26, 4, 0x18C3);
+        // Status Card (y=18..46)
+        _canvas->drawRoundRect(4, 18, 120, 30, 4, theme.line);
+        _canvas->fillRoundRect(5, 19, 118, 28, 3, theme.surface);
+
         _canvas->setFont(u8g2_font_profont10_mf);
-        _canvas->setTextColor(POKO_CLR_DIM, POKO_CLR_BG);
-        _canvas->setCursor(12, 30);
+        _canvas->setTextColor(theme.muted, theme.surface);
+        _canvas->setCursor(8, 29);
         _canvas->print("Server:");
-        _canvas->setTextColor(POKO_CLR_TEXT, POKO_CLR_BG);
-        _canvas->setCursor(54, 30);
-        String srv = _serverHost.length() > 11 ? _serverHost.substring(0, 10) + ".." : _serverHost;
+        _canvas->setTextColor(theme.text, theme.surface);
+        _canvas->setCursor(50, 29);
+        String srv = srvHost.length() > 11 ? srvHost.substring(0, 10) + ".." : srvHost;
         _canvas->print(srv);
 
-        _canvas->setTextColor(POKO_CLR_DIM, POKO_CLR_BG);
-        _canvas->setCursor(12, 40);
+        _canvas->setTextColor(theme.muted, theme.surface);
+        _canvas->setCursor(8, 41);
         _canvas->print("Codec:");
-        _canvas->setTextColor(POKO_CLR_ACCENT, POKO_CLR_BG);
-        _canvas->setCursor(54, 40);
-        _canvas->print(_codec);
+        _canvas->setTextColor(theme.accent, theme.surface);
+        _canvas->setCursor(50, 41);
+        _canvas->print(codec);
 
-        // Sync & Buffer Info (y=48..68)
+        // Sync & Buffer Info (y=52..68)
         _canvas->setFont(u8g2_font_5x7_tf);
-        _canvas->setTextColor(POKO_CLR_DIM, POKO_CLR_BG);
-        _canvas->setCursor(12, 58);
-        _canvas->print("LATENCY: 0 ms");
-        _canvas->setCursor(12, 68);
-        _canvas->print("BUFFER: 1000 ms");
+        _canvas->setTextColor(theme.muted, theme.bg);
+        char bufStr[32];
+        snprintf(bufStr, sizeof(bufStr), "LATENCY: %ld ms", (long)latMs);
+        _canvas->setCursor(8, 58);
+        _canvas->print(bufStr);
 
-        // Volume Bar (y=76..102)
+        snprintf(bufStr, sizeof(bufStr), "BUFFER:  %ld ms", (long)bufMs);
+        _canvas->setCursor(8, 68);
+        _canvas->print(bufStr);
+
+        // Volume Bar (y=74..104)
         _canvas->setFont(u8g2_font_profont10_mf);
-        _canvas->setTextColor(POKO_CLR_TEXT, POKO_CLR_BG);
-        _canvas->setCursor(12, 84);
-        char volBuf[16];
-        snprintf(volBuf, sizeof(volBuf), "Volume: %d%%%s", _volume, _muted ? " (MUTED)" : "");
+        _canvas->setTextColor(theme.text, theme.bg);
+        _canvas->setCursor(8, 84);
+        char volBuf[24];
+        snprintf(volBuf, sizeof(volBuf), "Volume: %d%%%s", volume, muted ? " (MUTED)" : "");
         _canvas->print(volBuf);
 
         // Progress bar frame
-        _canvas->drawRect(12, 90, 104, 10, RGB565_WHITE);
-        int filled = (100 * _volume) / 100;
+        _canvas->drawRect(8, 90, 112, 10, theme.line);
+        int filled = (108 * volume) / 100;
         if (filled > 0) {
-            _canvas->fillRect(14, 92, filled, 6, _muted ? POKO_CLR_DIM : POKO_CLR_GREEN);
+            _canvas->fillRect(10, 92, filled, 6, muted ? theme.muted : POKO_CLR_GREEN);
         }
 
         // Footer (y=114..127)
-        _canvas->fillRect(0, 114, 128, 14, 0x0841);
-        _canvas->drawFastHLine(0, 114, 128, 0x18C3);
+        _canvas->fillRect(0, 114, 128, 14, theme.headerBg);
+        _canvas->drawFastHLine(0, 114, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
-        _canvas->setTextColor(POKO_CLR_DIM, 0x0841);
-        const char* hint = "Boot:Vol- Key:Vol+ D-Boot:X";
+        _canvas->setTextColor(theme.footerText, theme.headerBg);
+        const char* hint = "Boot:V-  Key:V+  D-Key:Mute";
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
         _canvas->print(hint);
@@ -117,20 +129,23 @@ public:
             _canvas = new Arduino_Canvas(128, 128, _gfx, 0, 0);
             _canvas->begin();
         }
-        _serverHost = prefs.getString("snap_host", "192.168.1.100");
-        _serverPort = prefs.getInt("snap_port", 1704);
-        _volume     = prefs.getInt("volume", 75);
+        if (!_player) {
+            _player = new SnapPlayer(nullptr, &prefs);
+            _player->begin();
+        }
     }
 
     void load() {
         _active = true;
         _dirty  = true;
         begin();
+        if (_player) _player->load();
         renderToCanvas();
     }
 
     void unload() {
         _active = false;
+        if (_player) _player->unload();
         if (_canvas) {
             delete _canvas;
             _canvas = nullptr;
@@ -139,20 +154,36 @@ public:
 
     bool isLoaded() const { return _active; }
 
+    SnapPlayer* getPlayer() { return _player; }
+
     void onLeft() {
-        if (_volume > 0) {
-            _volume = max(0, _volume - 5);
-            prefs.putInt("volume", _volume);
-            es8311SetVolume(_volume);
+        if (_player) {
+            int curVol = _player->getVolume();
+            _player->setVolumePercent(max(0, curVol - 5));
             _dirty = true;
         }
     }
 
     void onRight() {
-        if (_volume < 100) {
-            _volume = min(100, _volume + 5);
-            prefs.putInt("volume", _volume);
-            es8311SetVolume(_volume);
+        if (_player) {
+            int curVol = _player->getVolume();
+            _player->setVolumePercent(min(100, curVol + 5));
+            _dirty = true;
+        }
+    }
+
+    void volumeRampDown() {
+        if (_player) {
+            int curVol = _player->getVolume();
+            _player->setVolumePercent(max(0, curVol - 2));
+            _dirty = true;
+        }
+    }
+
+    void volumeRampUp() {
+        if (_player) {
+            int curVol = _player->getVolume();
+            _player->setVolumePercent(min(100, curVol + 2));
             _dirty = true;
         }
     }
@@ -162,23 +193,21 @@ public:
     }
 
     void onEnter() {
-        _muted = !_muted;
-        es8311Mute(_muted);
-        _dirty = true;
+        if (_player) {
+            _player->toggleMute();
+            _dirty = true;
+        }
     }
 
     void onLongRight() {
-        _muted = !_muted;
-        es8311Mute(_muted);
-        _dirty = true;
+        onEnter();
     }
 
     void update() {
         if (!_active) return;
         uint32_t now = millis();
-        if (now - _lastDrawMs >= 1000) {
+        if (now - _lastDrawMs >= 500) {
             _lastDrawMs = now;
-            _connected = (WiFi.status() == WL_CONNECTED);
             _dirty = true;
         }
         if (!_dirty) return;
@@ -188,12 +217,16 @@ public:
 
     // REST API status
     String apiJson() {
+        if (!_player) return "{\"connected\":false,\"playing\":false}";
         String j = "{";
-        j += "\"connected\":" + String(_connected ? "true" : "false") + ",";
-        j += "\"playing\":" + String(_playing ? "true" : "false") + ",";
-        j += "\"volume\":" + String(_volume) + ",";
-        j += "\"server\":\"" + _serverHost + ":" + String(_serverPort) + "\",";
-        j += "\"codec\":\"" + _codec + "\"";
+        j += "\"connected\":" + String(_player->isConnected() ? "true" : "false") + ",";
+        j += "\"playing\":" + String(_player->isPlaying() ? "true" : "false") + ",";
+        j += "\"volume\":" + String(_player->getVolume()) + ",";
+        j += "\"muted\":" + String(_player->isMuted() ? "true" : "false") + ",";
+        j += "\"server\":\"" + _player->getServerHost() + ":" + String(_player->getServerPort()) + "\",";
+        j += "\"codec\":\"" + _player->getCodec() + "\",";
+        j += "\"buffer_ms\":" + String(_player->getBufferMs()) + ",";
+        j += "\"latency_ms\":" + String(_player->getLatencyMs());
         j += "}";
         return j;
     }

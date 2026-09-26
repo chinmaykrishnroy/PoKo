@@ -6,6 +6,7 @@
 #include "PokoAppState.h"
 #include "PokoPins.h"
 #include "PokoDrivers.h"
+#include "PokoTheme.h"
 
 // ─────────────────────────────────────────────────────────────
 //  MusicApp — Audio Streaming Player UI (128×128)
@@ -33,19 +34,20 @@ private:
 
     void renderToCanvas() {
         if (!_canvas) return;
+        const auto& theme = currentTheme();
 
-        _canvas->fillScreen(POKO_CLR_BG);
+        _canvas->fillScreen(theme.bg);
 
         // Header (y=0..13)
-        _canvas->fillRect(0, 0, 128, 14, 0x0841);
+        _canvas->fillRect(0, 0, 128, 14, theme.headerBg);
         _canvas->setFont(u8g2_font_helvB08_tf);
-        _canvas->setTextColor(0xF81F, 0x0841);
+        _canvas->setTextColor(0xF81F, theme.headerBg);
         _canvas->setCursor(3, 11);
         _canvas->print("Music");
 
         // Status text
         _canvas->setFont(u8g2_font_5x7_tf);
-        _canvas->setTextColor(_playing ? POKO_CLR_GREEN : POKO_CLR_DIM, 0x0841);
+        _canvas->setTextColor(_playing ? POKO_CLR_GREEN : theme.muted, theme.headerBg);
         const char* st = _playing ? "PLAYING" : "PAUSED";
         int16_t x1, y1; uint16_t w, h;
         _canvas->getTextBounds(st, 0, 0, &x1, &y1, &w, &h);
@@ -54,22 +56,22 @@ private:
 
         // Album Art / Graphic Placeholder (y=18..52)
         _canvas->drawRoundRect(46, 18, 36, 34, 6, 0xF81F);
-        _canvas->fillRoundRect(48, 20, 32, 30, 4, 0x0821);
+        _canvas->fillRoundRect(48, 20, 32, 30, 4, theme.surface);
         _canvas->setFont(u8g2_font_helvB14_tf);
-        _canvas->setTextColor(0xF81F, 0x0821);
+        _canvas->setTextColor(0xF81F, theme.surface);
         _canvas->setCursor(58, 42);
         _canvas->print(_playing ? ">" : "||");
 
         // Track Title (y=62)
         _canvas->setFont(u8g2_font_helvB08_tf);
-        _canvas->setTextColor(POKO_CLR_TEXT, POKO_CLR_BG);
+        _canvas->setTextColor(theme.text, theme.bg);
         _canvas->getTextBounds(_title, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 64);
         _canvas->print(_title);
 
         // Artist (y=74)
         _canvas->setFont(u8g2_font_profont10_mf);
-        _canvas->setTextColor(POKO_CLR_DIM, POKO_CLR_BG);
+        _canvas->setTextColor(theme.muted, theme.bg);
         _canvas->getTextBounds(_artist, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 76);
         _canvas->print(_artist);
@@ -81,7 +83,7 @@ private:
         }
 
         // Progress Bar (y=98..104)
-        _canvas->drawRect(14, 98, 100, 5, 0x18C3);
+        _canvas->drawRect(14, 98, 100, 5, theme.line);
         int progW = (_trackLen > 0) ? (96 * (_trackPos % _trackLen)) / _trackLen : 0;
         _canvas->fillRect(16, 99, progW, 3, 0xF81F);
 
@@ -91,17 +93,17 @@ private:
                  (unsigned long)(_trackPos / 60), (unsigned long)(_trackPos % 60),
                  (unsigned long)(_trackLen / 60), (unsigned long)(_trackLen % 60));
         _canvas->setFont(u8g2_font_5x7_tf);
-        _canvas->setTextColor(POKO_CLR_DIM, POKO_CLR_BG);
+        _canvas->setTextColor(theme.muted, theme.bg);
         _canvas->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 110);
         _canvas->print(timeStr);
 
         // Footer (y=114..127)
-        _canvas->fillRect(0, 114, 128, 14, 0x0841);
-        _canvas->drawFastHLine(0, 114, 128, 0x18C3);
+        _canvas->fillRect(0, 114, 128, 14, theme.headerBg);
+        _canvas->drawFastHLine(0, 114, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
-        _canvas->setTextColor(POKO_CLR_DIM, 0x0841);
-        const char* hint = "D-Key:Play/Pause  D-Boot:X";
+        _canvas->setTextColor(theme.footerText, theme.headerBg);
+        const char* hint = "Boot:V-  Key:V+  D-Key:Play";
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
         _canvas->print(hint);
@@ -142,7 +144,7 @@ public:
         if (_volume > 0) {
             _volume = max(0, _volume - 5);
             prefs.putInt("volume", _volume);
-            es8311SetVolume(_volume);
+            setScaledVolume(_volume);
             _dirty = true;
         }
     }
@@ -151,7 +153,25 @@ public:
         if (_volume < 100) {
             _volume = min(100, _volume + 5);
             prefs.putInt("volume", _volume);
-            es8311SetVolume(_volume);
+            setScaledVolume(_volume);
+            _dirty = true;
+        }
+    }
+
+    void volumeRampDown() {
+        if (_volume > 0) {
+            _volume = max(0, _volume - 2);
+            prefs.putInt("volume", _volume);
+            setScaledVolume(_volume);
+            _dirty = true;
+        }
+    }
+
+    void volumeRampUp() {
+        if (_volume < 100) {
+            _volume = min(100, _volume + 2);
+            prefs.putInt("volume", _volume);
+            setScaledVolume(_volume);
             _dirty = true;
         }
     }

@@ -5,7 +5,9 @@
 #include "PokoAppState.h"
 #include "PokoDrivers.h"
 #include "PokoWebUI.h"
+#include "PokoTheme.h"
 #include "InfoApp.h"
+#include "SSyncApp.h"
 
 // ─────────────────────────────────────────────────────────────
 //  PokoAPI — Master REST API & Web Dashboard backend
@@ -14,6 +16,7 @@
 extern AppState activeApp;
 extern void onAppChange(AppState newState);
 extern InfoApp* infoAppInstance;
+extern SSyncApp* ssyncAppInstance;
 extern void handleDriverReset();
 
 class PokoAPI {
@@ -42,12 +45,21 @@ public:
             json += "\"psram_free\":" + String(ESP.getFreePsram()) + ",";
             json += "\"uptime_ms\":" + String(millis()) + ",";
             json += "\"cpu_mhz\":" + String(getCpuFrequencyMhz()) + ",";
-            json += "\"app_state\":" + String((int)activeApp);
+            json += "\"app_state\":" + String((int)activeApp) + ",";
+            json += "\"theme\":\"" + String(isDarkTheme() ? "dark" : "light") + "\",";
+            json += "\"master_vol\":" + String(getMasterVolumeLimit()) + ",";
+            json += "\"app_vol\":" + String(getCurrentAppVolume()) + ",";
+            json += "\"brightness\":" + String(_prefs->getInt("brightness", 80)) + ",";
+            json += "\"gallery_timer\":" + String(_prefs->getInt("gallery_timer", 0)) + ",";
+            String snapHost = _prefs->getString("snap_host", "192.168.0.20");
+            int snapPort = _prefs->getInt("snap_port", 1780);
+            json += "\"snap_host\":\"" + snapHost + "\",";
+            json += "\"snap_port\":" + String(snapPort);
             json += "}";
             _server->send(200, "application/json", json);
         });
 
-        // System settings (brightness, volume)
+        // System settings (brightness, app volume, master volume limiter)
         _server->on("/api/sys", HTTP_GET, [this]() {
             if (_server->hasArg("brightness")) {
                 int b = constrain(_server->arg("brightness").toInt(), 1, 100);
@@ -57,12 +69,74 @@ public:
             if (_server->hasArg("volume")) {
                 int v = constrain(_server->arg("volume").toInt(), 0, 100);
                 _prefs->putInt("volume", v);
-                es8311SetVolume(v);
+                setScaledVolume(v);
+            }
+            if (_server->hasArg("master_vol")) {
+                int mv = constrain(_server->arg("master_vol").toInt(), 1, 100);
+                _prefs->putInt("master_vol", mv);
+                setMasterVolumeLimit(mv);
             }
             int curB = _prefs->getInt("brightness", 80);
-            int curV = _prefs->getInt("volume", 75);
-            String resp = "{\"ok\":true,\"brightness\":" + String(curB) + ",\"volume\":" + String(curV) + "}";
+            int curV = getCurrentAppVolume();
+            int curM = getMasterVolumeLimit();
+            String resp = "{\"ok\":true,\"brightness\":" + String(curB) +
+                          ",\"volume\":" + String(curV) +
+                          ",\"master_vol\":" + String(curM) + "}";
             _server->send(200, "application/json", resp);
+        });
+
+        // Theme endpoint (Dark / Light)
+        _server->on("/api/theme", HTTP_GET, [this]() {
+            if (_server->hasArg("mode")) {
+                String m = _server->arg("mode");
+                if (m == "dark") {
+                    setPokoTheme(true);
+                    _prefs->putString("ui_theme", "dark");
+                } else if (m == "light") {
+                    setPokoTheme(false);
+                    _prefs->putString("ui_theme", "light");
+                }
+            }
+            String mode = isDarkTheme() ? "dark" : "light";
+            _server->send(200, "application/json", "{\"ok\":true,\"theme\":\"" + mode + "\"}");
+        });
+
+        // Snapclient / SSync config & status
+        _server->on("/api/snap", HTTP_GET, [this]() {
+            if (_server->hasArg("host")) {
+                String h = _server->arg("host");
+                uint16_t p = _server->hasArg("port") ? _server->arg("port").toInt() : 1780;
+                _prefs->putString("snap_host", h);
+                _prefs->putInt("snap_port", p);
+                // Binary streaming port for Snapcast is 1704 if 1780 (control port) is entered
+                uint16_t streamPort = (p == 1780) ? 1704 : p;
+                if (ssyncAppInstance && ssyncAppInstance->getPlayer()) {
+                    ssyncAppInstance->getPlayer()->setServer(h, streamPort);
+                }
+            }
+            if (_server->hasArg("vol")) {
+                int v = constrain(_server->arg("vol").toInt(), 0, 100);
+                if (ssyncAppInstance && ssyncAppInstance->getPlayer()) {
+                    ssyncAppInstance->getPlayer()->setVolumePercent(v);
+                }
+            }
+            if (_server->hasArg("mute")) {
+                if (ssyncAppInstance && ssyncAppInstance->getPlayer()) {
+                    ssyncAppInstance->getPlayer()->toggleMute();
+                }
+            }
+            String j = (ssyncAppInstance) ? ssyncAppInstance->apiJson() : "{}";
+            _server->send(200, "application/json", j);
+        });
+
+        // Gallery slideshow settings
+        _server->on("/api/gallery", HTTP_GET, [this]() {
+            if (_server->hasArg("timer")) {
+                int t = constrain(_server->arg("timer").toInt(), 0, 3600);
+                _prefs->putInt("gallery_timer", t);
+            }
+            int t = _prefs->getInt("gallery_timer", 0);
+            _server->send(200, "application/json", "{\"ok\":true,\"timer\":" + String(t) + "}");
         });
 
         // App switch

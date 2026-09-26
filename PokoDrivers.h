@@ -103,6 +103,29 @@ inline void es8311SetVolume(int vol0to100) {
     }
 }
 
+static int _masterVolumeLimit = 100;
+static int _currentAppVolume  = 75;
+
+inline void setMasterVolumeLimit(int limit) {
+    _masterVolumeLimit = constrain(limit, 0, 100);
+    int effectiveVol = (_currentAppVolume * _masterVolumeLimit) / 100;
+    es8311SetVolume(effectiveVol);
+}
+
+inline int getMasterVolumeLimit() {
+    return _masterVolumeLimit;
+}
+
+inline void setScaledVolume(int appVol0to100) {
+    _currentAppVolume = constrain(appVol0to100, 0, 100);
+    int effectiveVol = (_currentAppVolume * _masterVolumeLimit) / 100;
+    es8311SetVolume(effectiveVol);
+}
+
+inline int getCurrentAppVolume() {
+    return _currentAppVolume;
+}
+
 inline void es8311Mute(bool mute) {
     if (_es8311Handle) es8311_voice_mute(_es8311Handle, mute);
 }
@@ -116,7 +139,7 @@ inline bool reinitES8311(uint32_t sampleRate = 44100) {
 }
 
 // ── I2S Driver (Modern ESP-IDF 5.x / Arduino 3.x) ────────────
-static i2s_chan_handle_t poko_tx_handle = nullptr;
+inline i2s_chan_handle_t poko_tx_handle = nullptr;
 
 inline esp_err_t initI2S(uint32_t sampleRate = 44100,
                           uint8_t  channels   = 2,

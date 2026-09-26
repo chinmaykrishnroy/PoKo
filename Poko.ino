@@ -143,9 +143,39 @@ void onBtnRight() {
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->onRight();
 }
 
+void onBtnLeftHolding() {
+    if (activeApp == STATE_SSYNC && ssyncAppInstance) {
+        ssyncAppInstance->volumeRampDown();
+    } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {
+        musicAppInstance->volumeRampDown();
+    } else {
+        int cur = getCurrentAppVolume();
+        if (cur > 0) {
+            setScaledVolume(max(0, cur - 2));
+            prefs.putInt("volume", getCurrentAppVolume());
+        }
+    }
+}
+
+void onBtnRightHolding() {
+    if (activeApp == STATE_SSYNC && ssyncAppInstance) {
+        ssyncAppInstance->volumeRampUp();
+    } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {
+        musicAppInstance->volumeRampUp();
+    } else {
+        int cur = getCurrentAppVolume();
+        if (cur < 100) {
+            setScaledVolume(min(100, cur + 2));
+            prefs.putInt("volume", getCurrentAppVolume());
+        }
+    }
+}
+
 void onBtnLeftDouble() {
-    Serial.println("[action] Left Double-Click -> Exit to launcher");
-    if (activeApp != STATE_LAUNCHER) {
+    Serial.println("[action] Left Double-Click -> Exit / Back");
+    if (activeApp == STATE_GALLERY_UI && galleryAppInstance) {
+        galleryAppInstance->onBack();
+    } else if (activeApp != STATE_LAUNCHER) {
         onAppChange(STATE_LAUNCHER);
     }
 }
@@ -218,6 +248,10 @@ void setup() {
     // Preferences & Settings
     prefs.begin("poko", false);
 
+    // 0. Theme Init
+    String savedTheme = prefs.getString("ui_theme", "dark");
+    setPokoTheme(savedTheme != "light");
+
     // 1. Centralized Display Init
     createDisplay();
     if (!initDisplay(pokoGfx)) {
@@ -233,8 +267,10 @@ void setup() {
 
     // 3. Audio Codec (ES8311)
     initES8311(44100);
+    int savedMaster = prefs.getInt("master_vol", 100);
+    setMasterVolumeLimit(savedMaster);
     int savedVol = prefs.getInt("volume", 75);
-    es8311SetVolume(savedVol);
+    setScaledVolume(savedVol);
 
     // 4. WS2812B LEDs
     initLEDs();
@@ -245,6 +281,8 @@ void setup() {
     btnInput.onRight(onBtnRight);
     btnInput.onLeftDouble(onBtnLeftDouble);
     btnInput.onRightDouble(onBtnRightDouble);
+    btnInput.onLeftHolding(onBtnLeftHolding);
+    btnInput.onRightHolding(onBtnRightHolding);
     btnInput.onLongRight(onBtnLongRight);
     btnInput.onBothClick(onComboBothClick);
     btnInput.onBothDouble(onComboBothDouble);

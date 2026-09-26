@@ -110,24 +110,25 @@ private:
 
     void renderToCanvas() {
         if (!_canvas) return;
+        const auto& theme = currentTheme();
 
         // Header (y=0..13)
-        _canvas->fillRect(0, 0, 128, 13, 0x0841);
+        _canvas->fillRect(0, 0, 128, 13, theme.headerBg);
         _canvas->setFont(u8g2_font_profont10_mf);
-        _canvas->setTextColor(POKO_CLR_ACCENT, 0x0841);
+        _canvas->setTextColor(theme.headerText, theme.headerBg);
         _canvas->setCursor(3, 10);
         _canvas->print("System Info");
 
         char countBuf[8];
         snprintf(countBuf, sizeof(countBuf), "%d/%d", _scroll + 1, _rowCount);
-        _canvas->setTextColor(POKO_CLR_DIM, 0x0841);
+        _canvas->setTextColor(theme.muted, theme.headerBg);
         int16_t x1, y1; uint16_t w, h;
         _canvas->getTextBounds(countBuf, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(125 - w, 10);
         _canvas->print(countBuf);
 
         // Rows (y=14..113)
-        _canvas->fillRect(0, TOP_Y, 128, FOOTER_Y - TOP_Y, POKO_CLR_BG);
+        _canvas->fillRect(0, TOP_Y, 128, FOOTER_Y - TOP_Y, theme.bg);
         _canvas->setFont(u8g2_font_profont10_mf);
 
         for (uint8_t i = 0; i < ROWS_VISIBLE; i++) {
@@ -137,14 +138,14 @@ private:
             int16_t textY = rowY + ROW_H - 3;
 
             if (i % 2 == 0) {
-                _canvas->fillRect(0, rowY, 124, ROW_H, 0x0821);
+                _canvas->fillRect(0, rowY, 124, ROW_H, theme.surface);
             }
 
-            _canvas->setTextColor(POKO_CLR_DIM, i % 2 == 0 ? 0x0821 : POKO_CLR_BG);
+            _canvas->setTextColor(theme.muted, i % 2 == 0 ? theme.surface : theme.bg);
             _canvas->setCursor(3, textY);
             _canvas->print(_rows[ri].label);
 
-            _canvas->setTextColor(_rows[ri].valColor, i % 2 == 0 ? 0x0821 : POKO_CLR_BG);
+            _canvas->setTextColor(_rows[ri].valColor, i % 2 == 0 ? theme.surface : theme.bg);
             _canvas->getTextBounds(_rows[ri].value, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(123 - w, textY);
             _canvas->print(_rows[ri].value);
@@ -154,15 +155,15 @@ private:
         if (_rowCount > ROWS_VISIBLE) {
             uint8_t barH = (ROWS_VISIBLE * (FOOTER_Y - TOP_Y)) / _rowCount;
             uint8_t barY = TOP_Y + (_scroll * (FOOTER_Y - TOP_Y)) / _rowCount;
-            _canvas->drawFastVLine(126, TOP_Y, FOOTER_Y - TOP_Y, POKO_CLR_DIM);
-            _canvas->drawFastVLine(126, barY, barH, POKO_CLR_ACCENT);
+            _canvas->drawFastVLine(126, TOP_Y, FOOTER_Y - TOP_Y, theme.line);
+            _canvas->drawFastVLine(126, barY, barH, theme.accent);
         }
 
         // Footer (y=114..127) - Filled with navigation guide
-        _canvas->fillRect(0, FOOTER_Y, 128, 14, 0x0841);
-        _canvas->drawFastHLine(0, FOOTER_Y, 128, 0x18C3);
+        _canvas->fillRect(0, FOOTER_Y, 128, 14, theme.headerBg);
+        _canvas->drawFastHLine(0, FOOTER_Y, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
-        _canvas->setTextColor(POKO_CLR_DIM, 0x0841);
+        _canvas->setTextColor(theme.footerText, theme.headerBg);
         const char* footerHint = "Boot:Up  Key:Dn  D-Boot:X";
         _canvas->getTextBounds(footerHint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
