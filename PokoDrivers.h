@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <Wire.h>
-#include <driver/i2s.h>
+#include <driver/i2s_std.h>
 #include <driver/ledc.h>
 #include <Arduino_GFX_Library.h>
 #include "PokoPins.h"
@@ -115,52 +115,80 @@ inline bool reinitES8311(uint32_t sampleRate = 44100) {
     return initES8311(sampleRate);
 }
 
-// ── I2S Driver ───────────────────────────────────────────────
-//  Shared I2S port. Call initI2S() before using SnapPlayer /
-//  TCPAudio / SyncedAVPlayer. One app owns I2S at a time.
-static const i2s_port_t POKO_I2S_PORT = I2S_NUM_0;
+// ── I2S Driver (Modern ESP-IDF 5.x / Arduino 3.x) ────────────
+static i2s_chan_handle_t poko_tx_handle = nullptr;
 
 inline esp_err_t initI2S(uint32_t sampleRate = 44100,
                           uint8_t  channels   = 2,
                           uint8_t  bitsPerSample = 16) {
-    i2s_config_t cfg = {
-        .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
-        .sample_rate          = sampleRate,
-        .bits_per_sample      = (i2s_bits_per_sample_t)bitsPerSample,
-        .channel_format       = (channels == 1)
-                                    ? I2S_CHANNEL_FMT_ALL_LEFT
-                                    : I2S_CHANNEL_FMT_RIGHT_LEFT,
-        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-        .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count        = 8,
-        .dma_buf_len          = 512,
-        .use_apll             = false,
-        .tx_desc_auto_clear   = true,
-        .fixed_mclk           = 0
+    if (poko_tx_handle) return ESP_OK;
+
+    i2s_chan_config_t chan_cfg = {
+        .id = I2S_NUM_0,
+        .role = I2S_ROLE_MASTER,
+        .dma_desc_num = 6,
+        .dma_frame_num = 240,
+        .auto_clear_after_cb = true,
+        .auto_clear_before_cb = false,
+        .intr_priority = 0,
     };
 
-    i2s_pin_config_t pins = {
-        .mck_io_num   = POKO_PIN_I2S_MCLK,
-        .bck_io_num   = POKO_PIN_I2S_BCLK,
-        .ws_io_num    = POKO_PIN_I2S_LRC,
-        .data_out_num = POKO_PIN_I2S_DOUT,
-        .data_in_num  = I2S_PIN_NO_CHANGE
-    };
-
-    esp_err_t err = i2s_driver_install(POKO_I2S_PORT, &cfg, 0, nullptr);
+    esp_err_t err = i2s_new_channel(&chan_cfg, &poko_tx_handle, nullptr);
     if (err != ESP_OK) {
-        Serial.printf("[I2S] driver install failed: %d\n", err);
+        Serial.printf("[I2S] new_channel failed: %d\n", err);
         return err;
     }
-    err = i2s_set_pin(POKO_I2S_PORT, &pins);
+
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = {
+            .sample_rate_hz = sampleRate,
+            .clk_src = I2S_CLK_SRC_DEFAULT,
+            .ext_clk_freq_hz = 0,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256
+        },
+        .slot_cfg = {
+            .data_bit_width = (i2s_data_bit_width_t)bitsPerSample,
+            .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
+            .slot_mode = (channels == 1) ? I2S_SLOT_MODE_MONO : I2S_SLOT_MODE_STEREO,
+            .slot_mask = I2S_STD_SLOT_BOTH,
+            .ws_width = (uint32_t)bitsPerSample,
+            .ws_pol = false,
+            .bit_shift = true,
+            .left_align = true,
+            .big_endian = false,
+            .bit_order_lsb = false
+        },
+        .gpio_cfg = {
+            .mclk = (gpio_num_t)POKO_PIN_I2S_MCLK,
+            .bclk = (gpio_num_t)POKO_PIN_I2S_BCLK,
+            .ws   = (gpio_num_t)POKO_PIN_I2S_LRC,
+            .dout = (gpio_num_t)POKO_PIN_I2S_DOUT,
+            .din  = (gpio_num_t)I2S_GPIO_UNUSED,
+            .invert_flags = { .mclk_inv = false, .bclk_inv = false, .ws_inv = false }
+        }
+    };
+
+    err = i2s_channel_init_std_mode(poko_tx_handle, &std_cfg);
     if (err != ESP_OK) {
-        Serial.printf("[I2S] set_pin failed: %d\n", err);
+        Serial.printf("[I2S] channel_init_std_mode failed: %d\n", err);
+        i2s_del_channel(poko_tx_handle);
+        poko_tx_handle = nullptr;
+        return err;
+    }
+
+    err = i2s_channel_enable(poko_tx_handle);
+    if (err != ESP_OK) {
+        Serial.printf("[I2S] channel_enable failed: %d\n", err);
     }
     return err;
 }
 
 inline void deinitI2S() {
-    i2s_driver_uninstall(POKO_I2S_PORT);
+    if (poko_tx_handle) {
+        i2s_channel_disable(poko_tx_handle);
+        i2s_del_channel(poko_tx_handle);
+        poko_tx_handle = nullptr;
+    }
 }
 
 // ── WS2812B LEDs ─────────────────────────────────────────────

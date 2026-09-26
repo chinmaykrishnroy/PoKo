@@ -126,7 +126,6 @@ public:
             HTTPUpload& upload = server->upload();
             if (upload.status == UPLOAD_FILE_START) {
                 if (switchCb) switchCb(STATE_LAUNCHER);
-                esp_task_wdt_reset();
                 _otaTotal = server->clientContentLength();
                 _otaWritten = 0;
                 _otaLastPct = -1;
@@ -135,7 +134,6 @@ public:
                     Update.printError(Serial);
                 }
             } else if (upload.status == UPLOAD_FILE_WRITE) {
-                esp_task_wdt_reset();
                 if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
                     Update.printError(Serial);
                 }

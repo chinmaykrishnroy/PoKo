@@ -328,8 +328,6 @@ void setup() {
 
 // ── Arduino Main Loop ─────────────────────────────────────────
 void loop() {
-    esp_task_wdt_reset();
-
     // Process button input and combos
     btnInput.update();
 
