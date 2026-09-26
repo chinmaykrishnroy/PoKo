@@ -219,13 +219,7 @@ public:
     }
 
     void onEnter() {
-        if (_fullscreen) {
-            _fullscreen = false;
-            _lastActivityMs = millis();
-        } else {
-            _fullscreen = true;
-        }
-        _dirty = true;
+        onBack();
     }
 
     void update() {

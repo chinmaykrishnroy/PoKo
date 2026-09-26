@@ -137,7 +137,7 @@ private:
         _canvas->drawFastHLine(0, 114, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(theme.footerText, theme.headerBg);
-        const char* hint = "Boot:Mode  Key:Style  D-Boot:X";
+        const char* hint = "L:Mode  R:Style  2R:Back";
         int16_t x1, y1; uint16_t w, h;
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
@@ -189,8 +189,7 @@ public:
     }
 
     void onEnter() {
-        _style = (_style + 1) % 2;
-        _dirty = true;
+        onBack();
     }
 
     void update() {
