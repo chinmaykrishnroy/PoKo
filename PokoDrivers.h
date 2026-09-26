@@ -44,7 +44,7 @@ inline bool initDisplay(Arduino_GFX* gfx) {
 // ── Backlight (PWM) ──────────────────────────────────────────
 inline void initBacklight() {
     ledcAttachChannel(POKO_PIN_LCD_BL, POKO_BL_PWM_FREQ, POKO_BL_PWM_RES, POKO_BL_PWM_CHANNEL);
-    ledcWriteChannel(POKO_BL_PWM_CHANNEL, 200); // ~78% default
+    ledcWriteChannel(POKO_BL_PWM_CHANNEL, 0); // Keep OFF initially until UI is rendered
 }
 
 inline void setBacklight(uint8_t duty) {  // 0–255

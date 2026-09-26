@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <WiFi.h>
 #include <U8g2lib.h>
 #include <Arduino_GFX_Library.h>
 #include "PokoAppState.h"
@@ -56,11 +57,28 @@ private:
         _statusCanvas->fillScreen(theme.headerBg);
 
         // Left: WiFi status dot
-        String net = getNetworkStatusMsg();
-        if (net.length() == 0) {
-            _statusCanvas->fillCircle(7, 6, 2, 0x07E0); // Green
-        } else {
-            _statusCanvas->fillCircle(7, 6, 2, 0xFD20); // Amber
+        // Connecting -> Yellow blinking
+        // Connected  -> Solid green
+        // AP waiting -> Red blinking
+        // AP client connected -> Solid red
+        bool blinkPhase = ((millis() / 350) % 2 == 0);
+        uint16_t dotColor = 0;
+        bool showDot = true;
+
+        if (wifiState == STATE_WIFI_CONNECTED) {
+            dotColor = POKO_CLR_GREEN;
+            showDot = true;
+        } else if (wifiState == STATE_WIFI_CONNECTING) {
+            dotColor = RGB565_YELLOW;
+            showDot = blinkPhase;
+        } else if (wifiState == STATE_WIFI_AP) {
+            int clients = WiFi.softAPgetStationNum();
+            dotColor = POKO_CLR_ERR;
+            showDot = (clients > 0) ? true : blinkPhase;
+        }
+
+        if (showDot) {
+            _statusCanvas->fillCircle(7, 6, 2, dotColor);
         }
 
         // Center: "PoKo" branding
@@ -167,10 +185,21 @@ public:
     void begin() {
         _statusCanvas = new Arduino_Canvas(128, 13, _gfx, 0, 0);
         _statusCanvas->begin();
-        redraw();
+        _dirty = true;
     }
 
     void redraw() { _dirty = true; }
+
+    void updateStatusBar() {
+        drawStatusBar();
+    }
+
+    void renderDirect() {
+        _dirty = false;
+        drawStatusBar();
+        drawTile(_selected);
+        drawNavIndicator();
+    }
 
     void setTileSubtitle(AppState s, const char* sub) {
         int idx = stateToTile(s);
@@ -207,7 +236,8 @@ public:
 
     void update() {
         uint32_t now = millis();
-        if (now - _lastStatusMs >= 1000) {
+        uint32_t updateInterval = (wifiState == STATE_WIFI_CONNECTED) ? 1000 : 350;
+        if (now - _lastStatusMs >= updateInterval) {
             _lastStatusMs = now;
             drawStatusBar();
         }

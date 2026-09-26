@@ -50,7 +50,6 @@ PokoAPI*     masterApi           = nullptr;
 AppState activeApp = STATE_LAUNCHER;
 
 // ── WiFi State Machine ────────────────────────────────────────
-enum WifiModeState { STATE_WIFI_CONNECTING, STATE_WIFI_CONNECTED, STATE_WIFI_AP };
 WifiModeState wifiState = STATE_WIFI_CONNECTING;
 unsigned long wifiTimer = 0;
 String savedSSID = "";
@@ -270,10 +269,8 @@ void setup() {
         Serial.println("[display] 128x128 GC9107 ready");
     }
 
-    // 2. Backlight
+    // 2. Backlight (attached, kept OFF until UI is drawn)
     initBacklight();
-    int savedBr = prefs.getInt("brightness", 80);
-    setBacklightPercent(savedBr);
 
     // 3. Audio Codec (ES8311) & I2S Master Clock
     initI2S(44100);
@@ -372,9 +369,13 @@ void setup() {
     // 9. OTA Updates (Web & ArduinoOTA)
     PokoOTA::begin(&server, onAppChange, pokoGfx);
 
-    // Initial state: Start on Launcher
+    // Initial state: Start on Launcher, render directly to display before backlight is enabled
     activeApp = STATE_LAUNCHER;
-    pokoUI->redraw();
+    if (pokoUI) pokoUI->renderDirect();
+
+    // Turn ON Backlight now that the initial UI is fully rendered on screen
+    int savedBr = prefs.getInt("brightness", 80);
+    setBacklightPercent(savedBr);
 
     Serial.println(">>> POKO 7-APP SUITE READY <<<");
 }
@@ -399,7 +400,7 @@ void loop() {
                 otaInit = true;
             }
 
-            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
+            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
         } else if (millis() - wifiTimer > staTimeoutMs) {
             Serial.println("[wifi] connection timeout -> fallback to AP mode");
             WiFi.disconnect();
@@ -409,7 +410,7 @@ void loop() {
             wifiState = STATE_WIFI_AP;
             wifiTimer = millis();
             ensureWebServerStarted("AP fallback (password: 12345678)");
-            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
+            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
         }
     } else if (wifiState == STATE_WIFI_AP) {
         dnsServer.processNextRequest();
@@ -420,7 +421,7 @@ void loop() {
             WiFi.begin(savedSSID.c_str(), savedPass.c_str());
             wifiState = STATE_WIFI_CONNECTING;
             wifiTimer = millis();
-            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
+            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
         } else if (WiFi.softAPgetStationNum() > 0) {
             wifiTimer = millis();
         }
@@ -430,7 +431,7 @@ void loop() {
             Serial.println("[wifi] lost connection -> reconnecting");
             wifiState = STATE_WIFI_CONNECTING;
             wifiTimer = millis();
-            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
+            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
         }
     }
 

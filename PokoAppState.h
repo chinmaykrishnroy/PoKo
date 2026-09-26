@@ -16,6 +16,14 @@ enum AppState {
     STATE_COUNT           // Sentinel — keep last
 };
 
+enum WifiModeState {
+    STATE_WIFI_CONNECTING,
+    STATE_WIFI_CONNECTED,
+    STATE_WIFI_AP
+};
+
+extern WifiModeState wifiState;
+
 // Maps a state to its tile index in the launcher carousel (order must match PokoUI _tiles[])
 inline int stateToTile(AppState s) {
     switch (s) {
