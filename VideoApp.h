@@ -181,13 +181,16 @@ private:
         if (idx < 0 || idx >= _videoCount) return;
 
         if (syncPlugin) {
-            syncPlugin->load();
+            if (!syncPlugin->isLoaded()) {
+                syncPlugin->load();
+                delay(100);
+            }
         }
 
         HTTPClient http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
                      "/api/video/" + String(_videos[idx].id) +
-                     "/play?audio=true&aspect=square&profile=balanced&start=0&switch=false";
+                     "/play?audio=true&aspect=square&profile=balanced&start=0&switch=false&async=true";
         http.begin(url);
         http.setTimeout(3000);
         http.GET();
@@ -200,14 +203,14 @@ private:
 
     void requestStop() {
         HTTPClient http;
-        String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop";
+        String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&async=true";
         http.begin(url);
         http.setTimeout(1500);
         http.GET();
         http.end();
 
         if (syncPlugin) {
-            syncPlugin->unload();
+            syncPlugin->reset();
         }
 
         _mode = MODE_BROWSE;
@@ -255,7 +258,7 @@ private:
             // Draw downloaded JPEG thumbnail centered inside the card
             _activeCanvas = _canvas;
             TJpgDec.setJpgScale(1);
-            TJpgDec.setSwapBytes(true);
+            TJpgDec.setSwapBytes(false);
             TJpgDec.setCallback(tftOutput);
             TJpgDec.drawJpg(24, 18, _thumbBuf, _thumbSize);
             _activeCanvas = nullptr;
@@ -320,6 +323,10 @@ public:
         _mode   = MODE_BROWSE;
         begin();
 
+        if (syncPlugin) {
+            syncPlugin->load();
+        }
+
         if (_videoCount == 0) {
             fetchVideoList();
         } else {
@@ -332,6 +339,9 @@ public:
         _active = false;
         if (_mode == MODE_PLAYING) {
             requestStop();
+        }
+        if (syncPlugin) {
+            syncPlugin->unload();
         }
         if (_canvas) {
             delete _canvas;
@@ -348,29 +358,41 @@ public:
     bool isLoaded() const { return _active; }
 
     void onLeft() {
-        if (_mode == MODE_PLAYING) {
-            int v = getCurrentAppVolume();
-            if (v > 0) setScaledVolume(max(0, v - 5));
-            return;
+        if (_videoCount <= 0) return;
+        bool wasPlaying = (_mode == MODE_PLAYING);
+        if (wasPlaying) {
+            requestStop();
         }
-        if (_videoCount > 1) {
-            _selectedIdx = (_selectedIdx == 0) ? (_videoCount - 1) : (_selectedIdx - 1);
-            fetchThumbnail(_selectedIdx);
-            _dirty = true;
+        _selectedIdx = (_selectedIdx == 0) ? (_videoCount - 1) : (_selectedIdx - 1);
+        fetchThumbnail(_selectedIdx);
+        _dirty = true;
+        if (wasPlaying) {
+            requestPlay(_selectedIdx);
         }
     }
 
     void onRight() {
-        if (_mode == MODE_PLAYING) {
-            int v = getCurrentAppVolume();
-            if (v < 100) setScaledVolume(min(100, v + 5));
-            return;
+        if (_videoCount <= 0) return;
+        bool wasPlaying = (_mode == MODE_PLAYING);
+        if (wasPlaying) {
+            requestStop();
         }
-        if (_videoCount > 1) {
-            _selectedIdx = (_selectedIdx + 1) % _videoCount;
-            fetchThumbnail(_selectedIdx);
-            _dirty = true;
+        _selectedIdx = (_selectedIdx + 1) % _videoCount;
+        fetchThumbnail(_selectedIdx);
+        _dirty = true;
+        if (wasPlaying) {
+            requestPlay(_selectedIdx);
         }
+    }
+
+    void volumeRampDown() {
+        int v = getCurrentAppVolume();
+        if (v > 0) setScaledVolume(max(0, v - 2));
+    }
+
+    void volumeRampUp() {
+        int v = getCurrentAppVolume();
+        if (v < 100) setScaledVolume(min(100, v + 2));
     }
 
     void onBack() {
@@ -399,6 +421,10 @@ public:
         if (_mode == MODE_PLAYING) {
             if (syncPlugin) {
                 syncPlugin->update();
+                if (syncPlugin->hasFinished()) {
+                    requestStop();
+                    return;
+                }
             }
             return;
         }

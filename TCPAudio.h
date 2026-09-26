@@ -70,7 +70,21 @@ private:
         AudioOutputPokoI2S(volatile float* vol) : _vol(vol) {}
 
         virtual bool begin() override { return true; }
-        virtual bool SetRate(int hz) override { return true; }
+        virtual bool SetRate(int hz) override {
+            if (poko_tx_handle && hz > 0) {
+                i2s_std_clk_config_t clk_cfg = {
+                    .sample_rate_hz = (uint32_t)hz,
+                    .clk_src = I2S_CLK_SRC_DEFAULT,
+                    .ext_clk_freq_hz = 0,
+                    .mclk_multiple = I2S_MCLK_MULTIPLE_256
+                };
+                i2s_channel_reconfig_std_clock(poko_tx_handle, &clk_cfg);
+                if (_es8311Handle) {
+                    es8311_sample_frequency_config(_es8311Handle, (uint32_t)hz * 256, (uint32_t)hz);
+                }
+            }
+            return true;
+        }
         virtual bool SetChannels(int channels) override { return true; }
 
         virtual bool ConsumeSample(int16_t sample[2]) override {
@@ -124,6 +138,7 @@ private:
                             mp3->stop();
                             break;
                         }
+                        vTaskDelay(pdMS_TO_TICKS(1));
                     }
                 }
 
@@ -145,7 +160,7 @@ private:
     }
 
 public:
-    TCPAudio(uint16_t port = 1235, float initialVolume = 0.85f)
+    TCPAudio(uint16_t port = 1235, float initialVolume = 1.0f)
         : _port(port), _server(port), _isLoaded(false), _isRunning(false),
           _netTaskHandle(NULL), _clientConnected(false), _volume(initialVolume) {}
 
@@ -167,7 +182,7 @@ public:
             _isLoaded = true;
 
             BaseType_t ok = xTaskCreatePinnedToCore(
-                networkTaskWrapper, "PokoAudNet", 16384, this, 2, (TaskHandle_t*)&_netTaskHandle, 0
+                networkTaskWrapper, "PokoAudNet", 8192, this, 2, (TaskHandle_t*)&_netTaskHandle, 0
             );
             if (ok != pdPASS) {
                 _isRunning = false;

@@ -64,6 +64,8 @@ private:
     uint32_t  _playStartMs  = 0;
     uint32_t  _lastSecondMs = 0;
     uint32_t  _lastDrawMs   = 0;
+    int       _scrollOffset = 0;
+    uint32_t  _lastScrollMs = 0;
 
     static Arduino_Canvas* _activeCanvas;
 
@@ -186,7 +188,10 @@ private:
         if (idx < 0 || idx >= _songCount) return;
 
         if (audioPlugin) {
-            audioPlugin->load();
+            if (!audioPlugin->isLoaded()) {
+                audioPlugin->load();
+                delay(100);
+            }
         }
 
         HTTPClient http;
@@ -201,20 +206,18 @@ private:
         _trackPos = 0;
         _playStartMs = millis();
         _lastSecondMs = millis();
+        _scrollOffset = 0;
+        _lastScrollMs = millis();
         _dirty = true;
     }
 
     void requestStop() {
         HTTPClient http;
-        String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop";
+        String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false";
         http.begin(url);
         http.setTimeout(1500);
         http.GET();
         http.end();
-
-        if (audioPlugin) {
-            audioPlugin->unload();
-        }
 
         _mode = MODE_BROWSE;
         _dirty = true;
@@ -265,7 +268,7 @@ private:
             if (_artSize > 100) {
                 _activeCanvas = _canvas;
                 TJpgDec.setJpgScale(1);
-                TJpgDec.setSwapBytes(true);
+                TJpgDec.setSwapBytes(false);
                 TJpgDec.setCallback(tftOutput);
                 TJpgDec.drawJpg(34, 18, _artBuf, _artSize);
                 _activeCanvas = nullptr;
@@ -311,43 +314,42 @@ private:
             _canvas->print(hint);
 
         } else {
-            // Playing screen with album art, spectrum bars, and progress bar
-            _canvas->drawRoundRect(46, 16, 36, 36, 4, 0xF81F);
+            // Playing screen: Thumbnail in center, scrolling "Name - Artist", progress bar, time/vol, footer
+            _canvas->drawRoundRect(32, 14, 64, 64, 4, 0xF81F);
             if (_artSize > 100) {
                 _activeCanvas = _canvas;
                 TJpgDec.setJpgScale(1);
-                TJpgDec.setSwapBytes(true);
+                TJpgDec.setSwapBytes(false);
                 TJpgDec.setCallback(tftOutput);
-                TJpgDec.drawJpg(48, 18, _artBuf, _artSize);
+                TJpgDec.drawJpg(34, 16, _artBuf, _artSize);
                 _activeCanvas = nullptr;
             } else {
-                _canvas->fillRoundRect(48, 18, 32, 32, 3, theme.surface);
-                _canvas->setFont(u8g2_font_helvB10_tf);
+                _canvas->fillRoundRect(34, 16, 60, 60, 3, theme.surface);
+                _canvas->setFont(u8g2_font_helvB14_tf);
                 _canvas->setTextColor(0xF81F, theme.surface);
-                _canvas->setCursor(59, 40);
+                _canvas->setCursor(58, 52);
                 _canvas->print(">");
             }
 
-            // Title
+            // Scrolling "Name - Artist" ticker (y=80..93)
+            String ticker = String(_songs[_selectedIdx].title) + " - " + String(_songs[_selectedIdx].artist);
             _canvas->setFont(u8g2_font_helvB08_tf);
             _canvas->setTextColor(theme.text, theme.bg);
-            const char* title = _songs[_selectedIdx].title;
-            _canvas->getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
-            _canvas->setCursor(max(4, 64 - w / 2), 62);
-            _canvas->print(title);
-
-            // Artist
-            _canvas->setFont(u8g2_font_5x7_tf);
-            _canvas->setTextColor(theme.muted, theme.bg);
-            const char* artist = _songs[_selectedIdx].artist;
-            _canvas->getTextBounds(artist, 0, 0, &x1, &y1, &w, &h);
-            _canvas->setCursor(max(4, 64 - w / 2), 73);
-            _canvas->print(artist);
-
-            // Animated Visualizer bars (y=78..90)
-            for (int i = 0; i < 11; i++) {
-                int bh = random(3, 13);
-                _canvas->fillRect(16 + i * 9, 90 - bh, 6, bh, 0xF81F);
+            int16_t x1, y1; uint16_t tw, th;
+            _canvas->getTextBounds(ticker.c_str(), 0, 0, &x1, &y1, &tw, &th);
+            if (tw <= 120) {
+                _canvas->setCursor(max(4, (128 - tw) / 2), 90);
+                _canvas->print(ticker);
+            } else {
+                int loopLen = tw + 32;
+                int offset = _scrollOffset % loopLen;
+                int dx = 4 - offset;
+                _canvas->setCursor(dx, 90);
+                _canvas->print(ticker);
+                if (dx + tw < 124) {
+                    _canvas->setCursor(dx + loopLen, 90);
+                    _canvas->print(ticker);
+                }
             }
 
             // Progress Bar (y=96..100)
@@ -356,7 +358,7 @@ private:
             int progW = min(96, (int)((96 * _trackPos) / dur));
             _canvas->fillRect(16, 97, progW, 3, 0xF81F);
 
-            // Time & Volume
+            // Time & Volume (y=103..111)
             char timeBuf[32];
             snprintf(timeBuf, sizeof(timeBuf), "%02lu:%02lu/%02lu:%02lu  V:%d%%",
                      (unsigned long)(_trackPos / 60), (unsigned long)(_trackPos % 60),
@@ -367,12 +369,12 @@ private:
             _canvas->setCursor(64 - w / 2, 110);
             _canvas->print(timeBuf);
 
-            // Footer
+            // Footer (y=114..127)
             _canvas->fillRect(0, 114, 128, 14, theme.headerBg);
             _canvas->drawFastHLine(0, 114, 128, theme.line);
             _canvas->setFont(u8g2_font_5x7_tf);
             _canvas->setTextColor(theme.footerText, theme.headerBg);
-            const char* hint = "L:V-  R:V+  2R:Stop";
+            const char* hint = "L:Prv  R:Nxt  2R:Pause";
             _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(64 - w / 2, 124);
             _canvas->print(hint);
@@ -398,6 +400,10 @@ public:
         _mode   = MODE_BROWSE;
         begin();
 
+        if (audioPlugin) {
+            audioPlugin->load();
+        }
+
         if (_songCount == 0) {
             fetchSongList();
         } else {
@@ -410,6 +416,9 @@ public:
         _active = false;
         if (_mode == MODE_PLAYING) {
             requestStop();
+        }
+        if (audioPlugin) {
+            audioPlugin->unload();
         }
         if (_canvas) {
             delete _canvas;
@@ -426,30 +435,30 @@ public:
     bool isLoaded() const { return _active; }
 
     void onLeft() {
-        if (_mode == MODE_PLAYING) {
-            int v = getCurrentAppVolume();
-            if (v > 0) setScaledVolume(max(0, v - 5));
-            _dirty = true;
-            return;
+        if (_songCount <= 0) return;
+        bool wasPlaying = (_mode == MODE_PLAYING);
+        if (wasPlaying) {
+            requestStop();
         }
-        if (_songCount > 1) {
-            _selectedIdx = (_selectedIdx == 0) ? (_songCount - 1) : (_selectedIdx - 1);
-            fetchArtwork(_selectedIdx);
-            _dirty = true;
+        _selectedIdx = (_selectedIdx == 0) ? (_songCount - 1) : (_selectedIdx - 1);
+        fetchArtwork(_selectedIdx);
+        _dirty = true;
+        if (wasPlaying) {
+            requestPlay(_selectedIdx);
         }
     }
 
     void onRight() {
-        if (_mode == MODE_PLAYING) {
-            int v = getCurrentAppVolume();
-            if (v < 100) setScaledVolume(min(100, v + 5));
-            _dirty = true;
-            return;
+        if (_songCount <= 0) return;
+        bool wasPlaying = (_mode == MODE_PLAYING);
+        if (wasPlaying) {
+            requestStop();
         }
-        if (_songCount > 1) {
-            _selectedIdx = (_selectedIdx + 1) % _songCount;
-            fetchArtwork(_selectedIdx);
-            _dirty = true;
+        _selectedIdx = (_selectedIdx + 1) % _songCount;
+        fetchArtwork(_selectedIdx);
+        _dirty = true;
+        if (wasPlaying) {
+            requestPlay(_selectedIdx);
         }
     }
 
@@ -498,9 +507,15 @@ public:
                 _lastSecondMs = now;
                 _trackPos++;
                 _dirty = true;
-            } else if (now - _lastDrawMs >= 120) {
-                // Animate spectrum bars
-                _lastDrawMs = now;
+
+                if (_songs[_selectedIdx].duration_s > 0 && _trackPos >= _songs[_selectedIdx].duration_s + 1) {
+                    onRight();
+                    return;
+                }
+            }
+            if (now - _lastScrollMs >= 40) {
+                _lastScrollMs = now;
+                _scrollOffset++;
                 _dirty = true;
             }
         }

@@ -211,6 +211,7 @@ private:
     uint16_t _bitsPerSample;
     int32_t _serverBufferMs;
     int32_t _serverLatencyMs;
+    volatile int32_t _measuredLatencyMs;
     int32_t _serverVolume;
     bool _serverMuted;
 
@@ -1157,6 +1158,7 @@ private:
                     } else {
                         int64_t rttUs = t4 - requestSentUs;
                         if (rttUs >= 0 && rttUs <= 25000) {
+                            _measuredLatencyMs = (int32_t)((rttUs + 500LL) / 1000LL);
                             addTimeDiffSample(newDiff);
                             _timeSyncCount++;
                             _syncing = true;
@@ -1675,7 +1677,7 @@ public:
           _resyncRequested(false), _volumePublishPending(false),
           _receivedInitialServerSettings(false), _audioFault(false),
           _codec("opus"), _sampleRate(48000), _channels(2), _bitsPerSample(16),
-          _serverBufferMs(1000), _serverLatencyMs(0), _serverVolume(80), _serverMuted(false),
+          _serverBufferMs(1000), _serverLatencyMs(0), _measuredLatencyMs(0), _serverVolume(80), _serverMuted(false),
           _diffCount(0), _diffIdx(0), _ageCount(0), _ageIdx(0),
           _correctionAccumulator(0.0), _pllIntegralPpm(0.0), _lastCorrectionPpm(0.0),
           _diffToServerUs(0), _lastTimeSyncMs(0), _lastTimeSentUs(0), _timeMsgId(0),
@@ -1976,7 +1978,11 @@ public:
     String getCodec() const { return _codec; }
     uint32_t getSampleRate() const { return _sampleRate; }
     int32_t getBufferMs() const { return _serverBufferMs; }
-    int32_t getLatencyMs() const { return _serverLatencyMs; }
+    int32_t getLatencyMs() const {
+        if (_measuredLatencyMs > 0) return _measuredLatencyMs;
+        if (_serverLatencyMs > 0) return _serverLatencyMs;
+        return _customLatencyMs;
+    }
     String getServerHost() const { return _serverHost; }
     uint16_t getServerPort() const { return _serverPort; }
 

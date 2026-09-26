@@ -29,7 +29,7 @@ private:
     static const uint16_t VIDEO_QUEUE_DEPTH  = 3;
     static const size_t   VIDEO_BUFFER_SIZE  = 16384;      // Up to 16KB per 128×128 frame
     static const size_t   AUDIO_BUFFER_BYTES = 32768;
-    static const size_t   START_AUDIO_BYTES  = 4000;
+    static const size_t   START_AUDIO_BYTES  = 2000;
     static const int16_t  VIDEO_EARLY_MS     = 14;
     static const uint16_t VIDEO_LATE_DROP_MS = 150;
 
@@ -65,6 +65,7 @@ private:
     volatile bool     _playReleased;
     volatile uint32_t _firstAudioTsMs;
     volatile uint32_t _samplesPlayed;
+    volatile uint32_t _wallClockStartMs;
 
     volatile uint32_t _audioPackets;
     volatile uint32_t _audioBytesDropped;
@@ -296,11 +297,12 @@ private:
 
         while (_isRunning) {
             if (!_playReleased) {
-                if (_playStarted &&
-                    xStreamBufferBytesAvailable(_audioStream) >= START_AUDIO_BYTES &&
-                    uxQueueMessagesWaiting(_videoQueue) >= 1) {
+                if ((_playStarted && xStreamBufferBytesAvailable(_audioStream) >= START_AUDIO_BYTES && uxQueueMessagesWaiting(_videoQueue) >= 1) ||
+                    (!_audioConnected && _videoConnected && uxQueueMessagesWaiting(_videoQueue) >= 1) ||
+                    (_videoConnected && uxQueueMessagesWaiting(_videoQueue) >= 2)) {
                     _samplesPlayed = 0;
                     _playReleased = true;
+                    _wallClockStartMs = millis();
                 } else {
                     vTaskDelay(pdMS_TO_TICKS(5));
                     continue;
@@ -377,7 +379,7 @@ private:
     }
 
 public:
-    SyncedAVPlayer(Arduino_GFX* display, uint16_t port = 1236, float initialVolume = 0.85f)
+    SyncedAVPlayer(Arduino_GFX* display, uint16_t port = 1236, float initialVolume = 1.0f)
         : _gfx(display), _port(port), _server(port), _videoServer(port + 1),
           _isRunning(false), _isLoaded(false), _clientConnected(false),
           _audioConnected(false), _videoConnected(false), _wasConnected(false),
@@ -385,6 +387,7 @@ public:
           _netTaskHandle(NULL), _videoTaskHandle(NULL), _audioTaskHandle(NULL),
           _videoQueue(NULL), _emptyQueue(NULL), _audioStream(NULL), _videoBuffers(nullptr),
           _playStarted(false), _playReleased(false), _firstAudioTsMs(0), _samplesPlayed(0),
+          _wallClockStartMs(0),
           _audioPackets(0), _audioBytesDropped(0), _audioUnderruns(0), _videoPackets(0),
           _videoFramesDropped(0), _videoFramesRendered(0), _lastFpsSampleMs(0),
           _lastFpsFrameCount(0), _renderFps(0.0f) {
@@ -402,14 +405,30 @@ public:
 
     uint32_t audioClockMs() const {
         if (!_playReleased) return 0;
-        return _firstAudioTsMs + (uint32_t)(((uint64_t)_samplesPlayed * 1000ULL) / AUDIO_RATE);
+        uint32_t wallClock = _firstAudioTsMs + (millis() - _wallClockStartMs);
+        if (_audioConnected && _playStarted) {
+            uint32_t audioClock = _firstAudioTsMs + (uint32_t)(((uint64_t)_samplesPlayed * 1000ULL) / AUDIO_RATE);
+            if ((int32_t)(wallClock - audioClock) > 120) {
+                return wallClock - 50;
+            }
+            return audioClock;
+        }
+        return wallClock;
+    }
+
+    bool hasFinished() const {
+        return _playReleased && !_clientConnected && (_videoQueue ? (uxQueueMessagesWaiting(_videoQueue) == 0) : true);
+    }
+
+    void reset() {
+        resetPlaybackState();
     }
 
     void load() {
         if (_isLoaded) return;
 
         TJpgDec.setJpgScale(1);
-        TJpgDec.setSwapBytes(true);
+        TJpgDec.setSwapBytes(false);
         TJpgDec.setCallback(tftOutput);
 
         _allocationFailed = false;
@@ -515,7 +534,7 @@ public:
 
             if ((int32_t)f.timestampMs <= (int32_t)clockMs + VIDEO_EARLY_MS) {
                 xQueueReceive(_videoQueue, &f, 0);
-                // Draw full-screen 128×128 frame directly onto the display
+                TJpgDec.setSwapBytes(false);
                 TJpgDec.drawJpg(0, 0, f.buffer, f.length);
                 _videoFramesRendered++;
                 uint8_t* ptr = f.buffer;
