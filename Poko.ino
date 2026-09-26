@@ -43,6 +43,8 @@ MusicApp*    musicAppInstance    = nullptr;
 VideoApp*    videoAppInstance    = nullptr;
 GalleryApp*  galleryAppInstance  = nullptr;
 SettingsApp* settingsAppInstance = nullptr;
+SyncedAVPlayer* syncPlugin       = nullptr;
+TCPAudio*       audioPlugin      = nullptr;
 PokoAPI*     masterApi           = nullptr;
 
 AppState activeApp = STATE_LAUNCHER;
@@ -175,6 +177,10 @@ void onBtnLeftDouble() {
     Serial.println("[action] Left Double-Click -> Exit / Back");
     if (activeApp == STATE_GALLERY_UI && galleryAppInstance) {
         galleryAppInstance->onBack();
+    } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {
+        musicAppInstance->onBack();
+    } else if (activeApp == STATE_VIDEO_UI && videoAppInstance) {
+        videoAppInstance->onBack();
     } else if (activeApp != STATE_LAUNCHER) {
         onAppChange(STATE_LAUNCHER);
     }
@@ -315,6 +321,10 @@ void setup() {
 
     settingsAppInstance = new SettingsApp(pokoGfx, onAppChange);
     settingsAppInstance->begin();
+
+    // Streaming Audio & Synced AV Players
+    syncPlugin = new SyncedAVPlayer(pokoGfx, 1236);
+    audioPlugin = new TCPAudio(1235);
 
     // 7. WiFi & Network Services
     savedSSID = prefs.getString("wifi_ssid", "X");

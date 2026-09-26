@@ -2,3 +2,7 @@ build/
 .vscode/
 *.bin
 *.elf
+*.db*
+__pycache__/
+*.pyc
+.test-tmp/

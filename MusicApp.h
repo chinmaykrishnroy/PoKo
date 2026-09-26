@@ -1,5 +1,9 @@
 #pragma once
 #include <Arduino.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <TJpg_Decoder.h>
 #include <U8g2lib.h>
 #include <Arduino_GFX_Library.h>
 #include <Preferences.h>
@@ -7,30 +11,214 @@
 #include "PokoPins.h"
 #include "PokoDrivers.h"
 #include "PokoTheme.h"
+#include "TCPAudio.h"
 
 // ─────────────────────────────────────────────────────────────
-//  MusicApp — Audio Streaming Player UI (128×128)
-//  Shows track title, artist, audio visualizer, and playback state.
+//  MusicApp — Single-Song Audio Browser & MP3 TCP Stream Player
+//  Displays exactly ONE song at a time with album art thumbnail,
+//  title, artist, and duration.
+//  Controls:
+//    - L:Prv / R:Nxt (Browse songs)
+//    - 2R:Play (Start MP3 TCP streaming playback over TCPAudio)
+//    - While Playing: L:V- / R:V+ / 2R:Stop / 2L:Back
 // ─────────────────────────────────────────────────────────────
 
 extern Preferences prefs;
+extern TCPAudio* audioPlugin;
 
 class MusicApp {
 private:
+    enum MusicMode {
+        MODE_BROWSE,
+        MODE_PLAYING
+    };
+
+    struct SongItem {
+        char id[36];
+        char title[44];
+        char artist[28];
+        uint32_t duration_s;
+    };
+
+    static constexpr int MAX_SONGS = 32;
+
     Arduino_GFX*    _gfx;
     AppSwitchFn     _exit;
     Arduino_Canvas* _canvas = nullptr;
 
-    bool     _active    = false;
-    bool     _dirty     = true;
-    bool     _playing   = false;
-    int      _volume    = 75;
-    uint32_t _trackPos  = 0;
-    uint32_t _trackLen  = 210; // seconds
-    uint32_t _lastDrawMs = 0;
+    bool      _active       = false;
+    bool      _dirty        = true;
+    MusicMode _mode         = MODE_BROWSE;
 
-    String   _title  = "Audio Stream";
-    String   _artist = "Poko Player";
+    SongItem  _songs[MAX_SONGS];
+    int       _songCount    = 0;
+    int       _selectedIdx  = 0;
+    bool      _loadingList  = false;
+    bool      _serverError  = false;
+
+    uint8_t*  _artBuf       = nullptr;
+    size_t    _artSize      = 0;
+    char      _loadedId[36] = {0};
+
+    uint32_t  _trackPos     = 0;
+    uint32_t  _playStartMs  = 0;
+    uint32_t  _lastSecondMs = 0;
+    uint32_t  _lastDrawMs   = 0;
+
+    static Arduino_Canvas* _activeCanvas;
+
+    static bool tftOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
+        if (_activeCanvas) {
+            _activeCanvas->draw16bitRGBBitmap(x, y, bitmap, w, h);
+        } else if (pokoGfx) {
+            pokoGfx->draw16bitRGBBitmap(x, y, bitmap, w, h);
+        }
+        return true;
+    }
+
+    String getServerHost() {
+        return prefs.getString("server_host", "192.168.0.15");
+    }
+
+    int getServerPort() {
+        return prefs.getInt("server_port", 8765);
+    }
+
+    void fetchSongList() {
+        if (WiFi.status() != WL_CONNECTED) {
+            _serverError = true;
+            _dirty = true;
+            return;
+        }
+
+        _loadingList = true;
+        _serverError = false;
+
+        HTTPClient http;
+        String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/library/audio?page=1&page_size=" + String(MAX_SONGS) + "&icons=false";
+        http.begin(url);
+        http.setTimeout(3500);
+
+        int httpCode = http.GET();
+        if (httpCode == HTTP_CODE_OK) {
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, http.getStream());
+            if (!err) {
+                JsonArray items = doc["items"].as<JsonArray>();
+                _songCount = 0;
+                for (JsonObject item : items) {
+                    if (_songCount >= MAX_SONGS) break;
+                    const char* id = item["id"] | "";
+                    const char* title = item["title"] | "Untitled";
+                    const char* artist = item["artist"] | "Unknown Artist";
+                    uint32_t dur = (uint32_t)(item["duration_s"] | 0);
+
+                    strncpy(_songs[_songCount].id, id, sizeof(_songs[_songCount].id) - 1);
+                    strncpy(_songs[_songCount].title, title, sizeof(_songs[_songCount].title) - 1);
+                    strncpy(_songs[_songCount].artist, artist, sizeof(_songs[_songCount].artist) - 1);
+                    _songs[_songCount].duration_s = dur;
+                    _songCount++;
+                }
+                _serverError = (_songCount == 0);
+            } else {
+                _serverError = true;
+            }
+        } else {
+            _serverError = true;
+        }
+        http.end();
+        _loadingList = false;
+
+        if (_songCount > 0) {
+            if (_selectedIdx >= _songCount) _selectedIdx = 0;
+            fetchArtwork(_selectedIdx);
+        }
+        _dirty = true;
+    }
+
+    void fetchArtwork(int idx) {
+        if (idx < 0 || idx >= _songCount) return;
+        if (strncmp(_loadedId, _songs[idx].id, sizeof(_loadedId)) == 0 && _artSize > 0) return;
+
+        if (!_artBuf) {
+            if (psramFound()) {
+                _artBuf = (uint8_t*)heap_caps_malloc(16384, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            }
+            if (!_artBuf) {
+                _artBuf = (uint8_t*)heap_caps_malloc(16384, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            }
+        }
+        if (!_artBuf) return;
+
+        _artSize = 0;
+        HTTPClient http;
+        String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
+                     "/api/library/audio/" + String(_songs[idx].id) + "/thumbnail.jpg?size=60";
+        http.begin(url);
+        http.setTimeout(2500);
+
+        int code = http.GET();
+        if (code == HTTP_CODE_OK) {
+            WiFiClient* stream = http.getStreamPtr();
+            size_t total = 0;
+            uint32_t startWait = millis();
+            while (http.connected() && (total < 16384) && (millis() - startWait < 2000)) {
+                int avail = stream->available();
+                if (avail > 0) {
+                    int r = stream->read(_artBuf + total, min(avail, (int)(16384 - total)));
+                    if (r > 0) {
+                        total += r;
+                        startWait = millis();
+                    }
+                } else {
+                    vTaskDelay(pdMS_TO_TICKS(2));
+                }
+            }
+            if (total > 100) {
+                _artSize = total;
+                strncpy(_loadedId, _songs[idx].id, sizeof(_loadedId) - 1);
+            }
+        }
+        http.end();
+    }
+
+    void requestPlay(int idx) {
+        if (idx < 0 || idx >= _songCount) return;
+
+        if (audioPlugin) {
+            audioPlugin->load();
+        }
+
+        HTTPClient http;
+        String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
+                     "/api/audio/" + String(_songs[idx].id) + "/play?start=0&switch=false";
+        http.begin(url);
+        http.setTimeout(3000);
+        http.GET();
+        http.end();
+
+        _mode = MODE_PLAYING;
+        _trackPos = 0;
+        _playStartMs = millis();
+        _lastSecondMs = millis();
+        _dirty = true;
+    }
+
+    void requestStop() {
+        HTTPClient http;
+        String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop";
+        http.begin(url);
+        http.setTimeout(1500);
+        http.GET();
+        http.end();
+
+        if (audioPlugin) {
+            audioPlugin->unload();
+        }
+
+        _mode = MODE_BROWSE;
+        _dirty = true;
+    }
 
     void renderToCanvas() {
         if (!_canvas) return;
@@ -45,68 +233,150 @@ private:
         _canvas->setCursor(3, 11);
         _canvas->print("Music");
 
-        // Status text
+        // Counter / status
         _canvas->setFont(u8g2_font_5x7_tf);
-        _canvas->setTextColor(_playing ? POKO_CLR_GREEN : theme.muted, theme.headerBg);
-        const char* st = _playing ? "PLAYING" : "PAUSED";
         int16_t x1, y1; uint16_t w, h;
-        _canvas->getTextBounds(st, 0, 0, &x1, &y1, &w, &h);
-        _canvas->setCursor(125 - w, 11);
-        _canvas->print(st);
 
-        // Album Art / Graphic Placeholder (y=18..52)
-        _canvas->drawRoundRect(46, 18, 36, 34, 6, 0xF81F);
-        _canvas->fillRoundRect(48, 20, 32, 30, 4, theme.surface);
-        _canvas->setFont(u8g2_font_helvB14_tf);
-        _canvas->setTextColor(0xF81F, theme.surface);
-        _canvas->setCursor(58, 42);
-        _canvas->print(_playing ? ">" : "||");
-
-        // Track Title (y=62)
-        _canvas->setFont(u8g2_font_helvB08_tf);
-        _canvas->setTextColor(theme.text, theme.bg);
-        _canvas->getTextBounds(_title, 0, 0, &x1, &y1, &w, &h);
-        _canvas->setCursor(64 - w / 2, 64);
-        _canvas->print(_title);
-
-        // Artist (y=74)
-        _canvas->setFont(u8g2_font_profont10_mf);
-        _canvas->setTextColor(theme.muted, theme.bg);
-        _canvas->getTextBounds(_artist, 0, 0, &x1, &y1, &w, &h);
-        _canvas->setCursor(64 - w / 2, 76);
-        _canvas->print(_artist);
-
-        // Animated Spectrum Visualizer (y=80..92)
-        for (int i = 0; i < 10; i++) {
-            int bh = _playing ? random(3, 12) : 2;
-            _canvas->fillRect(20 + i * 9, 92 - bh, 6, bh, 0xF81F);
+        if (_mode == MODE_PLAYING) {
+            _canvas->setTextColor(POKO_CLR_GREEN, theme.headerBg);
+            _canvas->setCursor(76, 11);
+            _canvas->print("PLAYING");
+        } else if (_songCount > 0) {
+            char badge[16];
+            snprintf(badge, sizeof(badge), "%d/%d", _selectedIdx + 1, _songCount);
+            _canvas->setTextColor(theme.muted, theme.headerBg);
+            _canvas->getTextBounds(badge, 0, 0, &x1, &y1, &w, &h);
+            _canvas->setCursor(125 - w, 11);
+            _canvas->print(badge);
+        } else if (_loadingList) {
+            _canvas->setTextColor(theme.muted, theme.headerBg);
+            _canvas->setCursor(72, 11);
+            _canvas->print("Loading...");
+        } else {
+            _canvas->setTextColor(0xF800, theme.headerBg);
+            _canvas->setCursor(76, 11);
+            _canvas->print("Offline");
         }
 
-        // Progress Bar (y=98..104)
-        _canvas->drawRect(14, 98, 100, 5, theme.line);
-        int progW = (_trackLen > 0) ? (96 * (_trackPos % _trackLen)) / _trackLen : 0;
-        _canvas->fillRect(16, 99, progW, 3, 0xF81F);
+        if (_mode == MODE_BROWSE) {
+            // Album Artwork Frame (y=16..78)
+            _canvas->drawRoundRect(32, 16, 64, 64, 6, 0xF81F);
 
-        // Track time
-        char timeStr[16];
-        snprintf(timeStr, sizeof(timeStr), "%02lu:%02lu / %02lu:%02lu",
-                 (unsigned long)(_trackPos / 60), (unsigned long)(_trackPos % 60),
-                 (unsigned long)(_trackLen / 60), (unsigned long)(_trackLen % 60));
-        _canvas->setFont(u8g2_font_5x7_tf);
-        _canvas->setTextColor(theme.muted, theme.bg);
-        _canvas->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
-        _canvas->setCursor(64 - w / 2, 110);
-        _canvas->print(timeStr);
+            if (_artSize > 100) {
+                _activeCanvas = _canvas;
+                TJpgDec.setJpgScale(1);
+                TJpgDec.setSwapBytes(true);
+                TJpgDec.setCallback(tftOutput);
+                TJpgDec.drawJpg(34, 18, _artBuf, _artSize);
+                _activeCanvas = nullptr;
+            } else {
+                _canvas->fillRoundRect(34, 18, 60, 60, 4, theme.surface);
+                _canvas->setFont(u8g2_font_helvB14_tf);
+                _canvas->setTextColor(0xF81F, theme.surface);
+                _canvas->setCursor(58, 54);
+                _canvas->print(">");
+            }
 
-        // Footer (y=114..127)
-        _canvas->fillRect(0, 114, 128, 14, theme.headerBg);
-        _canvas->drawFastHLine(0, 114, 128, theme.line);
-        _canvas->setFont(u8g2_font_5x7_tf);
-        _canvas->setTextColor(theme.footerText, theme.headerBg);
-        const char* hint = "L:V-  R:V+  2R:Play";
-        _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
-        _canvas->setCursor(64 - w / 2, 124);
-        _canvas->print(hint);
+            // Song Title (y=88)
+            _canvas->setFont(u8g2_font_helvB08_tf);
+            _canvas->setTextColor(theme.text, theme.bg);
+            const char* title = (_songCount > 0) ? _songs[_selectedIdx].title : (_serverError ? "Start PoKo Server" : "No Songs");
+            _canvas->getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
+            _canvas->setCursor(max(4, 64 - w / 2), 90);
+            _canvas->print(title);
+
+            // Artist & Duration (y=100)
+            _canvas->setFont(u8g2_font_5x7_tf);
+            _canvas->setTextColor(theme.muted, theme.bg);
+            char infoBuf[48];
+            if (_songCount > 0) {
+                uint32_t dur = _songs[_selectedIdx].duration_s;
+                snprintf(infoBuf, sizeof(infoBuf), "%s  %02lu:%02lu", _songs[_selectedIdx].artist,
+                         (unsigned long)(dur / 60), (unsigned long)(dur % 60));
+            } else {
+                snprintf(infoBuf, sizeof(infoBuf), "%s:%d", getServerHost().c_str(), getServerPort());
+            }
+            _canvas->getTextBounds(infoBuf, 0, 0, &x1, &y1, &w, &h);
+            _canvas->setCursor(max(4, 64 - w / 2), 103);
+            _canvas->print(infoBuf);
+
+            // Footer (y=114..127)
+            _canvas->fillRect(0, 114, 128, 14, theme.headerBg);
+            _canvas->drawFastHLine(0, 114, 128, theme.line);
+            _canvas->setFont(u8g2_font_5x7_tf);
+            _canvas->setTextColor(theme.footerText, theme.headerBg);
+            const char* hint = (_songCount > 0) ? "L:Prv  R:Nxt  2R:Play" : "2R:Retry  2L:Back";
+            _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
+            _canvas->setCursor(64 - w / 2, 124);
+            _canvas->print(hint);
+
+        } else {
+            // Playing screen with album art, spectrum bars, and progress bar
+            _canvas->drawRoundRect(46, 16, 36, 36, 4, 0xF81F);
+            if (_artSize > 100) {
+                _activeCanvas = _canvas;
+                TJpgDec.setJpgScale(1);
+                TJpgDec.setSwapBytes(true);
+                TJpgDec.setCallback(tftOutput);
+                TJpgDec.drawJpg(48, 18, _artBuf, _artSize);
+                _activeCanvas = nullptr;
+            } else {
+                _canvas->fillRoundRect(48, 18, 32, 32, 3, theme.surface);
+                _canvas->setFont(u8g2_font_helvB10_tf);
+                _canvas->setTextColor(0xF81F, theme.surface);
+                _canvas->setCursor(59, 40);
+                _canvas->print(">");
+            }
+
+            // Title
+            _canvas->setFont(u8g2_font_helvB08_tf);
+            _canvas->setTextColor(theme.text, theme.bg);
+            const char* title = _songs[_selectedIdx].title;
+            _canvas->getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
+            _canvas->setCursor(max(4, 64 - w / 2), 62);
+            _canvas->print(title);
+
+            // Artist
+            _canvas->setFont(u8g2_font_5x7_tf);
+            _canvas->setTextColor(theme.muted, theme.bg);
+            const char* artist = _songs[_selectedIdx].artist;
+            _canvas->getTextBounds(artist, 0, 0, &x1, &y1, &w, &h);
+            _canvas->setCursor(max(4, 64 - w / 2), 73);
+            _canvas->print(artist);
+
+            // Animated Visualizer bars (y=78..90)
+            for (int i = 0; i < 11; i++) {
+                int bh = random(3, 13);
+                _canvas->fillRect(16 + i * 9, 90 - bh, 6, bh, 0xF81F);
+            }
+
+            // Progress Bar (y=96..100)
+            _canvas->drawRect(14, 96, 100, 5, theme.line);
+            uint32_t dur = (_songs[_selectedIdx].duration_s > 0) ? _songs[_selectedIdx].duration_s : 1;
+            int progW = min(96, (int)((96 * _trackPos) / dur));
+            _canvas->fillRect(16, 97, progW, 3, 0xF81F);
+
+            // Time & Volume
+            char timeBuf[32];
+            snprintf(timeBuf, sizeof(timeBuf), "%02lu:%02lu/%02lu:%02lu  V:%d%%",
+                     (unsigned long)(_trackPos / 60), (unsigned long)(_trackPos % 60),
+                     (unsigned long)(dur / 60), (unsigned long)(dur % 60), getCurrentAppVolume());
+            _canvas->setFont(u8g2_font_5x7_tf);
+            _canvas->setTextColor(theme.muted, theme.bg);
+            _canvas->getTextBounds(timeBuf, 0, 0, &x1, &y1, &w, &h);
+            _canvas->setCursor(64 - w / 2, 110);
+            _canvas->print(timeBuf);
+
+            // Footer
+            _canvas->fillRect(0, 114, 128, 14, theme.headerBg);
+            _canvas->drawFastHLine(0, 114, 128, theme.line);
+            _canvas->setFont(u8g2_font_5x7_tf);
+            _canvas->setTextColor(theme.footerText, theme.headerBg);
+            const char* hint = "L:V-  R:V+  2R:Stop";
+            _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
+            _canvas->setCursor(64 - w / 2, 124);
+            _canvas->print(hint);
+        }
 
         _canvas->flush();
     }
@@ -120,84 +390,126 @@ public:
             _canvas = new Arduino_Canvas(128, 128, _gfx, 0, 0);
             _canvas->begin();
         }
-        _volume = prefs.getInt("volume", 75);
     }
 
     void load() {
-        _active  = true;
-        _dirty   = true;
+        _active = true;
+        _dirty  = true;
+        _mode   = MODE_BROWSE;
         begin();
+
+        if (_songCount == 0) {
+            fetchSongList();
+        } else {
+            fetchArtwork(_selectedIdx);
+        }
         renderToCanvas();
     }
 
     void unload() {
         _active = false;
+        if (_mode == MODE_PLAYING) {
+            requestStop();
+        }
         if (_canvas) {
             delete _canvas;
             _canvas = nullptr;
         }
+        if (_artBuf) {
+            heap_caps_free(_artBuf);
+            _artBuf = nullptr;
+        }
+        _artSize = 0;
+        _loadedId[0] = 0;
     }
 
     bool isLoaded() const { return _active; }
 
     void onLeft() {
-        if (_volume > 0) {
-            _volume = max(0, _volume - 5);
-            prefs.putInt("volume", _volume);
-            setScaledVolume(_volume);
+        if (_mode == MODE_PLAYING) {
+            int v = getCurrentAppVolume();
+            if (v > 0) setScaledVolume(max(0, v - 5));
+            _dirty = true;
+            return;
+        }
+        if (_songCount > 1) {
+            _selectedIdx = (_selectedIdx == 0) ? (_songCount - 1) : (_selectedIdx - 1);
+            fetchArtwork(_selectedIdx);
             _dirty = true;
         }
     }
 
     void onRight() {
-        if (_volume < 100) {
-            _volume = min(100, _volume + 5);
-            prefs.putInt("volume", _volume);
-            setScaledVolume(_volume);
+        if (_mode == MODE_PLAYING) {
+            int v = getCurrentAppVolume();
+            if (v < 100) setScaledVolume(min(100, v + 5));
+            _dirty = true;
+            return;
+        }
+        if (_songCount > 1) {
+            _selectedIdx = (_selectedIdx + 1) % _songCount;
+            fetchArtwork(_selectedIdx);
             _dirty = true;
         }
     }
 
     void volumeRampDown() {
-        if (_volume > 0) {
-            _volume = max(0, _volume - 2);
-            prefs.putInt("volume", _volume);
-            setScaledVolume(_volume);
+        int v = getCurrentAppVolume();
+        if (v > 0) {
+            setScaledVolume(max(0, v - 2));
             _dirty = true;
         }
     }
 
     void volumeRampUp() {
-        if (_volume < 100) {
-            _volume = min(100, _volume + 2);
-            prefs.putInt("volume", _volume);
-            setScaledVolume(_volume);
+        int v = getCurrentAppVolume();
+        if (v < 100) {
+            setScaledVolume(min(100, v + 2));
             _dirty = true;
         }
     }
 
     void onBack() {
+        if (_mode == MODE_PLAYING) {
+            requestStop();
+            return;
+        }
         if (_exit) _exit(STATE_LAUNCHER);
     }
 
     void onEnter() {
-        _playing = !_playing;
-        _dirty = true;
+        if (_mode == MODE_PLAYING) {
+            requestStop();
+            return;
+        }
+        if (_songCount > 0) {
+            requestPlay(_selectedIdx);
+        } else {
+            fetchSongList();
+        }
     }
 
     void update() {
         if (!_active) return;
-        uint32_t now = millis();
-        if (_playing && (now - _lastDrawMs >= 500)) {
-            _lastDrawMs = now;
-            _trackPos = (_trackPos + 1) % _trackLen;
-            _dirty = true;
-        } else if (!_playing && (now - _lastDrawMs >= 1000)) {
-            _lastDrawMs = now;
-            _dirty = true;
+
+        if (_mode == MODE_PLAYING) {
+            uint32_t now = millis();
+            if (now - _lastSecondMs >= 1000) {
+                _lastSecondMs = now;
+                _trackPos++;
+                _dirty = true;
+            } else if (now - _lastDrawMs >= 120) {
+                // Animate spectrum bars
+                _lastDrawMs = now;
+                _dirty = true;
+            }
         }
-        if (!_dirty) return;
-        _dirty = false;
-        renderToCanvas();
+
+        if (_dirty) {
+            _dirty = false;
+            renderToCanvas();
+        }
     }
 };
+
+inline Arduino_Canvas* MusicApp::_activeCanvas = nullptr;

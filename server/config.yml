@@ -1,0 +1,70 @@
+server:
+  host: 0.0.0.0
+  port: 8765
+
+poko:
+  ip: 192.168.0.4
+  base_url: http://192.168.0.4
+  switch_delay_ms: 500
+  ports:
+    graphics: 1234
+    audio: 1235
+    video_audio: 1236
+    video_frames: 1237
+
+nexus:
+  ip: 192.168.0.4
+  base_url: http://192.168.0.4
+  switch_delay_ms: 500
+  ports:
+    graphics: 1234
+    audio: 1235
+    video_audio: 1236
+    video_frames: 1237
+
+display:
+  width: 128
+  height: 128
+
+library:
+  read_folders:
+    - C:\Users\aarav\Desktop\Music
+    - C:\Users\aarav\Videos
+    - C:\Users\aarav\Music
+    - C:\Users\aarav\Downloads
+    - C:\Users\aarav\Pictures
+  write_folder: C:\Users\aarav\Videos\
+  page_size: 10
+  probe_on_scan: false
+  db_path: poko.db
+
+defaults:
+  audio_seek_seconds: 10
+  video_seek_seconds: 10
+  video_with_audio: true
+  video_aspect: square
+  image_aspect: square
+  image_hold_seconds: 30
+  motion_image_seconds: 8
+
+ffmpeg:
+  executable: auto
+  ffprobe: auto
+  audio_bitrate: 128k
+  audio_rate: 44100
+  audio_channels: 2
+  sync_audio_rate: 22050
+  sync_audio_chunk_ms: 20
+  video_fps: 20
+  video_quality: 7
+  graphics_fps: 20
+  graphics_quality: 7
+  start_delay_ms: 350
+  video_drop_late_ms: 150
+  audio_filters:
+    highpass:
+      enabled: false
+      cutoff_hz: 80
+    lowpass:
+      enabled: false
+      cutoff_hz: 16000

@@ -8,6 +8,8 @@
 #include "PokoTheme.h"
 #include "InfoApp.h"
 #include "SSyncApp.h"
+#include "MusicApp.h"
+#include "VideoApp.h"
 
 // ─────────────────────────────────────────────────────────────
 //  PokoAPI — Master REST API & Web Dashboard backend
@@ -17,6 +19,8 @@ extern AppState activeApp;
 extern void onAppChange(AppState newState);
 extern InfoApp* infoAppInstance;
 extern SSyncApp* ssyncAppInstance;
+extern MusicApp* musicAppInstance;
+extern VideoApp* videoAppInstance;
 extern void handleDriverReset();
 
 class PokoAPI {
@@ -54,7 +58,11 @@ public:
             String snapHost = _prefs->getString("snap_host", "192.168.0.20");
             int snapPort = _prefs->getInt("snap_port", 1780);
             json += "\"snap_host\":\"" + snapHost + "\",";
-            json += "\"snap_port\":" + String(snapPort);
+            json += "\"snap_port\":" + String(snapPort) + ",";
+            String srvHost = _prefs->getString("server_host", "192.168.0.15");
+            int srvPort = _prefs->getInt("server_port", 8765);
+            json += "\"server_host\":\"" + srvHost + "\",";
+            json += "\"server_port\":" + String(srvPort);
             json += "}";
             _server->send(200, "application/json", json);
         });
@@ -139,15 +147,49 @@ public:
             _server->send(200, "application/json", "{\"ok\":true,\"timer\":" + String(t) + "}");
         });
 
+        // Media Streaming Server endpoint (Video & Audio backend)
+        _server->on("/api/server", HTTP_GET, [this]() {
+            if (_server->hasArg("host")) {
+                _prefs->putString("server_host", _server->arg("host"));
+            }
+            if (_server->hasArg("port")) {
+                _prefs->putInt("server_port", _server->arg("port").toInt());
+            }
+            String h = _prefs->getString("server_host", "192.168.0.15");
+            int p = _prefs->getInt("server_port", 8765);
+            _server->send(200, "application/json", "{\"ok\":true,\"host\":\"" + h + "\",\"port\":" + String(p) + "}");
+        });
+
         // App switch
         _server->on("/api/app", HTTP_GET, [this]() {
-            if (_server->hasArg("state")) {
+            if (_server->hasArg("set") || _server->hasArg("name")) {
+                String appName = _server->hasArg("set") ? _server->arg("set") : _server->arg("name");
+                appName.toLowerCase();
+                if (appName == "home" || appName == "launcher") onAppChange(STATE_LAUNCHER);
+                else if (appName == "info") onAppChange(STATE_INFO);
+                else if (appName == "clock") onAppChange(STATE_CLOCK);
+                else if (appName == "video" || appName == "video_ui") onAppChange(STATE_VIDEO_UI);
+                else if (appName == "audio" || appName == "music" || appName == "audio_ui" || appName == "music_ui") onAppChange(STATE_MUSIC_UI);
+                else if (appName == "ssync" || appName == "snap" || appName == "snapclient") onAppChange(STATE_SSYNC);
+                else if (appName == "gallery" || appName == "gallery_ui") onAppChange(STATE_GALLERY_UI);
+                else if (appName == "settings" || appName == "settings_ui") onAppChange(STATE_SETTINGS_UI);
+            } else if (_server->hasArg("state")) {
                 int s = _server->arg("state").toInt();
                 if (s >= 0 && s < STATE_COUNT) {
                     onAppChange((AppState)s);
                 }
             }
             _server->send(200, "application/json", "{\"ok\":true,\"app\":" + String((int)activeApp) + "}");
+        });
+
+        // Playback stopped notification from streaming backend
+        _server->on("/api/ui/playback_stopped", HTTP_GET, [this]() {
+            if (activeApp == STATE_VIDEO_UI && videoAppInstance) {
+                videoAppInstance->onBack();
+            } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {
+                musicAppInstance->onBack();
+            }
+            _server->send(200, "application/json", "{\"ok\":true}");
         });
 
         // WS2812B LED Control

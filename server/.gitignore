@@ -1,0 +1,6 @@
+.tmp/
+.test-tmp/
+__pycache__/
+*.pyc
+nexus.db*
+.test-server.*

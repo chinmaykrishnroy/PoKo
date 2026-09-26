@@ -131,6 +131,25 @@ input[type=text],input[type=password],input[type=number],select{width:100%;paddi
     </table>
   </div>
 
+  <!-- Media Streaming Server (Video & Audio) -->
+  <div class="card">
+    <h3>Media Streaming Server</h3>
+    <form onsubmit="saveMediaServer(event)">
+      <div class="form-group">
+        <label>Server Host / IP</label>
+        <input type="text" id="server_host" value="192.168.0.15" required>
+      </div>
+      <div class="form-group">
+        <label>Server Port (Default: 8765)</label>
+        <input type="number" id="server_port" value="8765" required>
+      </div>
+      <button type="submit" class="btn accent" style="width:100%">Update Media Server</button>
+    </form>
+    <div style="margin-top:10px;font-size:12px;color:var(--muted)">
+      Streams 128x128 MJPEG video with synchronized PCM audio, plus MP3 audio streams and album art thumbnails.
+    </div>
+  </div>
+
   <!-- Gallery & Slideshow -->
   <div class="card">
     <h3>Gallery & Slideshow</h3>
@@ -162,9 +181,9 @@ input[type=text],input[type=password],input[type=number],select{width:100%;paddi
       <button class="btn accent" onclick="setApp(0)">Launcher</button>
       <button class="btn" onclick="setApp(1)">System Info</button>
       <button class="btn" onclick="setApp(2)">Clock</button>
-      <button class="btn" onclick="setApp(3)">SSync (Snap)</button>
+      <button class="btn" onclick="setApp(3)">Video</button>
       <button class="btn" onclick="setApp(4)">Music</button>
-      <button class="btn" onclick="setApp(5)">Video</button>
+      <button class="btn" onclick="setApp(5)">SSync (Snap)</button>
       <button class="btn" onclick="setApp(6)">Gallery</button>
       <button class="btn" onclick="setApp(7)">Settings</button>
     </div>
@@ -220,6 +239,8 @@ async function refresh(){
   }
   if(d.snap_host) document.getElementById('snap_host').value=d.snap_host;
   if(d.snap_port) document.getElementById('snap_port').value=d.snap_port;
+  if(d.server_host) document.getElementById('server_host').value=d.server_host;
+  if(d.server_port) document.getElementById('server_port').value=d.server_port;
 
   const sec=Math.floor((d.uptime_ms||0)/1000);
   const m=Math.floor(sec/60), s=sec%60;
@@ -286,6 +307,14 @@ async function saveSnap(e){
   const p=document.getElementById('snap_port').value;
   await fetch(`/api/snap?host=${encodeURIComponent(h)}&port=${encodeURIComponent(p)}`);
   alert('Snapcast server updated to ' + h + ':' + p);
+}
+
+async function saveMediaServer(e){
+  e.preventDefault();
+  const h=document.getElementById('server_host').value;
+  const p=document.getElementById('server_port').value;
+  await fetch(`/api/server?host=${encodeURIComponent(h)}&port=${encodeURIComponent(p)}`);
+  alert('Media server updated to ' + h + ':' + p);
 }
 
 function setSlideTimer(v){

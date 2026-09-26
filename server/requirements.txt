@@ -1,0 +1,9 @@
+python-ffmpeg>=2.0.12
+PyYAML>=6.0.2
+
+# Optional but useful later if you want a richer web API/UI around this core:
+# fastapi>=0.115
+# uvicorn[standard]>=0.34
+# pillow>=11.0
+# mutagen>=1.47
+# pytest>=8.0
