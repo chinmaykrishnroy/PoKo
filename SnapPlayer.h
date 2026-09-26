@@ -543,19 +543,12 @@ private:
     }
 
     bool initI2S(uint32_t sampleRate) {
-        if (_i2sInstalled) {
-            ::deinitI2S();
-            _i2sInstalled = false;
-        }
-
-        esp_err_t err = ::initI2S(sampleRate, 2, 16);
-        if (err != ESP_OK) {
-            Serial.printf("[snap] initI2S failed: %d\n", (int)err);
+        if (!ensureAudioOutput(sampleRate)) {
+            Serial.printf("[snap] ensureAudioOutput failed: %lu Hz\n", (unsigned long)sampleRate);
             _i2sInstalled = false;
             return false;
         }
 
-        reinitES8311(sampleRate);
         setScaledVolume(_serverMuted ? 0 : _serverVolume);
         _i2sInstalled = true;
         primeI2SPath(sampleRate);
@@ -1700,8 +1693,6 @@ public:
 
 
     void begin() {
-        muteI2SPins();
-
         if (!_netTaskDone) _netTaskDone = xSemaphoreCreateBinary();
         if (!_audioTaskDone) _audioTaskDone = xSemaphoreCreateBinary();
 

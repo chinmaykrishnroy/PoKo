@@ -273,8 +273,7 @@ void setup() {
     initBacklight();
 
     // 3. Audio Codec (ES8311) & I2S Master Clock
-    initI2S(44100);
-    initES8311(44100);
+    ensureAudioOutput(44100);
     int savedMaster = prefs.getInt("master_vol", 100);
     setMasterVolumeLimit(savedMaster);
     int savedVol = prefs.getInt("volume", 75);

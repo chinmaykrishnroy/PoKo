@@ -187,6 +187,8 @@ private:
     void requestPlay(int idx) {
         if (idx < 0 || idx >= _songCount) return;
 
+        ensureAudioOutput(44100);
+
         if (audioPlugin) {
             if (!audioPlugin->isLoaded()) {
                 audioPlugin->load();
@@ -399,6 +401,8 @@ public:
         _dirty  = true;
         _mode   = MODE_BROWSE;
         begin();
+
+        ensureAudioOutput(44100);
 
         if (audioPlugin) {
             audioPlugin->load();

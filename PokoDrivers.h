@@ -62,6 +62,8 @@ inline void setBacklightPercent(int pct) {
 //  MCLK comes from I2S MCLK pin (pin 8).
 inline es8311_handle_t _es8311Handle = nullptr;
 
+inline void deinitI2S();
+
 inline esp_err_t initI2S(uint32_t sampleRate = 44100,
                           uint8_t  channels   = 2,
                           uint8_t  bitsPerSample = 16);
@@ -160,11 +162,20 @@ inline bool reinitES8311(uint32_t sampleRate = 44100) {
 
 // ── I2S Driver (Modern ESP-IDF 5.x / Arduino 3.x) ────────────
 inline i2s_chan_handle_t poko_tx_handle = nullptr;
+inline uint32_t          poko_i2s_rate = 0;
+inline uint8_t           poko_i2s_channels = 0;
+inline uint8_t           poko_i2s_bits = 0;
 
 inline esp_err_t initI2S(uint32_t sampleRate,
                           uint8_t  channels,
                           uint8_t  bitsPerSample) {
-    if (poko_tx_handle) return ESP_OK;
+    // Existing driver is usable ONLY when its format matches exactly
+    if (poko_tx_handle) {
+        if (poko_i2s_rate == sampleRate && poko_i2s_channels == channels && poko_i2s_bits == bitsPerSample) {
+            return ESP_OK;
+        }
+        deinitI2S();
+    }
 
     i2s_chan_config_t chan_cfg = {
         .id = I2S_NUM_0,
@@ -179,6 +190,7 @@ inline esp_err_t initI2S(uint32_t sampleRate,
     esp_err_t err = i2s_new_channel(&chan_cfg, &poko_tx_handle, nullptr);
     if (err != ESP_OK) {
         Serial.printf("[I2S] new_channel failed: %d\n", err);
+        poko_tx_handle = nullptr;
         return err;
     }
 
@@ -222,8 +234,16 @@ inline esp_err_t initI2S(uint32_t sampleRate,
     err = i2s_channel_enable(poko_tx_handle);
     if (err != ESP_OK) {
         Serial.printf("[I2S] channel_enable failed: %d\n", err);
+        i2s_del_channel(poko_tx_handle);
+        poko_tx_handle = nullptr;
+        return err;
     }
-    return err;
+
+    poko_i2s_rate = sampleRate;
+    poko_i2s_channels = channels;
+    poko_i2s_bits = bitsPerSample;
+    Serial.printf("[I2S] ready %lu Hz / %u ch / %u-bit\n", (unsigned long)sampleRate, channels, bitsPerSample);
+    return ESP_OK;
 }
 
 inline void deinitI2S() {
@@ -232,6 +252,45 @@ inline void deinitI2S() {
         i2s_del_channel(poko_tx_handle);
         poko_tx_handle = nullptr;
     }
+    poko_i2s_rate = 0;
+    poko_i2s_channels = 0;
+    poko_i2s_bits = 0;
+}
+
+// ── Central Audio Output Enabler ──────────────────────────────
+//  Guarantees I2S clock, ES8311 codec, and PA amplifier are
+//  fully configured and unmuted for the requested sample rate.
+inline bool ensureAudioOutput(uint32_t sampleRate = 44100) {
+    if (!poko_tx_handle || poko_i2s_rate != sampleRate) {
+        esp_err_t err = initI2S(sampleRate, 2, 16);
+        if (err != ESP_OK) {
+            Serial.printf("[audio] initI2S failed for %lu Hz: %d\n", (unsigned long)sampleRate, (int)err);
+            return false;
+        }
+    }
+
+    if (!_es8311Handle) {
+        if (!initES8311(sampleRate)) {
+            Serial.println("[audio] initES8311 failed");
+            return false;
+        }
+    } else {
+        es8311_sample_frequency_config(_es8311Handle, sampleRate * 256, sampleRate);
+    }
+
+    // Power on speaker amplifier
+    pinMode(POKO_PIN_PA_CTRL, OUTPUT);
+    digitalWrite(POKO_PIN_PA_CTRL, HIGH);
+
+    // Ensure codec is active and volume is applied
+    es8311Mute(false);
+    setScaledVolume(getCurrentAppVolume());
+    Serial.printf("[audio] output ready @ %lu Hz\n", (unsigned long)sampleRate);
+    return true;
+}
+
+inline bool prepareAudioOutput(uint32_t sampleRate = 44100) {
+    return ensureAudioOutput(sampleRate);
 }
 
 // ── WS2812B LEDs ─────────────────────────────────────────────

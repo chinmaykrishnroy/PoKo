@@ -26,7 +26,7 @@ private:
     static const uint8_t  PACKET_VIDEO       = 2;
     static const uint16_t AUDIO_RATE         = 22050;
     static const uint16_t AUDIO_CHUNK_BYTES  = 512;
-    static const uint16_t VIDEO_QUEUE_DEPTH  = 3;
+    static const uint16_t VIDEO_QUEUE_DEPTH  = 4;
     static const size_t   VIDEO_BUFFER_SIZE  = 16384;      // Up to 16KB per 128×128 frame
     static const size_t   AUDIO_BUFFER_BYTES = 32768;
     static const size_t   START_AUDIO_BYTES  = 2000;
@@ -52,6 +52,7 @@ private:
     bool            _wasConnected;
     volatile float  _volume;
     bool            _allocationFailed;
+    uint32_t        _disconnectStartMs;
 
     TaskHandle_t         _netTaskHandle;
     TaskHandle_t         _videoTaskHandle;
@@ -145,6 +146,7 @@ private:
         _playReleased = false;
         _firstAudioTsMs = 0;
         _samplesPlayed = 0;
+        _disconnectStartMs = 0;
         _audioPackets = 0;
         _audioBytesDropped = 0;
         _audioUnderruns = 0;
@@ -259,7 +261,7 @@ private:
                 }
 
                 uint8_t* buf = nullptr;
-                if (xQueueReceive(_emptyQueue, &buf, pdMS_TO_TICKS(5)) != pdTRUE || !buf) {
+                if (xQueueReceive(_emptyQueue, &buf, pdMS_TO_TICKS(50)) != pdTRUE || !buf) {
                     _videoFramesDropped++;
                     if (!discardBytes(client, length)) break;
                     continue;
@@ -313,12 +315,16 @@ private:
             uint16_t monoSamples = got / 2;
 
             if (monoSamples == 0) {
-                if (_playReleased && !_audioConnected) {
+                // Stop playback only if BOTH transports are gone.
+                if (_playReleased && !_audioConnected && !_videoConnected) {
                     _playReleased = false;
                     _playStarted = false;
                     continue;
                 }
-                if (_playStarted) {
+
+                // If video is still connected but audio isn't, keep _playReleased = true
+                // and audioClockMs() will automatically use wall clock.
+                if (_playStarted && _audioConnected) {
                     memset(stereo, 0, sizeof(stereo));
                     size_t written = 0;
                     if (poko_tx_handle) {
@@ -346,6 +352,9 @@ private:
             }
 
             size_t written = 0;
+            if (!poko_tx_handle) {
+                ensureAudioOutput(44100);
+            }
             if (poko_tx_handle) {
                 i2s_channel_write(poko_tx_handle, stereo, outIdx * sizeof(int16_t), &written, pdMS_TO_TICKS(50));
             }
@@ -383,7 +392,7 @@ public:
         : _gfx(display), _port(port), _server(port), _videoServer(port + 1),
           _isRunning(false), _isLoaded(false), _clientConnected(false),
           _audioConnected(false), _videoConnected(false), _wasConnected(false),
-          _volume(initialVolume), _allocationFailed(false),
+          _volume(initialVolume), _allocationFailed(false), _disconnectStartMs(0),
           _netTaskHandle(NULL), _videoTaskHandle(NULL), _audioTaskHandle(NULL),
           _videoQueue(NULL), _emptyQueue(NULL), _audioStream(NULL), _videoBuffers(nullptr),
           _playStarted(false), _playReleased(false), _firstAudioTsMs(0), _samplesPlayed(0),
@@ -406,18 +415,30 @@ public:
     uint32_t audioClockMs() const {
         if (!_playReleased) return 0;
         uint32_t wallClock = _firstAudioTsMs + (millis() - _wallClockStartMs);
-        if (_audioConnected && _playStarted) {
+        if (_audioConnected && _playStarted && _samplesPlayed > 0) {
             uint32_t audioClock = _firstAudioTsMs + (uint32_t)(((uint64_t)_samplesPlayed * 1000ULL) / AUDIO_RATE);
-            if ((int32_t)(wallClock - audioClock) > 120) {
-                return wallClock - 50;
-            }
+            int32_t diff = (int32_t)(audioClock - wallClock);
+            if (diff > 120) return wallClock + 30;
+            if (diff < -120) return wallClock - 30;
             return audioClock;
         }
         return wallClock;
     }
 
-    bool hasFinished() const {
-        return _playReleased && !_clientConnected && (_videoQueue ? (uxQueueMessagesWaiting(_videoQueue) == 0) : true);
+    bool hasFinished() {
+        if (!_playReleased || _clientConnected) {
+            _disconnectStartMs = 0;
+            return false;
+        }
+        if (_videoQueue && uxQueueMessagesWaiting(_videoQueue) > 0) {
+            _disconnectStartMs = 0;
+            return false;
+        }
+        if (_disconnectStartMs == 0) {
+            _disconnectStartMs = millis();
+            return false;
+        }
+        return (millis() - _disconnectStartMs > 1500);
     }
 
     void reset() {
@@ -426,6 +447,8 @@ public:
 
     void load() {
         if (_isLoaded) return;
+
+        ensureAudioOutput(44100);
 
         TJpgDec.setJpgScale(1);
         TJpgDec.setSwapBytes(false);

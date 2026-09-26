@@ -180,6 +180,8 @@ private:
     void requestPlay(int idx) {
         if (idx < 0 || idx >= _videoCount) return;
 
+        ensureAudioOutput(44100);
+
         if (syncPlugin) {
             if (!syncPlugin->isLoaded()) {
                 syncPlugin->load();
@@ -322,6 +324,8 @@ public:
         _dirty  = true;
         _mode   = MODE_BROWSE;
         begin();
+
+        ensureAudioOutput(44100);
 
         if (syncPlugin) {
             syncPlugin->load();

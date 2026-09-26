@@ -34,19 +34,22 @@ private:
             : _client(client), _isRunning(isRunning) {}
 
         virtual uint32_t read(void *data, uint32_t len) override {
-            if (!_client) return 0;
+            if (!_client || !_client->connected()) return 0;
             uint32_t readBytes = 0;
             unsigned long startWait = millis();
 
             while (readBytes < len && _client->connected() && *_isRunning) {
-                if (_client->available() > 0) {
-                    int r = _client->read(((uint8_t*)data) + readBytes, len - readBytes);
+                int avail = _client->available();
+                if (avail > 0) {
+                    int toRead = min((size_t)avail, (size_t)(len - readBytes));
+                    int r = _client->read(((uint8_t*)data) + readBytes, toRead);
                     if (r > 0) {
                         readBytes += r;
                         startWait = millis();
                     }
                 } else {
-                    if (millis() - startWait > 2000) break;
+                    if (readBytes > 0) break;
+                    if (millis() - startWait > 3500) break;
                     vTaskDelay(pdMS_TO_TICKS(2));
                 }
             }
@@ -64,24 +67,18 @@ private:
     class AudioOutputPokoI2S : public AudioOutput {
     private:
         volatile float* _vol;
-        int16_t         _buffer[256];
+        int16_t         _buffer[512];
         int             _bufIndex = 0;
     public:
         AudioOutputPokoI2S(volatile float* vol) : _vol(vol) {}
 
-        virtual bool begin() override { return true; }
+        virtual bool begin() override {
+            _bufIndex = 0;
+            return true;
+        }
         virtual bool SetRate(int hz) override {
-            if (poko_tx_handle && hz > 0) {
-                i2s_std_clk_config_t clk_cfg = {
-                    .sample_rate_hz = (uint32_t)hz,
-                    .clk_src = I2S_CLK_SRC_DEFAULT,
-                    .ext_clk_freq_hz = 0,
-                    .mclk_multiple = I2S_MCLK_MULTIPLE_256
-                };
-                i2s_channel_reconfig_std_clock(poko_tx_handle, &clk_cfg);
-                if (_es8311Handle) {
-                    es8311_sample_frequency_config(_es8311Handle, (uint32_t)hz * 256, (uint32_t)hz);
-                }
+            if (hz > 0) {
+                ensureAudioOutput((uint32_t)hz);
             }
             return true;
         }
@@ -92,10 +89,13 @@ private:
             _buffer[_bufIndex++] = (int16_t)(sample[0] * v);
             _buffer[_bufIndex++] = (int16_t)(sample[1] * v);
 
-            if (_bufIndex >= 256) {
+            if (_bufIndex >= 512) {
                 size_t written = 0;
+                if (!poko_tx_handle) {
+                    ensureAudioOutput(44100);
+                }
                 if (poko_tx_handle) {
-                    i2s_channel_write(poko_tx_handle, _buffer, sizeof(_buffer), &written, pdMS_TO_TICKS(50));
+                    i2s_channel_write(poko_tx_handle, _buffer, sizeof(_buffer), &written, pdMS_TO_TICKS(100));
                 }
                 _bufIndex = 0;
             }
@@ -106,7 +106,7 @@ private:
             if (_bufIndex > 0) {
                 size_t written = 0;
                 if (poko_tx_handle) {
-                    i2s_channel_write(poko_tx_handle, _buffer, _bufIndex * sizeof(int16_t), &written, pdMS_TO_TICKS(50));
+                    i2s_channel_write(poko_tx_handle, _buffer, _bufIndex * sizeof(int16_t), &written, pdMS_TO_TICKS(100));
                 }
                 _bufIndex = 0;
             }
@@ -119,12 +119,15 @@ private:
     }
 
     void networkTask() {
+        ensureAudioOutput(44100);
         _server.begin();
         _server.setNoDelay(true);
 
         while (_isRunning) {
             WiFiClient client = _server.available();
             if (client) {
+                Serial.println("[tcpaudio] Client connected, starting MP3 stream decode");
+                ensureAudioOutput(44100);
                 _clientConnected = true;
                 client.setNoDelay(true);
 
@@ -133,13 +136,17 @@ private:
                 AudioStreamTCP* file   = new AudioStreamTCP(&client, &_isRunning);
 
                 if (mp3->begin(file, out)) {
+                    Serial.println("[tcpaudio] MP3 begin OK, streaming...");
                     while (client.connected() && _isRunning && mp3->isRunning()) {
                         if (!mp3->loop()) {
+                            Serial.println("[tcpaudio] MP3 stream ended");
                             mp3->stop();
                             break;
                         }
                         vTaskDelay(pdMS_TO_TICKS(1));
                     }
+                } else {
+                    Serial.println("[tcpaudio] MP3 begin FAILED");
                 }
 
                 if (mp3->isRunning()) mp3->stop();
@@ -150,6 +157,7 @@ private:
 
                 client.stop();
                 _clientConnected = false;
+                Serial.println("[tcpaudio] Client disconnected");
             }
             vTaskDelay(pdMS_TO_TICKS(10));
         }
@@ -173,6 +181,8 @@ public:
 
     void load() {
         if (!_isLoaded) {
+            ensureAudioOutput(44100);
+
             while (_netTaskHandle != NULL) {
                 vTaskDelay(pdMS_TO_TICKS(2));
             }
