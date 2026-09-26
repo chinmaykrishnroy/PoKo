@@ -2,6 +2,7 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <LittleFS.h>
 #include "PokoAppState.h"
 #include "PokoDrivers.h"
 #include "PokoWebUI.h"
@@ -10,6 +11,7 @@
 #include "SSyncApp.h"
 #include "MusicApp.h"
 #include "VideoApp.h"
+#include "GalleryApp.h"
 
 // ─────────────────────────────────────────────────────────────
 //  PokoAPI — Master REST API & Web Dashboard backend
@@ -21,6 +23,7 @@ extern InfoApp* infoAppInstance;
 extern SSyncApp* ssyncAppInstance;
 extern MusicApp* musicAppInstance;
 extern VideoApp* videoAppInstance;
+extern GalleryApp* galleryAppInstance;
 extern void handleDriverReset();
 
 class PokoAPI {
@@ -62,7 +65,8 @@ public:
             String srvHost = _prefs->getString("server_host", "192.168.0.15");
             int srvPort = _prefs->getInt("server_port", 8765);
             json += "\"server_host\":\"" + srvHost + "\",";
-            json += "\"server_port\":" + String(srvPort);
+            json += "\"server_port\":" + String(srvPort) + ",";
+            json += "\"server_addr\":\"" + srvHost + ":" + String(srvPort) + "\"";
             json += "}";
             _server->send(200, "application/json", json);
         });
@@ -147,8 +151,157 @@ public:
             _server->send(200, "application/json", "{\"ok\":true,\"timer\":" + String(t) + "}");
         });
 
+        // List LittleFS stored gallery files & disk space
+        _server->on("/api/gallery/files", HTTP_GET, [this]() {
+            size_t total = LittleFS.totalBytes();
+            size_t used  = LittleFS.usedBytes();
+            String json = "{\"ok\":true,\"total\":" + String((unsigned long)total) +
+                          ",\"used\":" + String((unsigned long)used) + ",\"files\":[";
+            if (LittleFS.exists("/photos")) {
+                File dir = LittleFS.open("/photos");
+                if (dir && dir.isDirectory()) {
+                    File f = dir.openNextFile();
+                    bool first = true;
+                    while (f) {
+                        if (!f.isDirectory()) {
+                            String fname = f.name();
+                            int slash = fname.lastIndexOf('/');
+                            if (slash >= 0) fname = fname.substring(slash + 1);
+                            int bslash = fname.lastIndexOf('\\');
+                            if (bslash >= 0) fname = fname.substring(bslash + 1);
+                            String lower = fname;
+                            lower.toLowerCase();
+                            if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+                                if (!first) json += ",";
+                                first = false;
+                                json += "{\"name\":\"" + fname + "\",\"size\":" + String((unsigned long)f.size()) + "}";
+                            }
+                        }
+                        f = dir.openNextFile();
+                    }
+                    dir.close();
+                }
+            }
+            json += "]}";
+            _server->send(200, "application/json", json);
+        });
+
+        // Serve single LittleFS image for Web UI thumbnail preview
+        _server->on("/api/gallery/file", HTTP_GET, [this]() {
+            if (!_server->hasArg("name")) {
+                _server->send(400, "application/json", "{\"ok\":false,\"error\":\"missing name\"}");
+                return;
+            }
+            String name = _server->arg("name");
+            int slash = name.lastIndexOf('/');
+            if (slash >= 0) name = name.substring(slash + 1);
+            int bslash = name.lastIndexOf('\\');
+            if (bslash >= 0) name = name.substring(bslash + 1);
+            String fullPath = "/photos/" + name;
+
+            if (!LittleFS.exists(fullPath)) {
+                _server->send(404, "application/json", "{\"ok\":false,\"error\":\"file not found\"}");
+                return;
+            }
+            File f = LittleFS.open(fullPath, "r");
+            if (!f) {
+                _server->send(500, "application/json", "{\"ok\":false,\"error\":\"open failed\"}");
+                return;
+            }
+            _server->sendHeader("Cache-Control", "max-age=86400");
+            _server->streamFile(f, "image/jpeg");
+            f.close();
+        });
+
+        // Delete LittleFS image
+        auto handleDelete = [this]() {
+            if (!_server->hasArg("name")) {
+                _server->send(400, "application/json", "{\"ok\":false,\"error\":\"missing name\"}");
+                return;
+            }
+            String name = _server->arg("name");
+            int slash = name.lastIndexOf('/');
+            if (slash >= 0) name = name.substring(slash + 1);
+            int bslash = name.lastIndexOf('\\');
+            if (bslash >= 0) name = name.substring(bslash + 1);
+            String fullPath = "/photos/" + name;
+
+            if (LittleFS.exists(fullPath)) {
+                LittleFS.remove(fullPath);
+                Serial.printf("[gallery] deleted %s\n", fullPath.c_str());
+                if (galleryAppInstance && activeApp == STATE_GALLERY_UI) {
+                    galleryAppInstance->reloadList();
+                }
+                _server->send(200, "application/json", "{\"ok\":true}");
+            } else {
+                _server->send(404, "application/json", "{\"ok\":false,\"error\":\"not found\"}");
+            }
+        };
+        _server->on("/api/gallery/delete", HTTP_GET, handleDelete);
+        _server->on("/api/gallery/delete", HTTP_POST, handleDelete);
+
+        // Upload LittleFS image (128x128 JPEG)
+        _server->on("/api/gallery/upload", HTTP_POST, [this]() {
+            _server->sendHeader("Connection", "close");
+            _server->send(200, "application/json", "{\"ok\":true}");
+            if (galleryAppInstance && activeApp == STATE_GALLERY_UI) {
+                galleryAppInstance->reloadList();
+            }
+        }, [this]() {
+            HTTPUpload& upload = _server->upload();
+            static File uploadFile;
+            if (upload.status == UPLOAD_FILE_START) {
+                if (!LittleFS.exists("/photos")) {
+                    LittleFS.mkdir("/photos");
+                }
+                String fname = upload.filename;
+                int slash = fname.lastIndexOf('/');
+                if (slash >= 0) fname = fname.substring(slash + 1);
+                int bslash = fname.lastIndexOf('\\');
+                if (bslash >= 0) fname = fname.substring(bslash + 1);
+                if (fname.length() == 0) fname = "photo_" + String(millis()) + ".jpg";
+                if (!fname.endsWith(".jpg") && !fname.endsWith(".jpeg")) fname += ".jpg";
+
+                String path = "/photos/" + fname;
+                Serial.printf("[gallery] start upload %s\n", path.c_str());
+                uploadFile = LittleFS.open(path, "w");
+            } else if (upload.status == UPLOAD_FILE_WRITE) {
+                if (uploadFile) {
+                    uploadFile.write(upload.buf, upload.currentSize);
+                }
+            } else if (upload.status == UPLOAD_FILE_END) {
+                if (uploadFile) {
+                    uploadFile.close();
+                    Serial.printf("[gallery] uploaded %u bytes successfully\n", (unsigned int)upload.totalSize);
+                }
+            } else if (upload.status == UPLOAD_FILE_ABORTED) {
+                if (uploadFile) {
+                    uploadFile.close();
+                }
+            }
+        });
+
         // Media Streaming Server endpoint (Video & Audio backend)
         _server->on("/api/server", HTTP_GET, [this]() {
+            if (_server->hasArg("addr")) {
+                String addr = _server->arg("addr");
+                addr.trim();
+                if (addr.startsWith("http://")) addr = addr.substring(7);
+                else if (addr.startsWith("https://")) addr = addr.substring(8);
+                int slashIdx = addr.indexOf('/');
+                if (slashIdx >= 0) addr = addr.substring(0, slashIdx);
+
+                int colonIdx = addr.lastIndexOf(':');
+                String hostPart = addr;
+                int portPart = 8765;
+                if (colonIdx > 0) {
+                    hostPart = addr.substring(0, colonIdx);
+                    portPart = addr.substring(colonIdx + 1).toInt();
+                    if (portPart <= 0) portPart = 8765;
+                }
+                _prefs->putString("server_host", hostPart);
+                _prefs->putInt("server_port", portPart);
+            }
             if (_server->hasArg("host")) {
                 _prefs->putString("server_host", _server->arg("host"));
             }
@@ -157,7 +310,7 @@ public:
             }
             String h = _prefs->getString("server_host", "192.168.0.15");
             int p = _prefs->getInt("server_port", 8765);
-            _server->send(200, "application/json", "{\"ok\":true,\"host\":\"" + h + "\",\"port\":" + String(p) + "}");
+            _server->send(200, "application/json", "{\"ok\":true,\"addr\":\"" + h + ":" + String(p) + "\",\"host\":\"" + h + "\",\"port\":" + String(p) + "}");
         });
 
         // App switch

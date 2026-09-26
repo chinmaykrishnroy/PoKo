@@ -174,8 +174,8 @@ class SyncedAVStreamer:
             self.counters["startup_ready"] = True
             return True
         self.threads = [
-            threading.Thread(target=self._audio_sender, name="nexus-sync-audio", daemon=True),
-            threading.Thread(target=self._video_sender, name="nexus-sync-video", daemon=True),
+            threading.Thread(target=self._audio_sender, name="poko-sync-audio", daemon=True),
+            threading.Thread(target=self._video_sender, name="poko-sync-video", daemon=True),
         ]
         for thread in self.threads:
             thread.start()
@@ -375,7 +375,7 @@ class PlaybackManager:
         self._next_operation_id = 1
         self._operation_worker = threading.Thread(
             target=self._run_operations,
-            name="nexus-playback-worker",
+            name="poko-playback-worker",
             daemon=True,
         )
         self._operation_worker.start()

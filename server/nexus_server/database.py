@@ -9,7 +9,7 @@ from typing import Any, Iterable
 from .models import MediaItem
 
 
-class NexusDatabase:
+class PokoDatabase:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)

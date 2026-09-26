@@ -4,22 +4,42 @@
 #include <Arduino_GFX_Library.h>
 #include <LittleFS.h>
 #include <Preferences.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <TJpg_Decoder.h>
 #include "PokoAppState.h"
 #include "PokoPins.h"
 #include "PokoTheme.h"
 
 // ─────────────────────────────────────────────────────────────
 //  GalleryApp — Photo viewer (128×128)
-//  Shows controls for 2s of inactivity then transitions to
-//  immersive fullscreen (128×128 image only).
-//  Single press: Next image (Nxt).
-//  Double press: Exits fullscreen / Exits to launcher.
-//  Configurable slideshow auto-timer supported via Preferences.
+//  Shows LittleFS uploaded images FIRST, then Server library images.
+//  In windowed mode: 64×64 thumbnail, title, counter & hints.
+//  After 2s of inactivity: switches to immersive 128×128 fullscreen.
+//  Controls:
+//    Single Left: Previous photo
+//    Single Right: Next photo
+//    Double Left: Exit fullscreen / Exit to launcher
+//    Double Right: Toggle fullscreen
+//  Slideshow auto-advance supported via Preferences.
 // ─────────────────────────────────────────────────────────────
 
 extern Preferences prefs;
 
 class GalleryApp {
+public:
+    enum PhotoSource : uint8_t { PHOTO_LITTLEFS, PHOTO_SERVER };
+
+    struct GalleryItem {
+        PhotoSource source;
+        char idOrPath[64];
+        char title[32];
+        size_t fileSize;
+    };
+
+    static constexpr int MAX_GALLERY_PHOTOS = 60;
+
 private:
     Arduino_GFX*    _gfx;
     AppSwitchFn     _exit;
@@ -28,85 +48,263 @@ private:
     bool     _active          = false;
     bool     _dirty           = true;
     bool     _fullscreen      = false;
-    uint8_t  _photoIdx        = 0;
+    int      _photoIdx        = 0;
+    int      _photoCount      = 0;
     uint32_t _lastActivityMs  = 0;
     uint32_t _lastSlideMs     = 0;
 
-    static constexpr uint8_t TOTAL_PHOTOS = 4;
+    GalleryItem _photos[MAX_GALLERY_PHOTOS];
 
-    void drawPhotoGraphic(int x, int y, int w, int h, uint8_t idx) {
-        if (!_canvas) return;
+    uint8_t* _imgBuf      = nullptr;
+    size_t   _imgSize     = 0;
+    int      _loadedIdx   = -1;
+    bool     _loadFailed  = false;
+    bool     _loading     = false;
 
-        switch (idx) {
-            case 0: { // Sunset Horizon
-                for (int py = 0; py < h; py++) {
-                    uint16_t r = (31 * py) / h;
-                    uint16_t g = (45 * (h - py)) / h;
-                    uint16_t b = (10 * (h - py)) / h;
-                    uint16_t col = (r << 11) | (g << 5) | b;
-                    _canvas->drawFastHLine(x, y + py, w, col);
+    inline static Arduino_Canvas* _activeCanvas = nullptr;
+
+    static bool tftOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
+        if (_activeCanvas) {
+            _activeCanvas->draw16bitRGBBitmap(x, y, bitmap, w, h);
+        } else if (pokoGfx) {
+            pokoGfx->draw16bitRGBBitmap(x, y, bitmap, w, h);
+        }
+        return true;
+    }
+
+    void scanPhotos() {
+        _photoCount = 0;
+        _loadedIdx = -1;
+        _imgSize = 0;
+
+        // 1. Scan LittleFS FIRST (/photos/)
+        if (!LittleFS.exists("/photos")) {
+            LittleFS.mkdir("/photos");
+        }
+        File dir = LittleFS.open("/photos");
+        if (dir && dir.isDirectory()) {
+            File f = dir.openNextFile();
+            while (f && _photoCount < MAX_GALLERY_PHOTOS) {
+                if (!f.isDirectory()) {
+                    String fname = f.name();
+                    int slash = fname.lastIndexOf('/');
+                    if (slash >= 0) fname = fname.substring(slash + 1);
+                    int bslash = fname.lastIndexOf('\\');
+                    if (bslash >= 0) fname = fname.substring(bslash + 1);
+
+                    String lower = fname;
+                    lower.toLowerCase();
+                    if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+                        GalleryItem& item = _photos[_photoCount++];
+                        item.source = PHOTO_LITTLEFS;
+                        snprintf(item.idOrPath, sizeof(item.idOrPath), "/photos/%s", fname.c_str());
+
+                        // Readable title: remove .jpg extension
+                        String t = fname;
+                        int dot = t.lastIndexOf('.');
+                        if (dot > 0) t = t.substring(0, dot);
+                        strncpy(item.title, t.c_str(), sizeof(item.title) - 1);
+                        item.title[sizeof(item.title) - 1] = '\0';
+                        item.fileSize = f.size();
+                    }
                 }
-                int sunR = min(w, h) / 5;
-                _canvas->fillCircle(x + w / 2, y + (h * 4) / 7, sunR, 0xFFE0);
-                // Water reflection line
-                for (int py = (h * 4) / 7 + sunR; py < h; py += 3) {
-                    _canvas->drawFastHLine(x + w / 4, y + py, w / 2, 0xFBE0);
-                }
-                break;
+                f = dir.openNextFile();
             }
-            case 1: { // Cyber Neon Grid
-                _canvas->fillRect(x, y, w, h, 0x0821);
-                int xStep = max(8, w / 8);
-                int yStep = max(8, h / 8);
-                for (int px = x; px <= x + w; px += xStep) {
-                    _canvas->drawFastVLine(px, y, h, 0x07FF);
+            dir.close();
+        }
+
+        Serial.printf("[gallery] LittleFS photos found: %d\n", _photoCount);
+
+        // 2. Fetch Server Images SECOND
+        if (WiFi.status() == WL_CONNECTED && _photoCount < MAX_GALLERY_PHOTOS) {
+            String host = prefs.getString("server_host", "192.168.0.15");
+            int port = prefs.getInt("server_port", 8765);
+            int remaining = MAX_GALLERY_PHOTOS - _photoCount;
+            String url = "http://" + host + ":" + String(port) + "/api/library/image?page=1&page_size=" + String(remaining) + "&icons=false";
+
+            WiFiClient client;
+            HTTPClient http;
+            http.begin(client, url);
+            http.setTimeout(3000);
+            int code = http.GET();
+            if (code == 200) {
+                JsonDocument doc;
+                DeserializationError err = deserializeJson(doc, http.getStream());
+                if (!err) {
+                    JsonArray items = doc["items"].as<JsonArray>();
+                    for (JsonObject it : items) {
+                        if (_photoCount >= MAX_GALLERY_PHOTOS) break;
+                        GalleryItem& item = _photos[_photoCount++];
+                        item.source = PHOTO_SERVER;
+                        const char* id = it["id"] | "";
+                        const char* title = it["title"] | "Server Photo";
+                        strncpy(item.idOrPath, id, sizeof(item.idOrPath) - 1);
+                        item.idOrPath[sizeof(item.idOrPath) - 1] = '\0';
+                        strncpy(item.title, title, sizeof(item.title) - 1);
+                        item.title[sizeof(item.title) - 1] = '\0';
+                        item.fileSize = it["size_bytes"] | 0;
+                    }
                 }
-                for (int py = y; py <= y + h; py += yStep) {
-                    _canvas->drawFastHLine(x, py, w, 0x07FF);
+            }
+            http.end();
+            Serial.printf("[gallery] Total photos after server query: %d\n", _photoCount);
+        }
+
+        if (_photoIdx >= _photoCount) {
+            _photoIdx = (_photoCount > 0) ? (_photoCount - 1) : 0;
+        }
+    }
+
+    void loadCurrentPhoto() {
+        if (_photoCount == 0 || _photoIdx < 0 || _photoIdx >= _photoCount) {
+            _imgSize = 0;
+            _loadedIdx = -1;
+            _loadFailed = false;
+            return;
+        }
+
+        if (_loadedIdx == _photoIdx && _imgSize > 0) {
+            return; // Already in buffer
+        }
+
+        _imgSize = 0;
+        _loadFailed = false;
+        _loading = true;
+
+        if (!_imgBuf) {
+            _imgBuf = (uint8_t*)ps_malloc(64 * 1024);
+            if (!_imgBuf) _imgBuf = (uint8_t*)malloc(64 * 1024);
+        }
+        if (!_imgBuf) {
+            _loadFailed = true;
+            _loading = false;
+            return;
+        }
+
+        GalleryItem& item = _photos[_photoIdx];
+
+        if (item.source == PHOTO_LITTLEFS) {
+            if (LittleFS.exists(item.idOrPath)) {
+                File f = LittleFS.open(item.idOrPath, "r");
+                if (f) {
+                    size_t sz = f.size();
+                    if (sz > 0 && sz <= (64 * 1024)) {
+                        size_t rd = f.read(_imgBuf, sz);
+                        _imgSize = rd;
+                        item.fileSize = rd;
+                        _loadedIdx = _photoIdx;
+                    }
+                    f.close();
                 }
-                // Center neon polygon
-                _canvas->drawRoundRect(x + w / 4, y + h / 4, w / 2, h / 2, 6, 0xF81F);
-                break;
             }
-            case 2: { // Mountain Scene
-                _canvas->fillRect(x, y, w, h, 0x0012); // Deep night sky
-                // Stars
-                _canvas->drawPixel(x + w / 5, y + h / 6, 0xFFFF);
-                _canvas->drawPixel(x + (w * 3) / 4, y + h / 5, 0xFFFF);
-                _canvas->drawPixel(x + w / 2, y + h / 8, 0xFFE0);
-                // Moon
-                _canvas->fillCircle(x + (w * 4) / 5, y + h / 4, max(4, w / 12), 0xFFE0);
-                // Peaks
-                _canvas->fillTriangle(x, y + h - 1, x + w / 3, y + h / 3, x + (w * 2) / 3, y + h - 1, 0x4208);
-                _canvas->fillTriangle(x + w / 3, y + h - 1, x + (w * 2) / 3, y + (h * 2) / 5, x + w - 1, y + h - 1, 0x632C);
-                break;
-            }
-            case 3: { // PoKo Emblem Mascot
-                _canvas->fillRect(x, y, w, h, 0x1082);
-                int mw = (w * 6) / 10;
-                int mh = (h * 6) / 10;
-                int mx = x + (w - mw) / 2;
-                int my = y + (h - mh) / 2;
-                _canvas->drawRoundRect(mx, my, mw, mh, 10, POKO_CLR_ACCENT);
-                _canvas->fillRoundRect(mx + 2, my + 2, mw - 4, mh - 4, 8, 0x18C3);
-                // Eyes
-                int eyeR = max(2, mw / 12);
-                _canvas->fillCircle(mx + mw / 3, my + mh / 3, eyeR, 0xFFFF);
-                _canvas->fillCircle(mx + (mw * 2) / 3, my + mh / 3, eyeR, 0xFFFF);
-                // Smile
-                _canvas->drawArc(mx + mw / 2, my + (mh * 6) / 10, mw / 5, mw / 6, 0, 180, 0xFD20);
-                break;
+        } else if (item.source == PHOTO_SERVER) {
+            if (WiFi.status() == WL_CONNECTED) {
+                String host = prefs.getString("server_host", "192.168.0.15");
+                int port = prefs.getInt("server_port", 8765);
+                String url = "http://" + host + ":" + String(port) + "/api/image/" + String(item.idOrPath) + "/jpeg?size=128&aspect=square";
+
+                WiFiClient client;
+                HTTPClient http;
+                http.begin(client, url);
+                http.setTimeout(3000);
+                int code = http.GET();
+                if (code == 200) {
+                    int len = http.getSize();
+                    WiFiClient* stream = http.getStreamPtr();
+                    size_t totalRead = 0;
+                    uint32_t startMs = millis();
+                    while (http.connected() && (len < 0 || totalRead < (size_t)len) && (millis() - startMs < 2500)) {
+                        size_t avail = stream->available();
+                        if (avail) {
+                            size_t toRead = avail;
+                            if (len > 0 && totalRead + toRead > (size_t)len) {
+                                toRead = (size_t)len - totalRead;
+                            }
+                            if (totalRead + toRead > 64 * 1024) break;
+                            size_t r = stream->readBytes(_imgBuf + totalRead, toRead);
+                            totalRead += r;
+                        } else {
+                            delay(2);
+                        }
+                    }
+                    if (totalRead > 50) {
+                        _imgSize = totalRead;
+                        item.fileSize = totalRead;
+                        _loadedIdx = _photoIdx;
+                    }
+                }
+                http.end();
             }
         }
+
+        _loadFailed = (_imgSize == 0);
+        _loading = false;
     }
 
     void renderToCanvas() {
         if (!_canvas) return;
         const auto& theme = currentTheme();
 
+        if (_photoCount == 0) {
+            // Empty gallery
+            _canvas->fillScreen(theme.bg);
+
+            // Header
+            _canvas->fillRect(0, 0, 128, 14, theme.headerBg);
+            _canvas->setFont(u8g2_font_helvB08_tf);
+            _canvas->setTextColor(theme.accent, theme.headerBg);
+            _canvas->setCursor(3, 11);
+            _canvas->print("Gallery");
+
+            _canvas->setTextColor(theme.muted, theme.headerBg);
+            _canvas->setFont(u8g2_font_5x7_tf);
+            _canvas->setCursor(104, 11);
+            _canvas->print("0/0");
+
+            // Empty state message
+            _canvas->drawRoundRect(14, 22, 100, 78, 6, theme.line);
+            _canvas->fillRoundRect(15, 23, 98, 76, 5, theme.surface);
+
+            _canvas->setFont(u8g2_font_helvB08_tf);
+            _canvas->setTextColor(theme.accent, theme.surface);
+            _canvas->setCursor(34, 46);
+            _canvas->print("No Photos");
+
+            _canvas->setFont(u8g2_font_5x7_tf);
+            _canvas->setTextColor(theme.muted, theme.surface);
+            _canvas->setCursor(22, 64);
+            _canvas->print("Upload via Web UI");
+            _canvas->setCursor(20, 76);
+            _canvas->print("or connect server");
+
+            // Footer
+            _canvas->fillRect(0, 114, 128, 14, theme.headerBg);
+            _canvas->drawFastHLine(0, 114, 128, theme.line);
+            _canvas->setFont(u8g2_font_5x7_tf);
+            _canvas->setTextColor(theme.footerText, theme.headerBg);
+            _canvas->setCursor(44, 124);
+            _canvas->print("2L:Back");
+
+            _canvas->flush();
+            return;
+        }
+
         if (_fullscreen) {
             // Fullscreen 128×128 image only — zero borders, zero UI
-            drawPhotoGraphic(0, 0, 128, 128, _photoIdx);
+            if (_imgSize > 100) {
+                _activeCanvas = _canvas;
+                TJpgDec.setJpgScale(1);
+                TJpgDec.setSwapBytes(false);
+                TJpgDec.setCallback(tftOutput);
+                TJpgDec.drawJpg(0, 0, _imgBuf, _imgSize);
+                _activeCanvas = nullptr;
+            } else {
+                _canvas->fillScreen(RGB565_BLACK);
+                _canvas->setFont(u8g2_font_5x7_tf);
+                _canvas->setTextColor(RGB565_WHITE, RGB565_BLACK);
+                _canvas->setCursor(44, 64);
+                _canvas->print("Loading...");
+            }
         } else {
             // Normal Windowed mode with navigation hints
             _canvas->fillScreen(theme.bg);
@@ -114,37 +312,80 @@ private:
             // Header (y=0..13)
             _canvas->fillRect(0, 0, 128, 14, theme.headerBg);
             _canvas->setFont(u8g2_font_helvB08_tf);
-            _canvas->setTextColor(0xFD20, theme.headerBg);
+            _canvas->setTextColor(theme.accent, theme.headerBg);
             _canvas->setCursor(3, 11);
             _canvas->print("Gallery");
 
-            char countBuf[8];
-            snprintf(countBuf, sizeof(countBuf), "%d/%d", _photoIdx + 1, TOTAL_PHOTOS);
+            // Source badge: [LFS] or [SRV]
+            bool isLfs = (_photos[_photoIdx].source == PHOTO_LITTLEFS);
             _canvas->setFont(u8g2_font_5x7_tf);
+            _canvas->setTextColor(isLfs ? 0x07E0 : 0x07FF, theme.headerBg);
+            _canvas->setCursor(52, 11);
+            _canvas->print(isLfs ? "[LFS]" : "[SRV]");
+
+            // Counter (e.g. "1/8")
+            char countBuf[10];
+            snprintf(countBuf, sizeof(countBuf), "%d/%d", _photoIdx + 1, _photoCount);
             _canvas->setTextColor(theme.muted, theme.headerBg);
             int16_t x1, y1; uint16_t w, h;
             _canvas->getTextBounds(countBuf, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(125 - w, 11);
             _canvas->print(countBuf);
 
-            // Photo display frame (y=18..98)
-            _canvas->drawRect(14, 18, 100, 80, theme.line);
-            drawPhotoGraphic(16, 20, 96, 76, _photoIdx);
+            // Photo display frame (y=16..84)
+            _canvas->drawRoundRect(30, 16, 68, 68, 4, theme.line);
+            _canvas->fillRoundRect(31, 17, 66, 66, 3, theme.surface);
 
-            // Subtitle (y=104)
+            if (_imgSize > 100) {
+                _activeCanvas = _canvas;
+                TJpgDec.setJpgScale(2);
+                TJpgDec.setSwapBytes(false);
+                TJpgDec.setCallback(tftOutput);
+                TJpgDec.drawJpg(32, 18, _imgBuf, _imgSize);
+                _activeCanvas = nullptr;
+            } else if (_loadFailed) {
+                _canvas->setFont(u8g2_font_5x7_tf);
+                _canvas->setTextColor(0xF800, theme.surface);
+                _canvas->setCursor(47, 52);
+                _canvas->print("Error");
+            } else {
+                _canvas->setFont(u8g2_font_5x7_tf);
+                _canvas->setTextColor(theme.muted, theme.surface);
+                _canvas->setCursor(41, 52);
+                _canvas->print("Loading");
+            }
+
+            // Subtitle / Filename (y=88..100)
             _canvas->setFont(u8g2_font_5x7_tf);
+            _canvas->setTextColor(theme.text, theme.bg);
+            const char* title = _photos[_photoIdx].title;
+            _canvas->getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
+            if (w <= 122) {
+                _canvas->setCursor(64 - w / 2, 98);
+            } else {
+                _canvas->setCursor(3, 98);
+            }
+            _canvas->print(title);
+
+            // Info line (y=102..110)
+            _canvas->setFont(u8g2_font_4x6_tf);
             _canvas->setTextColor(theme.muted, theme.bg);
-            const char* titles[] = { "Sunset Bloom", "Neon Horizon", "Alps Peak", "PoKo Mascot" };
-            _canvas->getTextBounds(titles[_photoIdx], 0, 0, &x1, &y1, &w, &h);
+            char infoBuf[32];
+            if (isLfs) {
+                snprintf(infoBuf, sizeof(infoBuf), "LittleFS (%.1f KB)", (float)_photos[_photoIdx].fileSize / 1024.0f);
+            } else {
+                snprintf(infoBuf, sizeof(infoBuf), "Media Server");
+            }
+            _canvas->getTextBounds(infoBuf, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(64 - w / 2, 108);
-            _canvas->print(titles[_photoIdx]);
+            _canvas->print(infoBuf);
 
             // Footer (y=114..127)
             _canvas->fillRect(0, 114, 128, 14, theme.headerBg);
             _canvas->drawFastHLine(0, 114, 128, theme.line);
             _canvas->setFont(u8g2_font_5x7_tf);
             _canvas->setTextColor(theme.footerText, theme.headerBg);
-            const char* hint = "L:Prv  R:Nxt  2R:Back";
+            const char* hint = "L:Prv  R:Nxt  2L:Back";
             _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(64 - w / 2, 124);
             _canvas->print(hint);
@@ -162,6 +403,10 @@ public:
             _canvas = new Arduino_Canvas(128, 128, _gfx, 0, 0);
             _canvas->begin();
         }
+        if (!_imgBuf) {
+            _imgBuf = (uint8_t*)ps_malloc(64 * 1024);
+            if (!_imgBuf) _imgBuf = (uint8_t*)malloc(64 * 1024);
+        }
     }
 
     void load() {
@@ -172,6 +417,8 @@ public:
         _lastActivityMs  = millis();
         _lastSlideMs     = millis();
         begin();
+        scanPhotos();
+        loadCurrentPhoto();
         renderToCanvas();
     }
 
@@ -181,6 +428,19 @@ public:
             delete _canvas;
             _canvas = nullptr;
         }
+        if (_imgBuf) {
+            free(_imgBuf);
+            _imgBuf = nullptr;
+        }
+        _loadedIdx = -1;
+        _imgSize = 0;
+    }
+
+    void reloadList() {
+        if (!_active) return;
+        scanPhotos();
+        loadCurrentPhoto();
+        _dirty = true;
     }
 
     bool isLoaded() const { return _active; }
@@ -188,12 +448,9 @@ public:
     void onLeft() {
         _lastActivityMs = millis();
         _lastSlideMs    = millis();
-        if (_fullscreen) {
-            // Single press in fullscreen advances to Nxt photo
-            _photoIdx = (_photoIdx + 1) % TOTAL_PHOTOS;
-        } else {
-            // In windowed mode, BOOT goes to Previous photo
-            _photoIdx = (_photoIdx == 0) ? (TOTAL_PHOTOS - 1) : (_photoIdx - 1);
+        if (_photoCount > 0) {
+            _photoIdx = (_photoIdx == 0) ? (_photoCount - 1) : (_photoIdx - 1);
+            loadCurrentPhoto();
         }
         _dirty = true;
     }
@@ -201,14 +458,16 @@ public:
     void onRight() {
         _lastActivityMs = millis();
         _lastSlideMs    = millis();
-        // Advance to Next photo
-        _photoIdx = (_photoIdx + 1) % TOTAL_PHOTOS;
+        if (_photoCount > 0) {
+            _photoIdx = (_photoIdx + 1) % _photoCount;
+            loadCurrentPhoto();
+        }
         _dirty = true;
     }
 
     void onBack() {
         if (_fullscreen) {
-            // Double press in fullscreen exits fullscreen back to windowed mode
+            // Exit fullscreen back to windowed mode
             _fullscreen = false;
             _lastActivityMs = millis();
             _dirty = true;
@@ -219,7 +478,10 @@ public:
     }
 
     void onEnter() {
-        onBack();
+        // Toggle fullscreen mode
+        _fullscreen = !_fullscreen;
+        _lastActivityMs = millis();
+        _dirty = true;
     }
 
     void update() {
@@ -227,16 +489,17 @@ public:
         uint32_t now = millis();
 
         // 2-Second Inactivity Fullscreen Transition
-        if (!_fullscreen && (now - _lastActivityMs >= 2000)) {
+        if (!_fullscreen && _photoCount > 0 && (now - _lastActivityMs >= 2000)) {
             _fullscreen = true;
             _dirty = true;
         }
 
         // Slideshow Auto-advance Timer
         int slideInterval = prefs.getInt("gallery_timer", 0);
-        if (slideInterval > 0 && (now - _lastSlideMs >= (uint32_t)slideInterval * 1000)) {
+        if (slideInterval > 0 && _photoCount > 1 && (now - _lastSlideMs >= (uint32_t)slideInterval * 1000)) {
             _lastSlideMs = now;
-            _photoIdx = (_photoIdx + 1) % TOTAL_PHOTOS;
+            _photoIdx = (_photoIdx + 1) % _photoCount;
+            loadCurrentPhoto();
             _dirty = true;
         }
 

@@ -109,6 +109,62 @@ private:
         _statusCanvas->flush();
     }
 
+    // Draw a per-app icon centred at (cx,cy) using GFX primitives
+    void drawAppIcon(int cx, int cy, AppState state, uint16_t color, uint16_t bg) {
+        switch (state) {
+        case STATE_INFO:
+            // ── i ── circle + dot + bar
+            _gfx->drawCircle(cx, cy, 11, color);
+            _gfx->fillCircle(cx, cy - 4, 2, color);
+            _gfx->fillRect(cx - 1, cy - 1, 3, 8, color);
+            break;
+        case STATE_CLOCK:
+            // ── clock face + two hands
+            _gfx->drawCircle(cx, cy, 11, color);
+            _gfx->drawLine(cx, cy, cx, cy - 7, color);
+            _gfx->drawLine(cx, cy, cx + 5, cy + 2, color);
+            _gfx->fillCircle(cx, cy, 2, color);
+            break;
+        case STATE_SSYNC:
+            // ── speaker + two wave arcs
+            _gfx->fillRect(cx - 9, cy - 4, 6, 9, color);
+            _gfx->fillTriangle(cx - 3, cy - 6, cx - 3, cy + 7, cx + 5, cy, color);
+            _gfx->drawCircle(cx + 8, cy, 5, color);
+            _gfx->drawCircle(cx + 8, cy, 9, color);
+            break;
+        case STATE_MUSIC_UI:
+            // ── double beamed music note
+            _gfx->fillCircle(cx - 4, cy + 5, 4, color);
+            _gfx->fillCircle(cx + 4, cy + 3, 4, color);
+            _gfx->drawFastVLine(cx,     cy - 6, 11, color);
+            _gfx->drawFastVLine(cx + 8, cy - 8, 11, color);
+            _gfx->drawLine(cx, cy - 6, cx + 8, cy - 8, color);
+            break;
+        case STATE_VIDEO_UI:
+            // ── play triangle
+            _gfx->fillTriangle(cx - 8, cy - 10, cx - 8, cy + 10, cx + 9, cy, color);
+            break;
+        case STATE_GALLERY_UI:
+            // ── image frame + mountain + sun
+            _gfx->drawRoundRect(cx - 10, cy - 8, 20, 16, 2, color);
+            _gfx->fillCircle(cx - 4, cy - 3, 2, color);
+            _gfx->fillTriangle(cx - 9, cy + 7, cx + 9, cy + 7, cx, cy - 1, color);
+            break;
+        case STATE_SETTINGS_UI:
+            // ── 4-tooth gear
+            _gfx->fillRect(cx - 2, cy - 13, 4, 5, color);
+            _gfx->fillRect(cx - 2, cy + 8,  4, 5, color);
+            _gfx->fillRect(cx - 13, cy - 2, 5, 4, color);
+            _gfx->fillRect(cx + 8,  cy - 2, 5, 4, color);
+            _gfx->fillCircle(cx, cy, 9, color);
+            _gfx->fillCircle(cx, cy, 4, bg);
+            break;
+        default:
+            _gfx->fillCircle(cx, cy, 8, color);
+            break;
+        }
+    }
+
     void drawTile(uint8_t idx) {
         const PokoTile& t = _tiles[idx];
         const auto& theme = currentTheme();
@@ -116,7 +172,7 @@ private:
         // Clear main carousel area with theme background
         _gfx->fillRect(0, 13, 128, 101, theme.bg);
 
-        // Center carousel chevrons alongside the tile box
+        // Carousel chevrons
         _gfx->setFont(u8g2_font_helvB10_tf);
         _gfx->setTextColor(theme.line, theme.bg);
         _gfx->setCursor(4, 52);
@@ -124,17 +180,14 @@ private:
         _gfx->setCursor(118, 52);
         _gfx->print(">");
 
-        // Rounded box for app emblem, centered lower from header
+        // Rounded box border + fill
         _gfx->drawRoundRect(36, 26, 56, 42, 8, t.accentColor);
         _gfx->fillRoundRect(38, 28, 52, 38, 6, theme.surface);
 
-        // Emblem symbol
-        _gfx->setFont(u8g2_font_helvB14_tf);
-        _gfx->setTextColor(t.accentColor, theme.surface);
+        // Draw the per-app icon centred in the box (box centre: 64, 47)
+        drawAppIcon(64, 47, t.state, t.accentColor, theme.surface);
+
         int16_t x1, y1; uint16_t w, h;
-        _gfx->getTextBounds(t.emblem, 0, 0, &x1, &y1, &w, &h);
-        _gfx->setCursor(64 - w / 2, 54);
-        _gfx->print(t.emblem);
 
         // App Name
         _gfx->setFont(u8g2_font_helvB10_tf);

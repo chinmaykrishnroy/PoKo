@@ -343,7 +343,7 @@ def _thumbnail_with_python_ffmpeg(path: Path, ffmpeg_path: str, timeout: float, 
         except TypeError:
             ffmpeg = FFmpeg()
         command = ffmpeg.option("hide_banner").option("loglevel", "error")
-        if kind == "audio":
+        if kind in {"audio", "image"}:
             command = command.input(str(path))
         else:
             command = command.input(str(path), ss="1")
@@ -404,7 +404,7 @@ def thumbnail_icon(path: Path, kind: str, config: AppConfig, timeout: float = 5,
 def thumbnail_raw_jpeg(path: Path, kind: str, config: AppConfig, timeout: float = 6, size: int = 80) -> bytes | None:
     ffmpeg = default_ffmpeg_executable(config.ffmpeg.executable)
     selected = max(16, min(int(size), 128))
-    seek_points = [None] if kind == "audio" else ["1", "0.05", "0"]
+    seek_points = [None] if kind in {"audio", "image"} else ["1", "0.05", "0"]
     for seek in seek_points:
         cmd = [ffmpeg, "-hide_banner", "-loglevel", "error"]
         if seek is not None:

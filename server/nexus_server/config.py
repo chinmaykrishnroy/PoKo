@@ -117,7 +117,7 @@ class DisplayConfig:
 
 
 @dataclass(frozen=True)
-class NexusConfig:
+class PokoDeviceConfig:
     ip: str
     base_url: str
     switch_delay_ms: int
@@ -172,15 +172,15 @@ class FFmpegConfig:
 class AppConfig:
     host: str
     port: int
-    nexus: NexusConfig
+    poko: PokoDeviceConfig
     library: LibraryConfig
     defaults: DefaultsConfig
     ffmpeg: FFmpegConfig
     display: DisplayConfig = DisplayConfig()
 
     @property
-    def poko(self) -> NexusConfig:
-        return self.nexus
+    def nexus(self) -> PokoDeviceConfig:
+        return self.poko
 
 
 def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
@@ -216,7 +216,7 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
         host=str(_get(raw, "server.host", "0.0.0.0")),
         port=int(_get(raw, "server.port", 8765)),
         display=DisplayConfig(width=disp_w, height=disp_h),
-        nexus=NexusConfig(
+        poko=PokoDeviceConfig(
             ip=poko_ip,
             base_url=poko_base_url,
             switch_delay_ms=poko_delay,
@@ -269,15 +269,15 @@ def config_to_yaml(config: AppConfig) -> str:
   host: {config.host}
   port: {config.port}
 
-nexus:
-  ip: {config.nexus.ip}
-  base_url: {config.nexus.base_url}
-  switch_delay_ms: {config.nexus.switch_delay_ms}
+poko:
+  ip: {config.poko.ip}
+  base_url: {config.poko.base_url}
+  switch_delay_ms: {config.poko.switch_delay_ms}
   ports:
-    graphics: {config.nexus.graphics_port}
-    audio: {config.nexus.audio_port}
-    video_audio: {config.nexus.video_audio_port}
-    video_frames: {config.nexus.video_frames_port}
+    graphics: {config.poko.graphics_port}
+    audio: {config.poko.audio_port}
+    video_audio: {config.poko.video_audio_port}
+    video_frames: {config.poko.video_frames_port}
 
 library:
   read_folders:

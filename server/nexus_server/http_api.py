@@ -23,12 +23,12 @@ from .playback import PlaybackManager
 from .ui import ADMIN_HTML, FAVICON_SVG
 
 
-class NexusHTTPServer(ThreadingHTTPServer):
+class PokoHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = False
     daemon_threads = True
 
 
-class NexusBackend:
+class PokoBackend:
     def __init__(self, config: AppConfig, *, dry_run: bool = False, config_path: Path = DEFAULT_CONFIG_PATH) -> None:
         self.config = config
         self.config_path = config_path
@@ -116,7 +116,7 @@ class NexusBackend:
     def config_summary(self) -> dict[str, Any]:
         return {
             "server": {"host": self.config.host, "port": self.config.port},
-            "nexus": {"ip": self.config.nexus.ip, "base_url": self.config.nexus.base_url},
+            "poko": {"ip": self.config.poko.ip, "base_url": self.config.poko.base_url},
             "library": {
                 "read_folders": [str(p) for p in self.config.library.read_folders],
                 "write_folder": str(self.config.library.write_folder),
@@ -206,15 +206,16 @@ class NexusBackend:
         except (OSError, subprocess.TimeoutExpired):
             return path.read_bytes()
 
-    def image_preview_jpeg(self, item_id: str, aspect: str = "square") -> bytes | None:
+    def image_preview_jpeg(self, item_id: str, aspect: str = "square", size: int = 128) -> bytes | None:
         item = self.index.get(item_id)
         if not item or item.kind != "image":
             return None
         ffmpeg = default_ffmpeg_executable(self.config.ffmpeg.executable)
+        sz = max(16, min(int(size), 1024))
         if aspect == "fit":
-            vf = "scale=240:240:force_original_aspect_ratio=decrease,pad=240:240:(ow-iw)/2:(oh-ih)/2:black,format=yuvj420p"
+            vf = f"scale={sz}:{sz}:force_original_aspect_ratio=decrease,pad={sz}:{sz}:(ow-iw)/2:(oh-ih)/2:black,format=yuvj420p"
         else:
-            vf = "scale=240:240:force_original_aspect_ratio=increase,crop=240:240,format=yuvj420p"
+            vf = f"scale={sz}:{sz}:force_original_aspect_ratio=increase,crop={sz}:{sz},format=yuvj420p"
         cmd = [
             ffmpeg, "-hide_banner", "-loglevel", "error",
             "-i", str(item.path),
@@ -222,7 +223,7 @@ class NexusBackend:
             "-frames:v", "1",
             "-f", "image2pipe",
             "-vcodec", "mjpeg",
-            "-q:v", "3",
+            "-q:v", "4",
             "-",
         ]
         try:
@@ -257,10 +258,10 @@ def _int_query(query: dict[str, list[str]], key: str, default: int = 0) -> int:
         return default
 
 
-class NexusRequestHandler(BaseHTTPRequestHandler):
-    backend: NexusBackend
+class PokoRequestHandler(BaseHTTPRequestHandler):
+    backend: PokoBackend
 
-    server_version = "NexusBackend/0.1"
+    server_version = "PokoBackend/0.1"
 
     def log_message(self, format: str, *args: Any) -> None:
         print("%s - - [%s] %s" % (self.client_address[0], self.log_date_time_string(), format % args))
@@ -569,7 +570,9 @@ class NexusRequestHandler(BaseHTTPRequestHandler):
                 return
             if path.startswith("/api/image/") and path.endswith("/jpeg"):
                 item_id = unquote(path.split("/")[3])
-                payload = self.backend.image_preview_jpeg(item_id, _first(query, "aspect", "square") or "square")
+                aspect = _first(query, "aspect", "square") or "square"
+                size = int(_first(query, "size", "128") or "128")
+                payload = self.backend.image_preview_jpeg(item_id, aspect=aspect, size=size)
                 if not payload:
                     self._json({"ok": False, "error": "image not found"}, HTTPStatus.NOT_FOUND)
                     return
@@ -743,14 +746,12 @@ class NexusRequestHandler(BaseHTTPRequestHandler):
 
 
 def make_server(config: AppConfig, *, dry_run: bool = False, config_path: Path = DEFAULT_CONFIG_PATH) -> ThreadingHTTPServer:
-    class Handler(NexusRequestHandler):
+    class Handler(PokoRequestHandler):
         pass
 
-    # Bind first. If another Nexus instance owns the port, fail before starting
-    # an indexer thread that could otherwise keep a duplicate process alive.
-    server = NexusHTTPServer((config.host, config.port), Handler)
+    server = PokoHTTPServer((config.host, config.port), Handler)
     try:
-        Handler.backend = NexusBackend(config, dry_run=dry_run, config_path=config_path)
+        Handler.backend = PokoBackend(config, dry_run=dry_run, config_path=config_path)
     except Exception:
         server.server_close()
         raise
@@ -758,7 +759,7 @@ def make_server(config: AppConfig, *, dry_run: bool = False, config_path: Path =
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the Nexus media backend.")
+    parser = argparse.ArgumentParser(description="Run the Poko media backend.")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH), help="Path to server config.yml")
     parser.add_argument("--dry-run", action="store_true", help="Do not switch or stream to the ESP32")
     parser.add_argument("--host", help="Override configured bind host")
@@ -770,14 +771,14 @@ def main(argv: list[str] | None = None) -> int:
         config = replace(config, host=args.host)
     if args.port:
         config = replace(config, port=args.port)
-    print(f"Starting Nexus backend on http://{config.host}:{config.port}", flush=True)
+    print(f"Starting Poko backend on http://{config.host}:{config.port}", flush=True)
     server = make_server(config, dry_run=args.dry_run, config_path=Path(args.config))
-    print(f"Nexus backend listening on http://{config.host}:{config.port}", flush=True)
+    print(f"Poko backend listening on http://{config.host}:{config.port}", flush=True)
     print(f"Indexed folders: {', '.join(str(p) for p in config.library.read_folders) or '(none)'}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopping Nexus backend")
+        print("\nStopping Poko backend")
     finally:
         server.server_close()
     return 0

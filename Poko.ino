@@ -5,6 +5,7 @@
 #include <Preferences.h>
 #include <ArduinoOTA.h>
 #include <esp_task_wdt.h>
+#include <LittleFS.h>
 
 #include "PokoPins.h"
 #include "PokoAppState.h"
@@ -256,6 +257,18 @@ void setup() {
 
     // Preferences & Settings
     prefs.begin("poko", false);
+
+    // LittleFS Storage for offline photos & assets
+    if (!LittleFS.begin(true)) {
+        Serial.println("[fs] LittleFS mount failed!");
+    } else {
+        Serial.printf("[fs] LittleFS ready (%u / %u bytes used)\n",
+                      (unsigned int)LittleFS.usedBytes(),
+                      (unsigned int)LittleFS.totalBytes());
+        if (!LittleFS.exists("/photos")) {
+            LittleFS.mkdir("/photos");
+        }
+    }
 
     // 0. Theme Init
     String savedTheme = prefs.getString("ui_theme", "dark");

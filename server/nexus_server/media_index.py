@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import AppConfig
-from .database import NexusDatabase
+from .database import PokoDatabase
 from .ffmpeg_tools import (
     default_ffmpeg_executable,
     default_ffprobe_executable,
@@ -26,7 +26,7 @@ ProbeFn = Callable[[Path, str], dict[str, Any]]
 class MediaIndex:
     def __init__(self, config: AppConfig, probe_fn: ProbeFn | None = None) -> None:
         self.config = config
-        self.db = NexusDatabase(config.library.db_path)
+        self.db = PokoDatabase(config.library.db_path)
         self._probe_fn = probe_fn or ffprobe_media
         self._ffprobe: str | None = None
         self._scan_thread: threading.Thread | None = None
@@ -50,7 +50,7 @@ class MediaIndex:
         with self._scan_lock:
             if self._scan_thread and self._scan_thread.is_alive():
                 return False
-            self._scan_thread = threading.Thread(target=self.rescan, name="nexus-indexer", daemon=True)
+            self._scan_thread = threading.Thread(target=self.rescan, name="poko-indexer", daemon=True)
             self._scan_thread.start()
             return True
 
