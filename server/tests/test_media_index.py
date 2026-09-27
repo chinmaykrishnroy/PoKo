@@ -4,8 +4,8 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from server.nexus_server.config import LibraryConfig, load_config
-from server.nexus_server.media_index import MediaIndex
+from server.poko_server.config import LibraryConfig, load_config
+from server.poko_server.media_index import MediaIndex
 from helpers import workspace_tempdir
 
 

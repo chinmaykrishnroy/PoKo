@@ -6,11 +6,11 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-from server.nexus_server.config import LibraryConfig, load_config
-from server.nexus_server.device import DeviceClient, DeviceResponse
-from server.nexus_server.media_index import MediaIndex
-from server.nexus_server.models import MediaItem
-from server.nexus_server.playback import PlaybackManager, SyncedAVStreamer, resolve_video_tuning
+from server.poko_server.config import LibraryConfig, load_config
+from server.poko_server.device import DeviceClient, DeviceResponse
+from server.poko_server.media_index import MediaIndex
+from server.poko_server.models import MediaItem
+from server.poko_server.playback import PlaybackManager, SyncedAVStreamer, resolve_video_tuning
 from helpers import workspace_tempdir
 
 
@@ -40,7 +40,7 @@ class PlaybackTests(unittest.TestCase):
         item = MediaItem(id="v1", kind="video", path=Path("movie.mkv"), title="Movie", extension=".mkv", size_bytes=1)
         streamer = SyncedAVStreamer(item, config)
         fake_socket = FakeSocket()
-        with mock.patch("server.nexus_server.playback.socket.create_connection", return_value=fake_socket):
+        with mock.patch("server.poko_server.playback.socket.create_connection", return_value=fake_socket):
             connected = streamer._connect(config.nexus.video_audio_port)
         self.assertIs(connected, fake_socket)
         self.assertIsNone(fake_socket.timeout)

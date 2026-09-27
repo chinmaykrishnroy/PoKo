@@ -198,9 +198,9 @@ async function renderDashboard(){
   try{await syncDashboard(await getHealth(true));}catch(e){setOnline(false);liveText('dashOnline','Unavailable');}
 }
 
-const APP_NAMES={0:'Launcher',1:'Info',2:'Clock',3:'SSync',4:'Music',5:'Video',6:'Gallery',7:'Settings'};
-const APP_ICONS={0:'home',1:'info',2:'clock',3:'snapcast',4:'music',5:'video',6:'gallery',7:'settings'};
-const APP_COLORS={0:'#3aba7d',1:'#3aba7d',2:'#00c8ff',3:'#e4b94d',4:'#ef6a73',5:'#6d9ff5',6:'#f18450',7:'#9da6b0'};
+const APP_NAMES={0:'Launcher',1:'Info',2:'Clock',3:'Video',4:'Music',5:'SSync',6:'Gallery',7:'Settings'};
+const APP_ICONS={0:'home',1:'info',2:'clock',3:'video',4:'music',5:'snapcast',6:'gallery',7:'settings'};
+const APP_COLORS={0:'#3aba7d',1:'#3aba7d',2:'#00c8ff',3:'#6d9ff5',4:'#ef6a73',5:'#e4b94d',6:'#f18450',7:'#9da6b0'};
 
 function quickLaunchApps(){
   return Object.entries(APP_NAMES).slice(0,8).map(([state,name])=>
@@ -265,7 +265,7 @@ function renderApps(){
   });
 }
 
-const APP_DESC={0:'Launcher carousel',1:'System information',2:'IST clock display',3:'Snapclient audio',4:'Audio player',5:'Video player',6:'Photo viewer',7:'Device preferences'};
+const APP_DESC={0:'Launcher carousel',1:'System information',2:'IST clock display',3:'Video player',4:'Audio player',5:'Snapclient audio',6:'Photo viewer',7:'Device preferences'};
 
 // ── Controls ──────────────────────────────────────────────────────────────────
 function renderControls(){

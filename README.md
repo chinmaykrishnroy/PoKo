@@ -100,7 +100,7 @@ PoKo is a **full-featured pocket media device** running on an ESP32-S3 microcont
                ▼
 ┌──────────────────────────────────────────────┐
 │           Python Media Server                │
-│   server/nexus_server/                       │
+│   server/poko_server/                        │
 │   ├─ http_api.py  — REST API                 │
 │   ├─ playback.py  — FFmpeg stream manager    │
 │   ├─ media_index.py — library scanner        │
@@ -150,7 +150,7 @@ arduino-cli compile \
 ```bash
 cd server
 pip install -r requirements.txt      # pyyaml, pillow, requests
-python -m nexus_server --config config.yml
+python -m poko_server --config config.yml
 ```
 
 Edit `server/config.yml` to point at your media folders:
@@ -195,7 +195,7 @@ Poko/
 ├── poko_icon.svg          # App icon
 ├── server/
 │   ├── config.yml         # Server configuration
-│   └── nexus_server/      # Python media server package
+│   └── poko_server/       # Python media server package
 │       ├── http_api.py
 │       ├── playback.py
 │       ├── media_index.py

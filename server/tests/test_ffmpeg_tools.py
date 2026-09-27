@@ -5,8 +5,8 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from server.nexus_server.config import load_config
-from server.nexus_server.ffmpeg_tools import (
+from server.poko_server.config import load_config
+from server.poko_server.ffmpeg_tools import (
     audio_filter,
     audio_tcp_command,
     graphics_video_tcp_command,

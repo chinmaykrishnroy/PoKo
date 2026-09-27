@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from server.nexus_server.config import load_config, load_raw_config
+from server.poko_server.config import load_config, load_raw_config
 from helpers import workspace_tempdir
 
 

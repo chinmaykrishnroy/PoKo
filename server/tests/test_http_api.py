@@ -9,8 +9,8 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-from server.nexus_server.config import LibraryConfig, config_to_yaml, load_config
-from server.nexus_server.http_api import make_server
+from server.poko_server.config import LibraryConfig, config_to_yaml, load_config
+from server.poko_server.http_api import make_server
 from helpers import workspace_tempdir
 
 
@@ -22,7 +22,7 @@ class HttpApiTests(unittest.TestCase):
             first = make_server(config, dry_run=True)
             try:
                 occupied = replace(config, port=first.server_address[1])
-                with mock.patch("server.nexus_server.http_api.NexusBackend") as backend:
+                with mock.patch("server.poko_server.http_api.PokoBackend") as backend:
                     with self.assertRaises(OSError):
                         make_server(occupied, dry_run=True)
                     backend.assert_not_called()
