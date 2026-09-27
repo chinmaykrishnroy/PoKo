@@ -432,15 +432,17 @@ esp_err_t es8311_voice_volume_set(es8311_handle_t dev, int volume, int *volume_s
     if (volume == 0) {
         reg32 = 0; // mute
     } else {
-        // Map 1–100 → -60 dB … 0 dB logarithmically.
-        // dB = -60 * (1 - vol/100)^2  (square-law curve — sounds natural)
+        // Map 1-100 to log curve peaking at (0 dB + boost) at vol=100.
+        // Anchoring to (0xBF + _amp_boost_steps) means the whole curve
+        // shifts up — previously 0xBF was hard-coded so boost steps only
+        // raised the cap but the curve never exceeded 0xBF (no effect).
+        int   peak = 0xBF + _amp_boost_steps;
         float t    = volume / 100.0f;
         float db   = -60.0f * (1.0f - t) * (1.0f - t);
-        // Register = (dB / 0.5) + 0xBF, clamp 0 … 191 (0 dB max, no overdriving)
-        int   step = (int)(db / 0.5f);
-        reg32 = 0xBF + step;   // step is negative, so this subtracts
-        if (reg32 < 1)   reg32 = 1;
-        if (reg32 > 0xBF + _amp_boost_steps) reg32 = 0xBF + _amp_boost_steps;
+        int   step = (int)(db / 0.5f); // 0 at t=1, negative below
+        reg32 = peak + step;
+        if (reg32 < 1)    reg32 = 1;
+        if (reg32 > peak) reg32 = peak;
     }
 
     if (volume_set != NULL) {
