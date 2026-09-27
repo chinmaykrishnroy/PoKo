@@ -27,11 +27,12 @@ private:
     bool     _dirty     = true;
     uint8_t  _selected  = 0;
 
-    static constexpr uint8_t ITEM_COUNT = 6;
+    static constexpr uint8_t ITEM_COUNT = 7;
     const char* _items[ITEM_COUNT] = {
         "Theme",
         "Master Vol",
         "Brightness",
+        "Amp Boost",
         "Slide Timer",
         "Reset Drivers",
         "Reboot"
@@ -62,6 +63,7 @@ private:
 
         int curBr      = prefs.getInt("brightness", 80);
         int curMaster  = getMasterVolumeLimit();
+        int curBoost   = getAmpBoostDb();
         int curSlide   = prefs.getInt("gallery_timer", 0);
         bool isDark    = isDarkTheme();
 
@@ -87,12 +89,13 @@ private:
                 case 0: snprintf(valBuf, sizeof(valBuf), isDark ? "Dark" : "Light"); break;
                 case 1: snprintf(valBuf, sizeof(valBuf), "%d%%", curMaster); break;
                 case 2: snprintf(valBuf, sizeof(valBuf), "%d%%", curBr); break;
-                case 3:
+                case 3: snprintf(valBuf, sizeof(valBuf), "+%ddB", curBoost); break;
+                case 4:
                     if (curSlide == 0) snprintf(valBuf, sizeof(valBuf), "Off");
                     else snprintf(valBuf, sizeof(valBuf), "%ds", curSlide);
                     break;
-                case 4: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
-                case 5: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
+                case 5: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
+                case 6: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
             }
 
             _canvas->setTextColor(valCol, isSel ? theme.surface : theme.bg);
@@ -139,7 +142,14 @@ private:
                 setBacklightPercent(b);
                 break;
             }
-            case 3: { // Cycle Slide Timer: 0 -> 3 -> 5 -> 10 -> 15 -> 30 -> 60 -> 0
+            case 3: { // Cycle Amp Boost: 0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 0
+                int boost = getAmpBoostDb();
+                boost = (boost >= 5) ? 0 : (boost + 1);
+                setAmpBoostDb(boost);
+                prefs.putInt("amp_boost", boost);
+                break;
+            }
+            case 4: { // Cycle Slide Timer: 0 -> 3 -> 5 -> 10 -> 15 -> 30 -> 60 -> 0
                 int cur = prefs.getInt("gallery_timer", 0);
                 int next = 0;
                 if (cur == 0)       next = 3;
@@ -152,11 +162,11 @@ private:
                 prefs.putInt("gallery_timer", next);
                 break;
             }
-            case 4: { // Reset Drivers
+            case 5: { // Reset Drivers
                 handleDriverReset();
                 break;
             }
-            case 5: { // Reboot
+            case 6: { // Reboot
                 _canvas->fillScreen(POKO_CLR_ERR);
                 _canvas->setFont(u8g2_font_helvB10_tf);
                 _canvas->setTextColor(POKO_CLR_TEXT);

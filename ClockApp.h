@@ -43,7 +43,7 @@ private:
             _canvas->setFont(u8g2_font_profont10_mf);
             _canvas->setTextColor(theme.muted, theme.headerBg);
             _canvas->setCursor(3, 10);
-            _canvas->print(WiFi.status() == WL_CONNECTED ? "WiFi OK" : "No WiFi");
+            _canvas->print("Clock");
 
             _canvas->setCursor(85, 10);
             _canvas->print("GMT+5:30");
@@ -84,10 +84,11 @@ private:
             _canvas->setCursor(56 - w / 2, 74);
             _canvas->print(timeBuf);
 
-            // Seconds text
+            // Seconds text — positioned 4 px right of where HH:MM ends
+            int16_t timeEndX = (56 - w / 2) + (int16_t)w + 4;
             _canvas->setFont(u8g2_font_helvB10_tf);
             _canvas->setTextColor(theme.accent, theme.bg);
-            _canvas->setCursor(88, 70);
+            _canvas->setCursor(timeEndX, 70);
             _canvas->print(secBuf);
 
             // Seconds progress bar (y=84..88)
