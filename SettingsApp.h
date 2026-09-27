@@ -26,8 +26,14 @@ private:
     bool     _active    = false;
     bool     _dirty     = true;
     uint8_t  _selected  = 0;
+    uint8_t  _scroll    = 0;
 
-    static constexpr uint8_t ITEM_COUNT = 7;
+    static constexpr uint8_t ITEM_COUNT   = 7;
+    static constexpr uint8_t ROW_H        = 16;
+    static constexpr uint8_t TOP_Y        = 14;
+    static constexpr uint8_t ROWS_VISIBLE = 6;
+    static constexpr uint8_t FOOTER_Y     = 114;
+
     const char* _items[ITEM_COUNT] = {
         "Theme",
         "Master Vol",
@@ -37,6 +43,14 @@ private:
         "Reset Drivers",
         "Reboot"
     };
+
+    void adjustScroll() {
+        if (_selected < _scroll) {
+            _scroll = _selected;
+        } else if (_selected >= _scroll + ROWS_VISIBLE) {
+            _scroll = _selected - ROWS_VISIBLE + 1;
+        }
+    }
 
     void renderToCanvas() {
         if (!_canvas) return;
@@ -58,7 +72,7 @@ private:
         _canvas->print(countBuf);
 
         // Menu items area (y=14..113)
-        _canvas->fillRect(0, 14, 128, 100, theme.bg);
+        _canvas->fillRect(0, TOP_Y, 128, FOOTER_Y - TOP_Y, theme.bg);
         _canvas->setFont(u8g2_font_profont10_mf);
 
         int curBr      = prefs.getInt("brightness", 80);
@@ -67,25 +81,28 @@ private:
         int curSlide   = prefs.getInt("gallery_timer", 0);
         bool isDark    = isDarkTheme();
 
-        for (uint8_t i = 0; i < ITEM_COUNT; i++) {
-            int16_t rowY = 16 + i * 16;
-            bool isSel = (i == _selected);
+        for (uint8_t i = 0; i < ROWS_VISIBLE; i++) {
+            uint8_t itemIdx = _scroll + i;
+            if (itemIdx >= ITEM_COUNT) break;
+
+            int16_t rowY = TOP_Y + 2 + i * ROW_H;
+            bool isSel = (itemIdx == _selected);
 
             if (isSel) {
-                _canvas->fillRect(0, rowY - 2, 128, 15, theme.surface);
-                _canvas->drawFastHLine(0, rowY - 2, 128, theme.accent);
-                _canvas->drawFastHLine(0, rowY + 12, 128, theme.accent);
+                _canvas->fillRect(0, rowY - 2, 124, 15, theme.surface);
+                _canvas->drawFastHLine(0, rowY - 2, 124, theme.accent);
+                _canvas->drawFastHLine(0, rowY + 12, 124, theme.accent);
             }
 
             _canvas->setTextColor(isSel ? theme.text : theme.muted, isSel ? theme.surface : theme.bg);
             _canvas->setCursor(4, rowY + 9);
-            _canvas->print(_items[i]);
+            _canvas->print(_items[itemIdx]);
 
             // Value text on the right
             char valBuf[16] = "";
             uint16_t valCol = isSel ? theme.accent : theme.muted;
 
-            switch (i) {
+            switch (itemIdx) {
                 case 0: snprintf(valBuf, sizeof(valBuf), isDark ? "Dark" : "Light"); break;
                 case 1: snprintf(valBuf, sizeof(valBuf), "%d%%", curMaster); break;
                 case 2: snprintf(valBuf, sizeof(valBuf), "%d%%", curBr); break;
@@ -100,13 +117,21 @@ private:
 
             _canvas->setTextColor(valCol, isSel ? theme.surface : theme.bg);
             _canvas->getTextBounds(valBuf, 0, 0, &x1, &y1, &w, &h);
-            _canvas->setCursor(124 - w, rowY + 9);
+            _canvas->setCursor(122 - w, rowY + 9);
             _canvas->print(valBuf);
         }
 
+        // Scroll indicator bar
+        if (ITEM_COUNT > ROWS_VISIBLE) {
+            uint8_t barH = (ROWS_VISIBLE * (FOOTER_Y - TOP_Y)) / ITEM_COUNT;
+            uint8_t barY = TOP_Y + (_scroll * (FOOTER_Y - TOP_Y - barH)) / (ITEM_COUNT - ROWS_VISIBLE);
+            _canvas->drawFastVLine(126, TOP_Y, FOOTER_Y - TOP_Y, theme.line);
+            _canvas->drawFastVLine(126, barY, barH, theme.accent);
+        }
+
         // Footer (y=114..127)
-        _canvas->fillRect(0, 114, 128, 14, theme.headerBg);
-        _canvas->drawFastHLine(0, 114, 128, theme.line);
+        _canvas->fillRect(0, FOOTER_Y, 128, 14, theme.headerBg);
+        _canvas->drawFastHLine(0, FOOTER_Y, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(theme.footerText, theme.headerBg);
         const char* hint = "L:Up  R:Dn  2R:Set";
@@ -195,6 +220,7 @@ public:
     void load() {
         _active   = true;
         _selected = 0;
+        _scroll   = 0;
         _dirty    = true;
         begin();
         renderToCanvas();
@@ -212,11 +238,13 @@ public:
 
     void onLeft() {
         _selected = (_selected == 0) ? (ITEM_COUNT - 1) : (_selected - 1);
+        adjustScroll();
         _dirty = true;
     }
 
     void onRight() {
         _selected = (_selected + 1) % ITEM_COUNT;
+        adjustScroll();
         _dirty = true;
     }
 
