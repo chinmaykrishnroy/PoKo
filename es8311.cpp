@@ -5,6 +5,7 @@
  */
 
 #include <string.h>
+#include <math.h>
 #include "es8311.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -405,14 +406,31 @@ esp_err_t es8311_voice_volume_set(es8311_handle_t dev, int volume, int *volume_s
         volume = 100;
     }
 
+    // ES8311 DAC_REG32 is a 0.5 dB/step digital volume register.
+    // 0x00 = mute/−∞, 0xBF (191) = 0 dB (unity gain), 0xFF = +32 dB.
+    // Sending values above 0xBF overdrives the output past 0 dBFS and
+    // causes hard clipping + PA distortion — which is why 75% sounds
+    // clean (0xBF = 75 * 256/100 - 1) and anything higher clips.
+    //
+    // Fix: map the 0–100 user percentage to −60 dB … 0 dB on a log
+    // curve, then write the corresponding register value (0 … 191).
+    // This gives a perceptually linear volume knob with no clipping.
+
     int reg32;
     if (volume == 0) {
-        reg32 = 0;
+        reg32 = 0; // mute
     } else {
-        reg32 = ((volume) * 256 / 100) - 1;
+        // Map 1–100 → -60 dB … 0 dB logarithmically.
+        // dB = -60 * (1 - vol/100)^2  (square-law curve — sounds natural)
+        float t    = volume / 100.0f;
+        float db   = -60.0f * (1.0f - t) * (1.0f - t);
+        // Register = (dB / 0.5) + 0xBF, clamp 0 … 191 (0 dB max, no overdriving)
+        int   step = (int)(db / 0.5f);
+        reg32 = 0xBF + step;   // step is negative, so this subtracts
+        if (reg32 < 1)   reg32 = 1;
+        if (reg32 > 0xBF) reg32 = 0xBF; // never exceed 0 dB / unity
     }
 
-    // provide user with real volume set
     if (volume_set != NULL) {
         *volume_set = volume;
     }
@@ -427,7 +445,16 @@ esp_err_t es8311_voice_volume_get(es8311_handle_t dev, int *volume)
     if (reg32 == 0) {
         *volume = 0;
     } else {
-        *volume = ((reg32 * 100) / 256) + 1;
+        // Invert: reg32 = 0xBF + step, step = dB / 0.5, dB = -60*(1-t)^2
+        float db   = (reg32 - 0xBF) * 0.5f;            // dB (negative or 0)
+        float sq   = db / -60.0f;                       // (1-t)^2
+        if (sq <= 0.0f) { *volume = 100; }
+        else {
+            float t = 1.0f - sqrtf(sq);
+            *volume = (int)(t * 100.0f + 0.5f);
+            if (*volume < 1)  *volume = 1;
+            if (*volume > 100) *volume = 100;
+        }
     }
     return ESP_OK;
 }
