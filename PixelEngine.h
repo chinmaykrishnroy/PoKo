@@ -66,7 +66,8 @@ private:
     uint8_t   _r = 0;
     uint8_t   _g = 200;
     uint8_t   _b = 255;
-    uint8_t   _targetPixel = 8; // 8 = All 8 LEDs, 0..7 = single LED
+    uint8_t   _targetPixel = 8; // 8 = All 8 LEDs, 0..7 = single LED, 255 = custom WEB mask
+    uint8_t   _targetMask = 0xFF; // Bitmask of enabled LEDs (bits 0..7)
     uint8_t   _brightness = 40; // 0..255
     uint16_t  _speedMs = 70;
 
@@ -140,7 +141,8 @@ public:
         _r = (uint8_t)prefs.getInt("px_r", 0);
         _g = (uint8_t)prefs.getInt("px_g", 200);
         _b = (uint8_t)prefs.getInt("px_b", 255);
-        _targetPixel = (uint8_t)constrain(prefs.getInt("px_target", 8), 0, 8);
+        _targetPixel = (uint8_t)constrain(prefs.getInt("px_target", 8), 0, 255);
+        _targetMask = (uint8_t)prefs.getInt("px_mask", _targetPixel == 8 ? 0xFF : (_targetPixel < 8 ? (1 << _targetPixel) : 0xFF));
         _brightness = (uint8_t)constrain(prefs.getInt("px_bright", 40), 1, 255);
         _speedMs = (uint16_t)constrain(prefs.getInt("px_speed", 70), 20, 2000);
         _musicLightOn = prefs.getBool("px_mus_on", true);
@@ -160,6 +162,7 @@ public:
         prefs.putInt("px_g", _g);
         prefs.putInt("px_b", _b);
         prefs.putInt("px_target", _targetPixel);
+        prefs.putInt("px_mask", _targetMask);
         prefs.putInt("px_bright", _brightness);
         prefs.putInt("px_speed", _speedMs);
         prefs.putBool("px_mus_on", _musicLightOn);
@@ -180,7 +183,55 @@ public:
     void setColor(uint8_t r, uint8_t g, uint8_t b) { _r = r; _g = g; _b = b; }
 
     uint8_t getTargetPixel() const { return _targetPixel; }
-    void setTargetPixel(uint8_t t) { _targetPixel = constrain(t, 0, 8); }
+    void setTargetPixel(uint8_t t) {
+        if (t == 8) {
+            _targetPixel = 8;
+            _targetMask = 0xFF;
+        } else if (t < POKO_LED_COUNT) {
+            _targetPixel = t;
+            _targetMask = (1 << t);
+        } else {
+            _targetPixel = 255;
+        }
+    }
+
+    uint8_t getTargetMask() const { return _targetMask; }
+    void setTargetMask(uint8_t mask) {
+        _targetMask = mask;
+        if (_targetMask == 0xFF) {
+            _targetPixel = 8;
+        } else if ((_targetMask & (_targetMask - 1)) == 0 && _targetMask != 0) {
+            for (uint8_t i = 0; i < POKO_LED_COUNT; i++) {
+                if (_targetMask == (1 << i)) {
+                    _targetPixel = i;
+                    break;
+                }
+            }
+        } else {
+            _targetPixel = 255; // Arbitrary multi-LED selection from WEB
+        }
+    }
+
+    void toggleTargetLed(uint8_t idx) {
+        if (idx < POKO_LED_COUNT) {
+            setTargetMask(_targetMask ^ (1 << idx));
+        }
+    }
+
+    const char* getTargetMaskLabel() const {
+        if (_targetMask == 0xFF) return "All 8";
+        if (_targetMask == 0) return "None";
+        if ((_targetMask & (_targetMask - 1)) == 0) {
+            for (uint8_t k = 0; k < 8; k++) {
+                if (_targetMask == (1 << k)) {
+                    static char buf[10];
+                    snprintf(buf, sizeof(buf), "LED %d", k + 1);
+                    return buf;
+                }
+            }
+        }
+        return "WEB";
+    }
 
     uint8_t getBrightness() const { return _brightness; }
     void setBrightness(uint8_t b) {
@@ -479,18 +530,26 @@ public:
                 break;
         }
 
+        // Apply target LED mask to ambient lighting if not all 8 LEDs
+        if (_targetMask != 0xFF && _mode != PIXEL_MODE_OFF) {
+            for (uint8_t i = 0; i < POKO_LED_COUNT; i++) {
+                if (!(_targetMask & (1 << i))) {
+                    _leds[i] = CRGB::Black;
+                }
+            }
+        }
+
         FastLED.show();
     }
 
 private:
     void renderSolid() {
         CRGB c(_r, _g, _b);
-        if (_targetPixel == 8) {
-            fill_solid(_leds, POKO_LED_COUNT, c);
-        } else {
-            fill_solid(_leds, POKO_LED_COUNT, CRGB::Black);
-            if (_targetPixel < POKO_LED_COUNT) {
-                _leds[_targetPixel] = c;
+        for (uint8_t i = 0; i < POKO_LED_COUNT; i++) {
+            if (_targetMask & (1 << i)) {
+                _leds[i] = c;
+            } else {
+                _leds[i] = CRGB::Black;
             }
         }
     }

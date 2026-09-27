@@ -353,11 +353,22 @@ async function renderControls(){
             </div>
           </div>
 
-          <!-- Target Pixel Selector -->
-          <label style="font-size:12px;color:var(--muted);margin-top:12px;display:block">Target LED</label>
-          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
-            <button class="btn ${d.pixel_target===8||d.pixel_target==null?'blue':''}" onclick="setPixelTarget(8)" style="font-size:11px;padding:4px 8px">All 8</button>
-            ${[0,1,2,3,4,5,6,7].map(i=>`<button class="btn ${d.pixel_target===i?'blue':''}" onclick="setPixelTarget(${i})" style="font-size:11px;padding:4px 8px">${i+1}</button>`).join('')}
+          <!-- Target LED Multi-Select (1..8) -->
+          <div style="margin-top:14px">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+              <label style="font-size:12px;color:var(--muted);font-weight:600">Active LEDs (Click to Toggle)</label>
+              <div style="display:flex;gap:5px">
+                <button type="button" class="btn ${(d.target_mask===255||d.target_mask==null)?'blue':''}" onclick="setAllLeds(true)" style="font-size:11px;padding:3px 8px;height:24px">All 8</button>
+                <button type="button" class="btn" onclick="setAllLeds(false)" style="font-size:11px;padding:3px 8px;height:24px">Clear</button>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:5px;margin-top:6px">
+              ${[0,1,2,3,4,5,6,7].map(i => {
+                const active = ((d.target_mask !== undefined ? d.target_mask : 255) & (1 << i)) !== 0;
+                return `<button type="button" class="btn ${active ? 'blue' : ''}" onclick="toggleLed(${i})" style="font-size:12px;padding:7px 0;font-weight:700;display:flex;flex-direction:column;align-items:center;gap:2px" title="Toggle LED ${i+1}"><span>${i+1}</span><span style="width:6px;height:6px;border-radius:50%;background:${active ? '#000' : 'var(--line)'}"></span></button>`;
+              }).join('')}
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:5px;text-align:right" id="targetStatusText">Target: ${esc(d.target_label || 'All 8')}</div>
           </div>
 
           <!-- LED Brightness -->
@@ -368,17 +379,21 @@ async function renderControls(){
           </div>
 
           <!-- Music Reactive Lighting -->
-          <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)">
-            <label style="font-size:12px;color:var(--accent);font-weight:700">Music Player Reactive Lighting</label>
-            <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
-              <label class="switch" style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
-                <input type="checkbox" id="musLightCb" ${d.music_light!==false?'checked':''} onchange="setMusicLight(this.checked)"> Music Light (Active on Song Play)
+          <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+              <div style="min-width:0;flex:1">
+                <div style="font-size:13px;font-weight:700;color:var(--accent)">Music Reactive Light</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px">Pulsates with music playback</div>
+              </div>
+              <label class="switch" style="flex-shrink:0">
+                <input type="checkbox" id="musLightCb" ${d.music_light!==false?'checked':''} onchange="setMusicLight(this.checked)">
+                <span></span>
               </label>
             </div>
-            <label style="font-size:12px;color:var(--muted);margin-top:8px;display:block">Music Effect (Glows with Song Volume &amp; Waveform)</label>
+            <label style="font-size:12px;color:var(--muted);margin-top:10px;display:block">Music Visualizer Effect</label>
             <select id="musFxSelect" onchange="setMusicEffect(this.value)" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px">
-              <option value="auto" ${d.music_effect===0?'selected':''}>Auto (Extract 2 Colors from Album Art)</option>
-              <option value="progress" ${d.music_effect===1?'selected':''}>Playback Progress (Track Fill + Beat Pulse)</option>
+              <option value="auto" ${d.music_effect===0?'selected':''}>Auto (Album Art Dual-Color)</option>
+              <option value="progress" ${d.music_effect===1?'selected':''}>Playback Progress (Track Fill + Beat)</option>
               <option value="red" ${d.music_effect===2?'selected':''}>Red Pulse</option>
               <option value="green" ${d.music_effect===3?'selected':''}>Green Glow</option>
               <option value="blue" ${d.music_effect===4?'selected':''}>Blue Ocean</option>
@@ -390,16 +405,20 @@ async function renderControls(){
           </div>
 
           <!-- SSync Reactive Lighting -->
-          <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)">
-            <label style="font-size:12px;color:var(--accent);font-weight:700">SSync (Snapcast) Reactive Lighting</label>
-            <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
-              <label class="switch" style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
-                <input type="checkbox" id="ssyLightCb" ${d.ssync_light!==false?'checked':''} onchange="setSSyncLight(this.checked)"> SSync Light (Active on Stream)
+          <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+              <div style="min-width:0;flex:1">
+                <div style="font-size:13px;font-weight:700;color:var(--accent)">SSync Reactive Light</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px">Pulsates with Snapcast stream</div>
+              </div>
+              <label class="switch" style="flex-shrink:0">
+                <input type="checkbox" id="ssyLightCb" ${d.ssync_light!==false?'checked':''} onchange="setSSyncLight(this.checked)">
+                <span></span>
               </label>
             </div>
-            <label style="font-size:12px;color:var(--muted);margin-top:8px;display:block">SSync Effect</label>
+            <label style="font-size:12px;color:var(--muted);margin-top:10px;display:block">SSync Effect</label>
             <select id="ssyFxSelect" onchange="setSSyncEffect(this.value)" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px">
-              <option value="vol_hue" ${d.ssync_effect===0?'selected':''}>Volume Adaptive Hue (Green -&gt; Amber -&gt; Red)</option>
+              <option value="vol_hue" ${d.ssync_effect===0?'selected':''}>Volume Adaptive Hue (Green-&gt;Amber-&gt;Red)</option>
               <option value="rainbow" ${d.ssync_effect===1?'selected':''}>Rainbow Wave</option>
               <option value="cyan" ${d.ssync_effect===2?'selected':''}>Cyan Beat Pulse</option>
               <option value="magenta" ${d.ssync_effect===3?'selected':''}>Magenta Beat Pulse</option>
@@ -408,13 +427,13 @@ async function renderControls(){
           </div>
 
           <!-- Audio Frequency Response Filter -->
-          <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)">
-            <label style="font-size:12px;color:var(--accent);font-weight:700">Audio Frequency Response (Beat Sensitivity)</label>
-            <label style="font-size:12px;color:var(--muted);margin-top:6px;display:block">Filter audio spectrum for reactive pulsing</label>
+          <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+            <label style="font-size:12px;color:var(--accent);font-weight:700">Audio Frequency Response</label>
+            <label style="font-size:11px;color:var(--muted);margin-top:2px;display:block">Filter audio spectrum for reactive visualizer pulsing</label>
             <select id="freqRespSelect" onchange="setFreqResponse(this.value)" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px">
-              <option value="low" ${d.freq_resp===0?'selected':''}>Low [Bass &amp; Kick drum &lt; 250 Hz] (Rhythm)</option>
+              <option value="low" ${d.freq_resp===0?'selected':''}>Low [Bass &amp; Kick &lt; 250 Hz] (Recommended)</option>
               <option value="mid" ${d.freq_resp===1?'selected':''}>Mid [Vocals &amp; Melody 250 Hz - 3 kHz]</option>
-              <option value="high" ${d.freq_resp===2?'selected':''}>High [Treble &amp; Hi-hats &gt; 3 kHz]</option>
+              <option value="high" ${d.freq_resp===2?'selected':''}>High [Treble &amp; Cymbals &gt; 3 kHz]</option>
               <option value="all" ${d.freq_resp===3?'selected':''}>All [Full Spectrum Raw Peak]</option>
             </select>
           </div>
@@ -704,7 +723,29 @@ function onRgbChange(){
   pxRgbTimer=setTimeout(()=>fetch(`/api/pixels?r=${r}&g=${g}&b=${b}&mode=solid`),80);
 }
 function setPixelMode(m){fetch('/api/pixels?mode='+m).then(()=>toast('Mode: '+m));}
-function setPixelTarget(t){fetch('/api/pixels?target='+t).then(()=>{toast('Target: '+(t===8?'All 8':'LED '+(t+1)));renderControls();});}
+let curTargetMask=255;
+function toggleLed(i){
+  if(healthCache&&healthCache.target_mask!==undefined)curTargetMask=healthCache.target_mask;
+  curTargetMask^=(1<<i);
+  fetch(`/api/pixels?target_mask=${curTargetMask}&mode=solid`)
+    .then(r=>r.json())
+    .then(d=>{
+      if(healthCache){healthCache.target_mask=d.target_mask;healthCache.target_label=d.target_label;healthCache.pixel_mode=d.mode;}
+      toast(`LED ${i+1} ${(curTargetMask&(1<<i))?'ON':'OFF'}`);
+      renderControls();
+    });
+}
+function setAllLeds(on){
+  curTargetMask=on?255:0;
+  fetch(`/api/pixels?target_mask=${curTargetMask}${on?'&mode=solid':''}`)
+    .then(r=>r.json())
+    .then(d=>{
+      if(healthCache){healthCache.target_mask=d.target_mask;healthCache.target_label=d.target_label;if(on)healthCache.pixel_mode=d.mode;}
+      toast(on?'All 8 LEDs selected':'All LEDs cleared');
+      renderControls();
+    });
+}
+function setPixelTarget(t){fetch('/api/pixels?target='+t+'&mode=solid').then(()=>{toast('Target: '+(t===8?'All 8':'LED '+(t+1)));renderControls();});}
 let pxBrTimer=null;
 function setPixelBrightness(v){$('pxBrightVal').textContent=Math.round(v*100/255)+'%';clearTimeout(pxBrTimer);pxBrTimer=setTimeout(()=>fetch('/api/pixels?brightness='+v),80);}
 function setMusicLight(on){fetch('/api/pixels?music_light='+(on?1:0));}

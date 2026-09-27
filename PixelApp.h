@@ -88,53 +88,52 @@ private:
         // 2. Visual Preview Swatch & 8-LED Ring Diagram (y=14..40)
         _canvas->fillRect(0, 14, 128, 27, theme.surface);
         _canvas->drawFastHLine(0, 40, 128, theme.line);
+        _canvas->setTextWrap(false);
 
         uint8_t curR = pixelEngine.getR();
         uint8_t curG = pixelEngine.getG();
         uint8_t curB = pixelEngine.getB();
         uint16_t swatchCol = toRgb565(curR, curG, curB);
 
-        // Color Swatch Box (x=6, y=17, w=28, h=18)
-        _canvas->fillRoundRect(6, 17, 28, 19, 3, swatchCol);
-        _canvas->drawRoundRect(6, 17, 28, 19, 3, theme.line);
+        // Color Swatch Box (x=5, y=17, w=22, h=19)
+        _canvas->fillRoundRect(5, 17, 22, 19, 3, swatchCol);
+        _canvas->drawRoundRect(5, 17, 22, 19, 3, theme.line);
 
-        // Mini 8-LED Ring Visualizer (center cx=60, cy=26, radius=9)
-        const int cx = 58;
+        // Mini 8-LED Ring Visualizer (center cx=46, cy=26)
+        const int cx = 46;
         const int cy = 26;
+        uint8_t curMask = pixelEngine.getTargetMask();
         for (int a = 0; a < POKO_LED_COUNT; a++) {
             float angle = a * (6.2831853f / 8.0f) - 1.5707963f;
             int dx = cx + (int)(cosf(angle) * 8.5f + 0.5f);
             int dy = cy + (int)(sinf(angle) * 8.5f + 0.5f);
 
-            CRGB ledCol = pixelEngine.getPixelColor(a);
-            uint16_t c565 = toRgb565(ledCol.r, ledCol.g, ledCol.b);
-            _canvas->fillCircle(dx, dy, 2, c565);
-
-            // Highlight target LED if specific pixel selected
-            if (pixelEngine.getTargetPixel() == a) {
-                _canvas->drawCircle(dx, dy, 3, theme.accent);
+            bool inMask = (curMask & (1 << a)) != 0;
+            if (inMask) {
+                CRGB ledCol = pixelEngine.getPixelColor(a);
+                uint16_t c565 = toRgb565(ledCol.r, ledCol.g, ledCol.b);
+                _canvas->fillCircle(dx, dy, 2, c565);
+                if (curMask != 0xFF) {
+                    _canvas->drawCircle(dx, dy, 3, theme.accent);
+                }
+            } else {
+                _canvas->drawCircle(dx, dy, 2, theme.line);
             }
         }
 
-        // Color Hex / Label text (x=80..126)
+        // Color Hex text (x=68, y=24)
         _canvas->setFont(u8g2_font_profont10_mf);
         _canvas->setTextColor(theme.text, theme.surface);
         char hexBuf[10];
         snprintf(hexBuf, sizeof(hexBuf), "#%02X%02X%02X", curR, curG, curB);
-        _canvas->setCursor(80, 24);
+        _canvas->setCursor(68, 24);
         _canvas->print(hexBuf);
 
-        // Target badge
+        // Target badge (x=68, y=34)
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(theme.muted, theme.surface);
-        _canvas->setCursor(80, 34);
-        if (pixelEngine.getTargetPixel() == 8) {
-            _canvas->print("ALL 8 LEDS");
-        } else {
-            char tgtBuf[12];
-            snprintf(tgtBuf, sizeof(tgtBuf), "LED #%d ONLY", pixelEngine.getTargetPixel() + 1);
-            _canvas->print(tgtBuf);
-        }
+        _canvas->setCursor(68, 34);
+        _canvas->print(pixelEngine.getTargetMaskLabel());
 
         // 3. Scrollable Parameter Rows (y=41..113)
         _canvas->fillRect(0, TOP_Y, 128, FOOTER_Y - TOP_Y, theme.bg);
@@ -178,9 +177,7 @@ private:
                 case 2: snprintf(valBuf, sizeof(valBuf), "%d", curG); valCol = 0x07E0; break;
                 case 3: snprintf(valBuf, sizeof(valBuf), "%d", curB); valCol = 0x001F; break;
                 case 4: { // Target
-                    uint8_t t = pixelEngine.getTargetPixel();
-                    if (t == 8) snprintf(valBuf, sizeof(valBuf), "All 8");
-                    else        snprintf(valBuf, sizeof(valBuf), "LED %d", t + 1);
+                    snprintf(valBuf, sizeof(valBuf), "%s", pixelEngine.getTargetMaskLabel());
                     break;
                 }
                 case 5: snprintf(valBuf, sizeof(valBuf), "%d%%", (int)(pixelEngine.getBrightness() * 100 / 255)); break;
@@ -278,9 +275,22 @@ private:
                 break;
             }
             case 4: { // Cycle Target: All 8 -> LED 1..8 -> All 8
-                uint8_t t = pixelEngine.getTargetPixel();
-                t = (t >= 8) ? 0 : (t + 1);
-                pixelEngine.setTargetPixel(t);
+                uint8_t mask = pixelEngine.getTargetMask();
+                if (mask == 0xFF) {
+                    pixelEngine.setTargetMask(1 << 0); // LED 1
+                } else if ((mask & (mask - 1)) == 0 && mask != 0) {
+                    uint8_t curBit = 0;
+                    for (uint8_t k = 0; k < 8; k++) {
+                        if (mask == (1 << k)) { curBit = k; break; }
+                    }
+                    if (curBit >= 7) {
+                        pixelEngine.setTargetMask(0xFF); // Wrap to All 8
+                    } else {
+                        pixelEngine.setTargetMask(1 << (curBit + 1));
+                    }
+                } else {
+                    pixelEngine.setTargetMask(0xFF); // Reset from WEB to All 8
+                }
                 break;
             }
             case 5: { // Cycle Brightness: 25 -> 60 -> 120 -> 200 -> 255 -> 25

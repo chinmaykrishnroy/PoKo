@@ -74,6 +74,8 @@ public:
             json += "\"pixel_b\":" + String(pixelEngine.getB()) + ",";
             json += "\"pixel_bright\":" + String(pixelEngine.getBrightness()) + ",";
             json += "\"pixel_target\":" + String(pixelEngine.getTargetPixel()) + ",";
+            json += "\"target_mask\":" + String((int)pixelEngine.getTargetMask()) + ",";
+            json += "\"target_label\":\"" + String(pixelEngine.getTargetMaskLabel()) + "\",";
             json += "\"music_light\":" + String(pixelEngine.getMusicLightOn() ? "true" : "false") + ",";
             json += "\"music_effect\":" + String((int)pixelEngine.getMusicEffect()) + ",";
             json += "\"ssync_light\":" + String(pixelEngine.getSSyncLightOn() ? "true" : "false") + ",";
@@ -402,8 +404,34 @@ public:
                 changed = true;
             }
 
-            if (_server->hasArg("target")) {
-                pixelEngine.setTargetPixel((uint8_t)constrain(_server->arg("target").toInt(), 0, 8));
+            if (_server->hasArg("target_mask")) {
+                uint8_t m = (uint8_t)constrain(_server->arg("target_mask").toInt(), 0, 255);
+                pixelEngine.setTargetMask(m);
+                if (pixelEngine.getMode() == PIXEL_MODE_OFF) pixelEngine.setMode(PIXEL_MODE_SOLID);
+                changed = true;
+            } else if (_server->hasArg("mask")) {
+                uint8_t m = (uint8_t)constrain(_server->arg("mask").toInt(), 0, 255);
+                pixelEngine.setTargetMask(m);
+                if (pixelEngine.getMode() == PIXEL_MODE_OFF) pixelEngine.setMode(PIXEL_MODE_SOLID);
+                changed = true;
+            } else if (_server->hasArg("toggle_led")) {
+                int k = _server->arg("toggle_led").toInt();
+                if (k >= 1 && k <= 8) {
+                    pixelEngine.toggleTargetLed((uint8_t)(k - 1));
+                    if (pixelEngine.getMode() == PIXEL_MODE_OFF) pixelEngine.setMode(PIXEL_MODE_SOLID);
+                    changed = true;
+                }
+            } else if (_server->hasArg("target")) {
+                String t = _server->arg("target");
+                if (t == "all" || t == "8") {
+                    pixelEngine.setTargetMask(0xFF);
+                } else {
+                    int k = t.toInt();
+                    if (k >= 1 && k <= 8) pixelEngine.setTargetMask(1 << (k - 1));
+                    else if (k >= 0 && k < 8) pixelEngine.setTargetMask(1 << k);
+                    else pixelEngine.setTargetMask(0xFF);
+                }
+                if (pixelEngine.getMode() == PIXEL_MODE_OFF) pixelEngine.setMode(PIXEL_MODE_SOLID);
                 changed = true;
             }
 
@@ -486,6 +514,8 @@ public:
             json += "\"color\":\"" + String(hexBuf) + "\",";
             json += "\"brightness\":" + String(pixelEngine.getBrightness()) + ",";
             json += "\"target\":" + String(pixelEngine.getTargetPixel()) + ",";
+            json += "\"target_mask\":" + String((int)pixelEngine.getTargetMask()) + ",";
+            json += "\"target_label\":\"" + String(pixelEngine.getTargetMaskLabel()) + "\",";
             json += "\"speed\":" + String(pixelEngine.getSpeed()) + ",";
             json += "\"music_light\":" + String(pixelEngine.getMusicLightOn() ? "true" : "false") + ",";
             json += "\"music_effect\":" + String((int)pixelEngine.getMusicEffect()) + ",";
