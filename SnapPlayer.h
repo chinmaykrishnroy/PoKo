@@ -1860,10 +1860,14 @@ public:
 
     void setServer(const String& host) {
         _serverHost = host;
+        if (_prefs) _prefs->putString("snap_host", host);
+        if (_client.connected()) _client.stop();
     }
 
     void setPort(uint16_t port) {
         _serverPort = port;
+        if (_prefs) _prefs->putInt("snap_port", port);
+        if (_client.connected()) _client.stop();
     }
 
     int32_t getCustomLatency() const { return _customLatencyMs; }
@@ -1997,6 +2001,9 @@ public:
         if (_prefs) {
             _prefs->putString("snap_host", host);
             _prefs->putInt("snap_port", port);
+        }
+        if (_client.connected()) {
+            _client.stop();
         }
     }
 };

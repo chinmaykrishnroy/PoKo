@@ -59,7 +59,7 @@ public:
             json += "\"brightness\":" + String(_prefs->getInt("brightness", 80)) + ",";
             json += "\"gallery_timer\":" + String(_prefs->getInt("gallery_timer", 0)) + ",";
             String snapHost = _prefs->getString("snap_host", "192.168.0.20");
-            int snapPort = _prefs->getInt("snap_port", 1780);
+            int snapPort = _prefs->getInt("snap_port", 1704);
             json += "\"snap_host\":\"" + snapHost + "\",";
             json += "\"snap_port\":" + String(snapPort) + ",";
             String srvHost = _prefs->getString("server_host", "192.168.0.15");
@@ -114,14 +114,22 @@ public:
         });
 
         // Snapclient / SSync config & status
-        _server->on("/api/snap", HTTP_GET, [this]() {
-            if (_server->hasArg("host")) {
-                String h = _server->arg("host");
-                uint16_t p = _server->hasArg("port") ? _server->arg("port").toInt() : 1780;
-                _prefs->putString("snap_host", h);
-                _prefs->putInt("snap_port", p);
+        _server->on("/api/snap", HTTP_ANY, [this]() {
+            if (_server->hasArg("host") || _server->hasArg("addr")) {
+                String h = _server->hasArg("host") ? _server->arg("host") : _server->arg("addr");
+                h.trim();
+                uint16_t p = 1704;
+                if (h.indexOf(':') != -1) {
+                    int colon = h.indexOf(':');
+                    p = (uint16_t)h.substring(colon + 1).toInt();
+                    h = h.substring(0, colon);
+                } else if (_server->hasArg("port")) {
+                    p = (uint16_t)_server->arg("port").toInt();
+                }
                 // Binary streaming port for Snapcast is 1704 if 1780 (control port) is entered
-                uint16_t streamPort = (p == 1780) ? 1704 : p;
+                uint16_t streamPort = (p == 1780) ? 1704 : (p == 0 ? 1704 : p);
+                _prefs->putString("snap_host", h);
+                _prefs->putInt("snap_port", streamPort);
                 if (ssyncAppInstance && ssyncAppInstance->getPlayer()) {
                     ssyncAppInstance->getPlayer()->setServer(h, streamPort);
                 }

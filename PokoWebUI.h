@@ -268,8 +268,10 @@ function renderApps(){
 const APP_DESC={0:'Launcher carousel',1:'System information',2:'IST clock display',3:'Video player',4:'Audio player',5:'Snapclient audio',6:'Photo viewer',7:'Device preferences'};
 
 // ── Controls ──────────────────────────────────────────────────────────────────
-function renderControls(){
-  const d=healthCache||{};
+async function renderControls(){
+  let d=healthCache;
+  if(!d){try{d=await api('/api/health');healthCache=d;}catch(e){}}
+  d=d||{};
   $('view-controls').innerHTML=`
     <div class="section-head"><div><h2>Controls</h2><p>Brightness, volume, RGB LED and network settings.</p></div></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
@@ -323,7 +325,7 @@ function renderControls(){
             <label style="font-size:12px;color:var(--muted)">Snapcast Server Host</label>
             <input type="text" id="snap_host" value="${esc(d.snap_host||'192.168.0.20')}" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px" required>
             <label style="font-size:12px;color:var(--muted);margin-top:10px;display:block">Port (1780 Web / 1704 Stream)</label>
-            <input type="number" id="snap_port" value="${d.snap_port||1780}" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px" required>
+            <input type="number" id="snap_port" value="${d.snap_port||1704}" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px" required>
             <button type="submit" class="btn blue" style="width:100%;margin-top:12px">${icon('save')} Update</button>
           </form>
           <div style="margin-top:12px">
@@ -569,8 +571,30 @@ function setLED(r,g,b){fetch(`/api/led?r=${r}&g=${g}&b=${b}`);}
 function pickLEDColor(hex){const r=parseInt(hex.substr(1,2),16),g=parseInt(hex.substr(3,2),16),b=parseInt(hex.substr(5,2),16);setLED(r,g,b);}
 function setSlideTimer(v){fetch('/api/gallery?timer='+v);}
 function rebootDevice(){if(confirm('Reboot PoKo now?'))fetch('/api/reboot').then(()=>toast('Rebooting...'));}
-async function saveSnap(e){e.preventDefault();const h=$('snap_host').value,p=$('snap_port').value;await fetch(`/api/snap?host=${encodeURIComponent(h)}&port=${encodeURIComponent(p)}`);toast('Snapcast updated to '+h+':'+p);}
-async function saveMediaServer(e){e.preventDefault();const a=$('server_addr').value.trim();if(!a)return;await fetch(`/api/server?addr=${encodeURIComponent(a)}`);toast('Media server updated');}
+async function saveSnap(e){
+  e.preventDefault();
+  const h=$('snap_host').value.trim(),p=$('snap_port').value.trim();
+  if(!h)return;
+  try{
+    await api(`/api/snap?host=${encodeURIComponent(h)}&port=${encodeURIComponent(p)}`);
+    if(healthCache){healthCache.snap_host=h;healthCache.snap_port=p;}
+    toast('Snapcast updated to '+h+':'+p);
+  }catch(err){
+    toast('Update failed: '+err.message,true);
+  }
+}
+async function saveMediaServer(e){
+  e.preventDefault();
+  const a=$('server_addr').value.trim();
+  if(!a)return;
+  try{
+    await api(`/api/server?addr=${encodeURIComponent(a)}`);
+    if(healthCache){healthCache.server_addr=a;}
+    toast('Media server updated');
+  }catch(err){
+    toast('Update failed: '+err.message,true);
+  }
+}
 async function saveWiFi(e){e.preventDefault();const s=$('wifi_ssid').value,p=$('wifi_pass').value;try{await fetch(`/api/wifi?ssid=${encodeURIComponent(s)}&pass=${encodeURIComponent(p)}`,{method:'POST'});}catch(err){}toast('Wi-Fi saved — rebooting to connect to '+s+'...');setTimeout(()=>location.reload(),4000);}
 
 // ── Render dispatch ───────────────────────────────────────────────────────────
@@ -594,13 +618,20 @@ async function pollHealth(){
     setOnline(true);
     // Update dashboard live if visible
     if(activeView==='dashboard')syncDashboard(d);
-    // Update controls sliders if not being interacted with
+    // Update controls sliders and live snap player status
     if(activeView==='controls'){
       const brEl=$('brSlider');if(brEl&&!brEl.matches(':active')&&d.brightness!=null){brEl.value=d.brightness;$('brVal').textContent=d.brightness+'%';}
       const mvEl=$('masterVolSlider');if(mvEl&&!mvEl.matches(':active')&&d.master_vol!=null){mvEl.value=d.master_vol;$('masterVolVal').textContent=d.master_vol+'%';}
-      const saEl=$('server_addr');if(saEl&&!saEl.matches(':focus')&&d.server_addr)saEl.value=d.server_addr;
-      const shEl=$('snap_host');if(shEl&&!shEl.matches(':focus')&&d.snap_host)shEl.value=d.snap_host;
-      const spEl=$('snap_port');if(spEl&&!spEl.matches(':focus')&&d.snap_port)spEl.value=d.snap_port;
+      const volEl=$('volSlider');if(volEl&&!volEl.matches(':active')&&d.app_vol!=null){volEl.value=d.app_vol;$('volVal').textContent=d.app_vol+'%';}
+      api('/api/snap').then(s=>{
+        if(!s)return;
+        liveText('snapStatus',s.connected?(s.playing?'PLAYING':'CONNECTED'):'OFFLINE');
+        liveText('snapCodec',s.codec||'--');
+        const snapVol=$('snapVolSlider');
+        if(snapVol&&!snapVol.matches(':active')&&s.volume!=null)snapVol.value=s.volume;
+        const muteBtn=$('muteBtn');
+        if(muteBtn)muteBtn.textContent=s.muted?'Unmute':'Mute';
+      }).catch(()=>{});
     }
     // Gallery timer
     if(d.gallery_timer!=null){const sel=$('slideTimerSel');if(sel)sel.value=String(d.gallery_timer);}

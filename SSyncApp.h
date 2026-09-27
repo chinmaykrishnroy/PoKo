@@ -70,7 +70,7 @@ private:
         _canvas->print("Server:");
         _canvas->setTextColor(theme.text, theme.surface);
         _canvas->setCursor(50, 29);
-        int srvPort = prefs.getInt("snap_port", 1780);
+        int srvPort = prefs.getInt("snap_port", 1704);
         String shortHost = srvHost;
         if (shortHost.startsWith("192.168.")) {
             shortHost = shortHost.substring(8);
