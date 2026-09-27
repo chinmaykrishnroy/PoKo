@@ -57,6 +57,7 @@ public:
             json += "\"master_vol\":" + String(getMasterVolumeLimit()) + ",";
             json += "\"app_vol\":" + String(getCurrentAppVolume()) + ",";
             json += "\"brightness\":" + String(_prefs->getInt("brightness", 80)) + ",";
+            json += "\"amp_boost\":" + String(getAmpBoostDb()) + ",";
             json += "\"gallery_timer\":" + String(_prefs->getInt("gallery_timer", 0)) + ",";
             String snapHost = _prefs->getString("snap_host", "192.168.0.20");
             int snapPort = _prefs->getInt("snap_port", 1704);
@@ -88,12 +89,19 @@ public:
                 _prefs->putInt("master_vol", mv);
                 setMasterVolumeLimit(mv);
             }
+            if (_server->hasArg("amp_boost")) {
+                int db = constrain(_server->arg("amp_boost").toInt(), 0, 5);
+                _prefs->putInt("amp_boost", db);
+                setAmpBoostDb(db);
+            }
             int curB = _prefs->getInt("brightness", 80);
             int curV = getCurrentAppVolume();
             int curM = getMasterVolumeLimit();
+            int curAmp = getAmpBoostDb();
             String resp = "{\"ok\":true,\"brightness\":" + String(curB) +
                           ",\"volume\":" + String(curV) +
-                          ",\"master_vol\":" + String(curM) + "}";
+                          ",\"master_vol\":" + String(curM) +
+                          ",\"amp_boost\":" + String(curAmp) + "}";
             _server->send(200, "application/json", resp);
         });
 

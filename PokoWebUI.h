@@ -294,6 +294,11 @@ async function renderControls(){
             <input type="range" id="volSlider" min="0" max="100" value="${d.app_vol||100}" oninput="setAppVolume(this.value)">
             <span class="range-value" id="volVal">${d.app_vol||100}%</span>
           </div>
+          <label style="font-size:12px;color:var(--muted);margin-top:12px;display:block">Amp Boost <span style="font-size:10px;color:var(--muted)">(0–5 dB above unity · use with care)</span></label>
+          <div class="range-wrap" style="margin-top:6px">
+            <input type="range" id="ampBoostSlider" min="0" max="5" step="1" value="${d.amp_boost!=null?d.amp_boost:0}" oninput="setAmpBoost(this.value)">
+            <span class="range-value" id="ampBoostVal">+${d.amp_boost!=null?d.amp_boost:0} dB</span>
+          </div>
         </div>
         <div class="form-foot">
           <button class="btn danger" onclick="rebootDevice()">Reboot</button>
@@ -565,6 +570,8 @@ let masterTimer=null;
 function setMasterVolume(v){$('masterVolVal').textContent=v+'%';clearTimeout(masterTimer);masterTimer=setTimeout(()=>fetch('/api/sys?master_vol='+v),100);}
 let volTimer=null;
 function setAppVolume(v){$('volVal').textContent=v+'%';clearTimeout(volTimer);volTimer=setTimeout(()=>fetch('/api/sys?volume='+v),100);}
+let ampBoostTimer=null;
+function setAmpBoost(v){$('ampBoostVal').textContent='+'+v+' dB';clearTimeout(ampBoostTimer);ampBoostTimer=setTimeout(()=>fetch('/api/sys?amp_boost='+v),100);}
 function setSnapVolume(v){fetch('/api/snap?vol='+v);}
 function toggleSnapMute(){fetch('/api/snap?mute=1');}
 function setLED(r,g,b){fetch(`/api/led?r=${r}&g=${g}&b=${b}`);}

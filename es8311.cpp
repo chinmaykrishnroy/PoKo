@@ -398,6 +398,18 @@ void es8311_delete(es8311_handle_t dev)
     free(dev);
 }
 
+// Extra gain headroom above 0 dB unity (0.5 dB/step, max 10 steps = +5 dB).
+// Controlled via es8311_set_amp_boost_db(). Default 0 = no boost.
+static int _amp_boost_steps = 0;
+
+esp_err_t es8311_set_amp_boost_db(es8311_handle_t dev, int boost_db)
+{
+    if (boost_db < 0) boost_db = 0;
+    if (boost_db > 5) boost_db = 5;
+    _amp_boost_steps = boost_db * 2; // 0.5 dB per register step
+    return ESP_OK;
+}
+
 esp_err_t es8311_voice_volume_set(es8311_handle_t dev, int volume, int *volume_set)
 {
     if (volume < 0) {
@@ -428,7 +440,7 @@ esp_err_t es8311_voice_volume_set(es8311_handle_t dev, int volume, int *volume_s
         int   step = (int)(db / 0.5f);
         reg32 = 0xBF + step;   // step is negative, so this subtracts
         if (reg32 < 1)   reg32 = 1;
-        if (reg32 > 0xBF) reg32 = 0xBF; // never exceed 0 dB / unity
+        if (reg32 > 0xBF + _amp_boost_steps) reg32 = 0xBF + _amp_boost_steps;
     }
 
     if (volume_set != NULL) {

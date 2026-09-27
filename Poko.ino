@@ -291,6 +291,8 @@ void setup() {
     setMasterVolumeLimit(savedMaster);
     int savedVol = prefs.getInt("volume", 75);
     setScaledVolume(savedVol);
+    int savedBoost = prefs.getInt("amp_boost", 0);
+    setAmpBoostDb(savedBoost);
 
     // 4. WS2812B LEDs
     initLEDs();

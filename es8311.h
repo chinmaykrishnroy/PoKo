@@ -129,6 +129,19 @@ esp_err_t es8311_voice_volume_set(es8311_handle_t dev, int volume, int *volume_s
 esp_err_t es8311_voice_volume_get(es8311_handle_t dev, int *volume);
 
 /**
+ * @brief Set DAC amp boost above 0 dB unity gain (0–5 dB)
+ *
+ * Allows the DAC digital volume to exceed 0 dBFS by up to +5 dB.
+ * Use sparingly — values above ~+3 dB may cause audible distortion
+ * depending on the downstream amplifier headroom.
+ *
+ * @param dev      ES8311 handle
+ * @param boost_db Boost in whole dB steps (0 = off, 5 = max)
+ * @return ESP_OK
+ */
+esp_err_t es8311_set_amp_boost_db(es8311_handle_t dev, int boost_db);
+
+/**
  * @brief Print out ES8311 register content
  *
  * @param dev ES8311 handle

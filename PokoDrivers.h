@@ -148,6 +148,20 @@ inline int getCurrentAppVolume() {
     return _currentAppVolume;
 }
 
+static int _ampBoostDb = 0; // 0–5 dB extra gain above unity
+
+inline void setAmpBoostDb(int db) {
+    _ampBoostDb = constrain(db, 0, 5);
+    if (_es8311Handle) {
+        es8311_set_amp_boost_db(_es8311Handle, _ampBoostDb);
+        // Re-apply current volume so the new cap takes effect immediately
+        int effectiveVol = (_currentAppVolume * _masterVolumeLimit) / 100;
+        es8311SetVolume(effectiveVol);
+    }
+}
+
+inline int getAmpBoostDb() { return _ampBoostDb; }
+
 inline void es8311Mute(bool mute) {
     if (_es8311Handle) es8311_voice_mute(_es8311Handle, mute);
 }
