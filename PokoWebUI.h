@@ -331,8 +331,6 @@ async function renderControls(){
             <option value="rainbow" ${d.pixel_mode===3?'selected':''}>Rainbow Spectrum Wave</option>
             <option value="breathe" ${d.pixel_mode===4?'selected':''}>Sine Breathing Pulse</option>
             <option value="fire" ${d.pixel_mode===5?'selected':''}>Fire Flicker</option>
-            <option value="music" ${d.pixel_mode===6?'selected':''}>Music Sync (Album Art Dual-Color)</option>
-            <option value="ssync" ${d.pixel_mode===7?'selected':''}>SSync Sync (Snapcast Vol-Hue Beat)</option>
             <option value="off" ${d.pixel_mode===0?'selected':''}>Off (Black)</option>
           </select>
 
@@ -380,13 +378,14 @@ async function renderControls(){
             <label style="font-size:12px;color:var(--muted);margin-top:8px;display:block">Music Effect (Glows with Song Volume &amp; Waveform)</label>
             <select id="musFxSelect" onchange="setMusicEffect(this.value)" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px">
               <option value="auto" ${d.music_effect===0?'selected':''}>Auto (Extract 2 Colors from Album Art)</option>
-              <option value="red" ${d.music_effect===1?'selected':''}>Red Pulse</option>
-              <option value="green" ${d.music_effect===2?'selected':''}>Green Glow</option>
-              <option value="blue" ${d.music_effect===3?'selected':''}>Blue Ocean</option>
-              <option value="cyan" ${d.music_effect===4?'selected':''}>Cyan Neon</option>
-              <option value="purple" ${d.music_effect===5?'selected':''}>Purple Haze</option>
-              <option value="amber" ${d.music_effect===6?'selected':''}>Amber Flame</option>
-              <option value="rainbow" ${d.music_effect===7?'selected':''}>Rainbow Spectrum</option>
+              <option value="progress" ${d.music_effect===1?'selected':''}>Playback Progress (Track Fill + Beat Pulse)</option>
+              <option value="red" ${d.music_effect===2?'selected':''}>Red Pulse</option>
+              <option value="green" ${d.music_effect===3?'selected':''}>Green Glow</option>
+              <option value="blue" ${d.music_effect===4?'selected':''}>Blue Ocean</option>
+              <option value="cyan" ${d.music_effect===5?'selected':''}>Cyan Neon</option>
+              <option value="purple" ${d.music_effect===6?'selected':''}>Purple Haze</option>
+              <option value="amber" ${d.music_effect===7?'selected':''}>Amber Flame</option>
+              <option value="rainbow" ${d.music_effect===8?'selected':''}>Rainbow Spectrum</option>
             </select>
           </div>
 
@@ -405,6 +404,18 @@ async function renderControls(){
               <option value="cyan" ${d.ssync_effect===2?'selected':''}>Cyan Beat Pulse</option>
               <option value="magenta" ${d.ssync_effect===3?'selected':''}>Magenta Beat Pulse</option>
               <option value="amber" ${d.ssync_effect===4?'selected':''}>Amber Glow</option>
+            </select>
+          </div>
+
+          <!-- Audio Frequency Response Filter -->
+          <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)">
+            <label style="font-size:12px;color:var(--accent);font-weight:700">Audio Frequency Response (Beat Sensitivity)</label>
+            <label style="font-size:12px;color:var(--muted);margin-top:6px;display:block">Filter audio spectrum for reactive pulsing</label>
+            <select id="freqRespSelect" onchange="setFreqResponse(this.value)" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px">
+              <option value="low" ${d.freq_resp===0?'selected':''}>Low [Bass &amp; Kick drum &lt; 250 Hz] (Rhythm)</option>
+              <option value="mid" ${d.freq_resp===1?'selected':''}>Mid [Vocals &amp; Melody 250 Hz - 3 kHz]</option>
+              <option value="high" ${d.freq_resp===2?'selected':''}>High [Treble &amp; Hi-hats &gt; 3 kHz]</option>
+              <option value="all" ${d.freq_resp===3?'selected':''}>All [Full Spectrum Raw Peak]</option>
             </select>
           </div>
 
@@ -700,6 +711,7 @@ function setMusicLight(on){fetch('/api/pixels?music_light='+(on?1:0));}
 function setMusicEffect(fx){fetch('/api/pixels?music_effect='+fx).then(()=>toast('Music FX: '+fx));}
 function setSSyncLight(on){fetch('/api/pixels?ssync_light='+(on?1:0));}
 function setSSyncEffect(fx){fetch('/api/pixels?ssync_effect='+fx).then(()=>toast('SSync FX: '+fx));}
+function setFreqResponse(fr){fetch('/api/pixels?freq_resp='+fr).then(()=>toast('Freq Resp: '+fr));}
 function applyQuickColor(r,g,b){
   if($('pxRSlider')){$('pxRSlider').value=r;$('pxGSlider').value=g;$('pxBSlider').value=b;onRgbChange();}
 }

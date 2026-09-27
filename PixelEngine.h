@@ -7,11 +7,13 @@
 // ─────────────────────────────────────────────────────────────
 //  PixelEngine — Central WS2812B 8-LED Ring Lighting Engine
 //  Features:
-//    - 8 Built-in animation modes (Solid, Spinner, Rainbow, Breathe, Fire, etc.)
-//    - Real-time audio waveform / envelope reactivity (Music & Snapcast)
-//    - Two-color dominant extraction from album art with perceptual contrast check
-//    - Per-pixel / mask control, RGB sliders, brightness, speed
-//    - NVS persistence across reboots
+//    - Standalone ambient modes (Spinner, Solid, Rainbow, Breathe, Fire, Off)
+//    - Automatic Music Player Reactivity (Dual-Color Wave, Song Progress, Presets)
+//    - Automatic SSync Snapcast Reactivity (Volume-Adaptive Hue & Waveform Pulse)
+//    - Frequency Response Filter: Low (Bass/Kick), Mid, High, All
+//    - Real-time Web OTA & ArduinoOTA Emerald Progress Ring & Error Flashing
+//    - Perceptually distinct 2-color extraction from album art
+//    - Preferences persistence across reboots
 // ─────────────────────────────────────────────────────────────
 
 enum PixelMode : uint8_t {
@@ -21,30 +23,37 @@ enum PixelMode : uint8_t {
     PIXEL_MODE_RAINBOW,      // Rotating rainbow spectrum
     PIXEL_MODE_BREATHE,      // Soft sine-wave breathing
     PIXEL_MODE_FIRE,         // Organic warm flame flicker
-    PIXEL_MODE_MUSIC_SYNC,   // Glows & pulses with Music player audio
-    PIXEL_MODE_SSYNC_SYNC,   // Glows & pulses with Snapcast audio
     PIXEL_MODE_COUNT
 };
 
 enum MusicEffectPreset : uint8_t {
-    MUSIC_FX_AUTO = 0,   // Extract 2 contrasting colors from album art
-    MUSIC_FX_RED,        // Crimson & Coral
-    MUSIC_FX_GREEN,      // Emerald & Mint
-    MUSIC_FX_BLUE,       // Deep Blue & Azure
-    MUSIC_FX_CYAN,       // Cyan & Neon Blue
-    MUSIC_FX_PURPLE,     // Violet & Magenta
-    MUSIC_FX_AMBER,      // Gold & Flame
-    MUSIC_FX_RAINBOW,    // Full dynamic spectrum
+    MUSIC_FX_AUTO = 0,       // Dual-color dynamic wave from album art
+    MUSIC_FX_PROGRESS,       // Playback progress fill (secondary track -> primary progress)
+    MUSIC_FX_RED,            // Crimson & Coral
+    MUSIC_FX_GREEN,          // Emerald & Mint
+    MUSIC_FX_BLUE,           // Deep Blue & Azure
+    MUSIC_FX_CYAN,           // Cyan & Neon Blue
+    MUSIC_FX_PURPLE,         // Violet & Magenta
+    MUSIC_FX_AMBER,          // Gold & Flame
+    MUSIC_FX_RAINBOW,        // Full dynamic spectrum
     MUSIC_FX_COUNT
 };
 
 enum SSyncEffectPreset : uint8_t {
-    SSYNC_FX_VOL_HUE = 0, // Volume-adaptive: Green (low) -> Amber (mid) -> Red (loud)
-    SSYNC_FX_RAINBOW,     // Moving rainbow wave
-    SSYNC_FX_CYAN,        // Neon Cyan beat pulse
-    SSYNC_FX_MAGENTA,     // Vivid Magenta beat pulse
-    SSYNC_FX_AMBER,       // Warm Amber beat pulse
+    SSYNC_FX_VOL_HUE = 0,    // Volume-adaptive: Green (low) -> Amber (mid) -> Red (loud)
+    SSYNC_FX_RAINBOW,        // Moving rainbow wave
+    SSYNC_FX_CYAN,           // Neon Cyan beat pulse
+    SSYNC_FX_MAGENTA,        // Vivid Magenta beat pulse
+    SSYNC_FX_AMBER,          // Warm Amber beat pulse
     SSYNC_FX_COUNT
+};
+
+enum FreqResponse : uint8_t {
+    FREQ_RESP_LOW = 0,       // Bass / Kick drum (< 250 Hz) - best for rhythm
+    FREQ_RESP_MID,           // Vocals & Melody (250 Hz - 3 kHz)
+    FREQ_RESP_HIGH,          // Cymbals & Treble (> 3 kHz)
+    FREQ_RESP_ALL,           // Full spectrum raw peak
+    FREQ_RESP_COUNT
 };
 
 class PixelEngine {
@@ -52,7 +61,7 @@ private:
     CRGB _leds[POKO_LED_COUNT];
     bool _initialized = false;
 
-    // Current settings
+    // Ambient settings
     PixelMode _mode = PIXEL_MODE_SPINNER;
     uint8_t   _r = 0;
     uint8_t   _g = 200;
@@ -64,10 +73,16 @@ private:
     // Music reactive settings
     bool              _musicLightOn = true;
     MusicEffectPreset _musicEffect = MUSIC_FX_AUTO;
+    float             _songProgress = 0.0f; // 0.0 to 1.0
 
     // SSync reactive settings
     bool              _ssyncLightOn = true;
     SSyncEffectPreset _ssyncEffect = SSYNC_FX_VOL_HUE;
+
+    // Audio Frequency Response Filter
+    FreqResponse _freqResp = FREQ_RESP_LOW;
+    float _lp1 = 0.0f, _lp2 = 0.0f;
+    float _hp = 0.0f, _prevIn = 0.0f;
 
     // Album art 2-color extraction
     CRGB _artColor1 = CRGB(0x16, 0x8B, 0xFF); // Vibrant Azure Blue
@@ -82,12 +97,16 @@ private:
 
     // Real-time audio reactive variables
     volatile float _audioLevel = 0.0f;  // Instantaneous smoothed audio envelope (0.0 .. 1.0)
-    uint32_t       _lastAudioSampleMs = 0;
     int            _effectiveVolume = 75; // 0..100 (master * app / 100)
+
+    // OTA Visualizer state
+    bool     _otaActive = false;
+    bool     _otaErrorActive = false;
+    uint32_t _otaErrorStartedAt = 0;
+    uint32_t _lastOtaShowAt = 0;
 
     // Animation state
     uint32_t _lastFrameMs = 0;
-    uint16_t _animStep = 0;
     float    _spinnerPos = 0.0f;
 
     // Fast perceptual color distance (Redmean formula)
@@ -109,7 +128,7 @@ public:
 
     void begin() {
         if (_initialized) return;
-        FastLED.addLeds<WS2812B, POKO_PIN_LED_DATA, GRB>(_leds, POKO_LED_COUNT);
+        FastLED.addLeds<WS2812B, POKO_PIN_LED_DATA, RGB>(_leds, POKO_LED_COUNT);
         FastLED.setBrightness(_brightness);
         fill_solid(_leds, POKO_LED_COUNT, CRGB::Black);
         FastLED.show();
@@ -128,6 +147,7 @@ public:
         _musicEffect = (MusicEffectPreset)constrain(prefs.getInt("px_mus_eff", 0), 0, (int)MUSIC_FX_COUNT - 1);
         _ssyncLightOn = prefs.getBool("px_ssy_on", true);
         _ssyncEffect = (SSyncEffectPreset)constrain(prefs.getInt("px_ssy_eff", 0), 0, (int)SSYNC_FX_COUNT - 1);
+        _freqResp = (FreqResponse)constrain(prefs.getInt("px_freq", 0), 0, (int)FREQ_RESP_COUNT - 1);
 
         if (_initialized) {
             FastLED.setBrightness(_brightness);
@@ -146,11 +166,12 @@ public:
         prefs.putInt("px_mus_eff", (int)_musicEffect);
         prefs.putBool("px_ssy_on", _ssyncLightOn);
         prefs.putInt("px_ssy_eff", (int)_ssyncEffect);
+        prefs.putInt("px_freq", (int)_freqResp);
     }
 
     // ── Getters & Setters ─────────────────────────────────────────
     PixelMode getMode() const { return _mode; }
-    void setMode(PixelMode m) { _mode = m; }
+    void setMode(PixelMode m) { _mode = (PixelMode)constrain((int)m, 0, (int)PIXEL_MODE_COUNT - 1); }
 
     uint8_t getR() const { return _r; }
     uint8_t getG() const { return _g; }
@@ -176,11 +197,17 @@ public:
     MusicEffectPreset getMusicEffect() const { return _musicEffect; }
     void setMusicEffect(MusicEffectPreset fx) { _musicEffect = fx; }
 
+    void setSongProgress(float p) { _songProgress = constrain(p, 0.0f, 1.0f); }
+    float getSongProgress() const { return _songProgress; }
+
     bool getSSyncLightOn() const { return _ssyncLightOn; }
     void setSSyncLightOn(bool on) { _ssyncLightOn = on; }
 
     SSyncEffectPreset getSSyncEffect() const { return _ssyncEffect; }
     void setSSyncEffect(SSyncEffectPreset fx) { _ssyncEffect = fx; }
+
+    FreqResponse getFreqResponse() const { return _freqResp; }
+    void setFreqResponse(FreqResponse f) { _freqResp = f; }
 
     CRGB getArtColor1() const { return _artColor1; }
     CRGB getArtColor2() const { return _artColor2; }
@@ -189,19 +216,94 @@ public:
     void setEffectiveVolume(int vol0to100) { _effectiveVolume = constrain(vol0to100, 0, 100); }
     int getEffectiveVolume() const { return _effectiveVolume; }
 
-    // ── Audio Reactivity Feed ────────────────────────────────────
+    // ── Frequency Filter & Audio Reactivity ──────────────────────
     inline void feedAudioSample(int16_t left, int16_t right) {
-        int32_t al = abs(left);
-        int32_t ar = abs(right);
-        int32_t peak = (al > ar) ? al : ar;
-        float norm = (float)peak / 32768.0f;
-        if (norm > _audioLevel) {
-            _audioLevel = norm;
+        int32_t mono = ((int32_t)left + (int32_t)right) / 2;
+        float in = (float)mono / 32768.0f;
+
+        // 1. Digital 2nd-order Low-Pass Filter (~220 Hz for Bass / Kick drum)
+        _lp1 += 0.032f * (in - _lp1);
+        _lp2 += 0.032f * (_lp1 - _lp2);
+
+        // 2. High-Pass Filter (> 3000 Hz for Treble / Hi-hats)
+        _hp = 0.70f * (_hp + in - _prevIn);
+        _prevIn = in;
+
+        // 3. Mid-Pass Filter (250 Hz - 3 kHz for Vocals & Melody)
+        float mid = in - _lp2 - _hp;
+
+        float filteredMag = 0.0f;
+        switch (_freqResp) {
+            case FREQ_RESP_LOW:
+                filteredMag = fabsf(_lp2) * 3.4f;
+                break;
+            case FREQ_RESP_MID:
+                filteredMag = fabsf(mid) * 2.2f;
+                break;
+            case FREQ_RESP_HIGH:
+                filteredMag = fabsf(_hp) * 2.6f;
+                break;
+            case FREQ_RESP_ALL:
+            default:
+                filteredMag = fabsf(in);
+                break;
         }
-        _lastAudioSampleMs = millis();
+
+        if (filteredMag > _audioLevel) {
+            _audioLevel = constrain(filteredMag, 0.0f, 1.0f);
+        }
     }
 
     float getAudioLevel() const { return _audioLevel; }
+
+    // ── Web OTA & ArduinoOTA Visualizer ──────────────────────────
+    void showOtaProgress(float percent) {
+        if (_otaErrorActive) return;
+        uint32_t now = millis();
+        percent = constrain(percent, 0.0f, 100.0f);
+
+        // Throttle during transfer to ~25 FPS to preserve write throughput
+        if (percent > 0.0f && percent < 100.0f && (now - _lastOtaShowAt < 40)) {
+            return;
+        }
+        _lastOtaShowAt = now;
+        _otaActive = true;
+
+        float fillCount = (percent / 100.0f) * (float)POKO_LED_COUNT;
+
+        for (uint8_t i = 0; i < POKO_LED_COUNT; i++) {
+            float f = fillCount - (float)i;
+            if (f <= 0.0f) {
+                // Unlit/dim track
+                _leds[i] = CRGB(6, 10, 16);
+            } else if (f >= 1.0f) {
+                // Completed segment: radiant emerald green
+                _leds[i] = CRGB(0, 255, 60);
+            } else {
+                // Active transition LED: smooth blend
+                uint8_t g = (uint8_t)(f * 255.0f);
+                uint8_t r = (uint8_t)((1.0f - f) * 6.0f);
+                uint8_t b = (uint8_t)((1.0f - f) * 16.0f);
+                _leds[i] = CRGB(r, g, b);
+            }
+        }
+        FastLED.show();
+    }
+
+    void showOtaError() {
+        _otaActive = false;
+        _otaErrorActive = true;
+        _otaErrorStartedAt = millis();
+        fill_solid(_leds, POKO_LED_COUNT, CRGB(255, 0, 0));
+        FastLED.show();
+    }
+
+    void endOta() {
+        _otaActive = false;
+        _otaErrorActive = false;
+    }
+
+    bool isOtaActive() const { return _otaActive || _otaErrorActive; }
 
     // ── Album Art Color Extraction ───────────────────────────────
     void startColorExtraction() {
@@ -220,7 +322,7 @@ public:
             uint8_t g = ((p >> 5) & 0x3F) << 2;
             uint8_t b = (p & 0x1F) << 3;
 
-            // Skip extreme near-black or extreme near-white unless image is mostly uniform
+            // Skip extreme near-black or extreme near-white
             if ((r < 20 && g < 20 && b < 20) || (r > 245 && g > 245 && b > 245)) {
                 continue;
             }
@@ -306,6 +408,22 @@ public:
         if (!_initialized) return;
 
         uint32_t now = millis();
+
+        // Check OTA states first
+        if (_otaErrorActive) {
+            uint32_t elapsed = now - _otaErrorStartedAt;
+            if (elapsed >= 2500) {
+                _otaErrorActive = false;
+                _otaActive = false;
+            } else {
+                bool blinkOn = ((elapsed / 120) % 2) == 0;
+                fill_solid(_leds, POKO_LED_COUNT, blinkOn ? CRGB(255, 0, 0) : CRGB::Black);
+                FastLED.show();
+                return;
+            }
+        }
+        if (_otaActive) return;
+
         if (now - _lastFrameMs < 18) return; // ~55 FPS
         _lastFrameMs = now;
 
@@ -316,21 +434,21 @@ public:
         // Effective volume scaling (0.0 .. 1.0)
         float volScale = (float)_effectiveVolume / 100.0f;
 
-        // Priority 1: Music Playback Reactivity (if enabled)
+        // Priority 1: Music Playback Reactivity (when Music is active & enabled)
         if (isMusicPlaying && _musicLightOn) {
             renderMusicSync(now, volScale);
             FastLED.show();
             return;
         }
 
-        // Priority 2: SSync / Snapcast Reactivity (if enabled)
+        // Priority 2: SSync / Snapcast Reactivity (when SSync is active & enabled)
         if (isSSyncPlaying && _ssyncLightOn) {
             renderSSyncSync(now, volScale);
             FastLED.show();
             return;
         }
 
-        // Priority 3: Manual / Selected Mode
+        // Priority 3: Manual Ambient Mode
         switch (_mode) {
             case PIXEL_MODE_OFF:
                 fill_solid(_leds, POKO_LED_COUNT, CRGB::Black);
@@ -354,14 +472,6 @@ public:
 
             case PIXEL_MODE_FIRE:
                 renderFire(now);
-                break;
-
-            case PIXEL_MODE_MUSIC_SYNC:
-                renderMusicSync(now, volScale);
-                break;
-
-            case PIXEL_MODE_SSYNC_SYNC:
-                renderSSyncSync(now, volScale);
                 break;
 
             default:
@@ -439,10 +549,11 @@ private:
     }
 
     void renderMusicSync(uint32_t now, float volScale) {
-        // Resolve the two active colors based on MusicEffectPreset
+        // Resolve primary & secondary colors
         CRGB c1, c2;
         switch (_musicEffect) {
             case MUSIC_FX_AUTO:
+            case MUSIC_FX_PROGRESS:
                 c1 = _artColor1;
                 c2 = _artColor2;
                 break;
@@ -475,12 +586,42 @@ private:
                 break;
         }
 
-        // Base glow is quiet when volume is low, expanding with beat & volume
         float baselineGlow = 0.08f * volScale;
         float beatGlow = _audioLevel * volScale;
         float totalIntensity = constrain(baselineGlow + beatGlow * 0.92f, 0.0f, 1.0f);
 
-        // Circular dual-color wave rotating with music
+        // Special Playback Progress Effect (like 5Pixels):
+        // Fills ring as song progresses from c2 (background) to c1 (progress), pulsing with beat!
+        if (_musicEffect == MUSIC_FX_PROGRESS) {
+            float totalLeds = _songProgress * (float)POKO_LED_COUNT;
+            for (int i = 0; i < POKO_LED_COUNT; i++) {
+                float fill = totalLeds - (float)i;
+                CRGB target;
+                if (fill <= 0.0f) {
+                    // Unplayed segment: secondary background color
+                    target = c2;
+                } else if (fill >= 1.0f) {
+                    // Played segment: primary color
+                    target = c1;
+                } else {
+                    // Blended transition LED
+                    target = CRGB(
+                        (uint8_t)(c2.r + (c1.r - c2.r) * fill),
+                        (uint8_t)(c2.g + (c1.g - c2.g) * fill),
+                        (uint8_t)(c2.b + (c1.b - c2.b) * fill)
+                    );
+                }
+                // Pulsate with audio beat and volume
+                _leds[i] = CRGB(
+                    (uint8_t)(target.r * totalIntensity),
+                    (uint8_t)(target.g * totalIntensity),
+                    (uint8_t)(target.b * totalIntensity)
+                );
+            }
+            return;
+        }
+
+        // Circular dual-color wave rotating with music beat
         _spinnerPos += 0.08f + (_audioLevel * 0.25f);
         if (_spinnerPos >= (float)POKO_LED_COUNT) _spinnerPos -= (float)POKO_LED_COUNT;
 
@@ -538,7 +679,6 @@ private:
                     break;
             }
 
-            // Fill LEDs around ring based on activeCount
             float fill = activeCount - (float)i;
             if (fill <= 0.0f) {
                 _leds[i] = CRGB((uint8_t)(col.r * 0.05f * volScale),

@@ -153,7 +153,9 @@ void onBtnRight() {
 }
 
 void onBtnLeftHolding() {
-    if (activeApp == STATE_SSYNC && ssyncAppInstance) {
+    if (activeApp == STATE_PIXELS_UI && pixelAppInstance) {
+        pixelAppInstance->onHoldingLeft();
+    } else if (activeApp == STATE_SSYNC && ssyncAppInstance) {
         ssyncAppInstance->volumeRampDown();
     } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {
         musicAppInstance->volumeRampDown();
@@ -169,7 +171,9 @@ void onBtnLeftHolding() {
 }
 
 void onBtnRightHolding() {
-    if (activeApp == STATE_SSYNC && ssyncAppInstance) {
+    if (activeApp == STATE_PIXELS_UI && pixelAppInstance) {
+        pixelAppInstance->onHoldingRight();
+    } else if (activeApp == STATE_SSYNC && ssyncAppInstance) {
         ssyncAppInstance->volumeRampUp();
     } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {
         musicAppInstance->volumeRampUp();
@@ -422,6 +426,18 @@ void loop() {
             static bool otaInit = false;
             if (!otaInit) {
                 ArduinoOTA.setHostname("Poko");
+                ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+                    if (total > 0) {
+                        float pct = ((float)progress / (float)total) * 100.0f;
+                        pixelEngine.showOtaProgress(pct);
+                    }
+                });
+                ArduinoOTA.onError([](ota_error_t error) {
+                    pixelEngine.showOtaError();
+                });
+                ArduinoOTA.onEnd([]() {
+                    pixelEngine.showOtaProgress(100.0f);
+                });
                 ArduinoOTA.begin();
                 otaInit = true;
             }

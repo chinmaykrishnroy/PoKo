@@ -32,7 +32,7 @@ private:
     uint8_t  _scroll    = 0;
     uint32_t _lastDrawMs = 0;
 
-    static constexpr uint8_t ITEM_COUNT   = 10;
+    static constexpr uint8_t ITEM_COUNT   = 11;
     static constexpr uint8_t ROW_H        = 14;
     static constexpr uint8_t TOP_Y        = 42;
     static constexpr uint8_t ROWS_VISIBLE = 5;
@@ -48,7 +48,8 @@ private:
         "Music Light",
         "Music FX",
         "SSync Light",
-        "SSync FX"
+        "SSync FX",
+        "Freq Resp"
     };
 
     void adjustScroll() {
@@ -163,15 +164,13 @@ private:
             switch (itemIdx) {
                 case 0: { // Mode
                     switch (pixelEngine.getMode()) {
-                        case PIXEL_MODE_OFF:        snprintf(valBuf, sizeof(valBuf), "Off"); break;
-                        case PIXEL_MODE_SOLID:      snprintf(valBuf, sizeof(valBuf), "Solid"); break;
-                        case PIXEL_MODE_SPINNER:    snprintf(valBuf, sizeof(valBuf), "Spinner"); break;
-                        case PIXEL_MODE_RAINBOW:    snprintf(valBuf, sizeof(valBuf), "Rainbow"); break;
-                        case PIXEL_MODE_BREATHE:    snprintf(valBuf, sizeof(valBuf), "Breathe"); break;
-                        case PIXEL_MODE_FIRE:       snprintf(valBuf, sizeof(valBuf), "Fire"); break;
-                        case PIXEL_MODE_MUSIC_SYNC: snprintf(valBuf, sizeof(valBuf), "Music"); break;
-                        case PIXEL_MODE_SSYNC_SYNC: snprintf(valBuf, sizeof(valBuf), "SSync"); break;
-                        default:                    snprintf(valBuf, sizeof(valBuf), "Auto"); break;
+                        case PIXEL_MODE_OFF:     snprintf(valBuf, sizeof(valBuf), "Off"); break;
+                        case PIXEL_MODE_SOLID:   snprintf(valBuf, sizeof(valBuf), "Solid"); break;
+                        case PIXEL_MODE_SPINNER: snprintf(valBuf, sizeof(valBuf), "Spinner"); break;
+                        case PIXEL_MODE_RAINBOW: snprintf(valBuf, sizeof(valBuf), "Rainbow"); break;
+                        case PIXEL_MODE_BREATHE: snprintf(valBuf, sizeof(valBuf), "Breathe"); break;
+                        case PIXEL_MODE_FIRE:    snprintf(valBuf, sizeof(valBuf), "Fire"); break;
+                        default:                 snprintf(valBuf, sizeof(valBuf), "Spinner"); break;
                     }
                     break;
                 }
@@ -188,15 +187,16 @@ private:
                 case 6: snprintf(valBuf, sizeof(valBuf), pixelEngine.getMusicLightOn() ? "ON" : "OFF"); break;
                 case 7: { // Music Effect
                     switch (pixelEngine.getMusicEffect()) {
-                        case MUSIC_FX_AUTO:    snprintf(valBuf, sizeof(valBuf), "Auto (Art)"); break;
-                        case MUSIC_FX_RED:     snprintf(valBuf, sizeof(valBuf), "Red"); break;
-                        case MUSIC_FX_GREEN:   snprintf(valBuf, sizeof(valBuf), "Green"); break;
-                        case MUSIC_FX_BLUE:    snprintf(valBuf, sizeof(valBuf), "Blue"); break;
-                        case MUSIC_FX_CYAN:    snprintf(valBuf, sizeof(valBuf), "Cyan"); break;
-                        case MUSIC_FX_PURPLE:  snprintf(valBuf, sizeof(valBuf), "Purple"); break;
-                        case MUSIC_FX_AMBER:   snprintf(valBuf, sizeof(valBuf), "Amber"); break;
-                        case MUSIC_FX_RAINBOW: snprintf(valBuf, sizeof(valBuf), "Rainbow"); break;
-                        default:               snprintf(valBuf, sizeof(valBuf), "Auto"); break;
+                        case MUSIC_FX_AUTO:     snprintf(valBuf, sizeof(valBuf), "Auto (Art)"); break;
+                        case MUSIC_FX_PROGRESS: snprintf(valBuf, sizeof(valBuf), "Progress"); break;
+                        case MUSIC_FX_RED:      snprintf(valBuf, sizeof(valBuf), "Red"); break;
+                        case MUSIC_FX_GREEN:    snprintf(valBuf, sizeof(valBuf), "Green"); break;
+                        case MUSIC_FX_BLUE:     snprintf(valBuf, sizeof(valBuf), "Blue"); break;
+                        case MUSIC_FX_CYAN:     snprintf(valBuf, sizeof(valBuf), "Cyan"); break;
+                        case MUSIC_FX_PURPLE:   snprintf(valBuf, sizeof(valBuf), "Purple"); break;
+                        case MUSIC_FX_AMBER:    snprintf(valBuf, sizeof(valBuf), "Amber"); break;
+                        case MUSIC_FX_RAINBOW:  snprintf(valBuf, sizeof(valBuf), "Rainbow"); break;
+                        default:                snprintf(valBuf, sizeof(valBuf), "Auto"); break;
                     }
                     break;
                 }
@@ -209,6 +209,16 @@ private:
                         case SSYNC_FX_MAGENTA: snprintf(valBuf, sizeof(valBuf), "Magenta"); break;
                         case SSYNC_FX_AMBER:   snprintf(valBuf, sizeof(valBuf), "Amber"); break;
                         default:               snprintf(valBuf, sizeof(valBuf), "Vol Hue"); break;
+                    }
+                    break;
+                }
+                case 10: { // Freq Resp
+                    switch (pixelEngine.getFreqResponse()) {
+                        case FREQ_RESP_LOW:  snprintf(valBuf, sizeof(valBuf), "Low"); break;
+                        case FREQ_RESP_MID:  snprintf(valBuf, sizeof(valBuf), "Mid"); break;
+                        case FREQ_RESP_HIGH: snprintf(valBuf, sizeof(valBuf), "High"); break;
+                        case FREQ_RESP_ALL:  snprintf(valBuf, sizeof(valBuf), "All"); break;
+                        default:             snprintf(valBuf, sizeof(valBuf), "Low"); break;
                     }
                     break;
                 }
@@ -233,7 +243,7 @@ private:
         _canvas->drawFastHLine(0, FOOTER_Y, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(theme.footerText, theme.headerBg);
-        const char* hint = "L:Up  R:Dn  2R:Set/Adj";
+        const char* hint = "L/R:Nav  2R:Set  Hold:Adj";
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
         _canvas->print(hint);
@@ -303,9 +313,49 @@ private:
                 pixelEngine.setSSyncEffect((SSyncEffectPreset)fx);
                 break;
             }
+            case 10: { // Cycle Freq Response
+                uint8_t fr = (uint8_t)pixelEngine.getFreqResponse();
+                fr = (fr + 1) % FREQ_RESP_COUNT;
+                pixelEngine.setFreqResponse((FreqResponse)fr);
+                break;
+            }
         }
         pixelEngine.saveToPreferences(prefs);
         _dirty = true;
+    }
+
+    void adjustCurrentValue(int delta) {
+        bool changed = false;
+        switch (_selected) {
+            case 1: { // Red
+                int cur = (int)pixelEngine.getR() + delta;
+                pixelEngine.setColor((uint8_t)constrain(cur, 0, 255), pixelEngine.getG(), pixelEngine.getB());
+                changed = true;
+                break;
+            }
+            case 2: { // Green
+                int cur = (int)pixelEngine.getG() + delta;
+                pixelEngine.setColor(pixelEngine.getR(), (uint8_t)constrain(cur, 0, 255), pixelEngine.getB());
+                changed = true;
+                break;
+            }
+            case 3: { // Blue
+                int cur = (int)pixelEngine.getB() + delta;
+                pixelEngine.setColor(pixelEngine.getR(), pixelEngine.getG(), (uint8_t)constrain(cur, 0, 255));
+                changed = true;
+                break;
+            }
+            case 5: { // Brightness
+                int cur = (int)pixelEngine.getBrightness() + delta;
+                pixelEngine.setBrightness((uint8_t)constrain(cur, 1, 255));
+                changed = true;
+                break;
+            }
+        }
+        if (changed) {
+            pixelEngine.saveToPreferences(prefs);
+            _dirty = true;
+        }
     }
 
 public:
@@ -348,6 +398,14 @@ public:
         _selected = (_selected + 1) % ITEM_COUNT;
         adjustScroll();
         _dirty = true;
+    }
+
+    void onHoldingLeft() {
+        adjustCurrentValue(-6);
+    }
+
+    void onHoldingRight() {
+        adjustCurrentValue(6);
     }
 
     void onBack() {

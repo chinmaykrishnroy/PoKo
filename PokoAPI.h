@@ -77,7 +77,8 @@ public:
             json += "\"music_light\":" + String(pixelEngine.getMusicLightOn() ? "true" : "false") + ",";
             json += "\"music_effect\":" + String((int)pixelEngine.getMusicEffect()) + ",";
             json += "\"ssync_light\":" + String(pixelEngine.getSSyncLightOn() ? "true" : "false") + ",";
-            json += "\"ssync_effect\":" + String((int)pixelEngine.getSSyncEffect());
+            json += "\"ssync_effect\":" + String((int)pixelEngine.getSSyncEffect()) + ",";
+            json += "\"freq_resp\":" + String((int)pixelEngine.getFreqResponse());
             json += "}";
             _server->send(200, "application/json", json);
         });
@@ -384,8 +385,6 @@ public:
                 else if (m == "rainbow" || m == "3")     pixelEngine.setMode(PIXEL_MODE_RAINBOW);
                 else if (m == "breathe" || m == "4")     pixelEngine.setMode(PIXEL_MODE_BREATHE);
                 else if (m == "fire" || m == "5")        pixelEngine.setMode(PIXEL_MODE_FIRE);
-                else if (m == "music" || m == "6")       pixelEngine.setMode(PIXEL_MODE_MUSIC_SYNC);
-                else if (m == "ssync" || m == "7")       pixelEngine.setMode(PIXEL_MODE_SSYNC_SYNC);
                 changed = true;
             }
 
@@ -427,14 +426,15 @@ public:
             if (_server->hasArg("music_effect")) {
                 String fx = _server->arg("music_effect");
                 fx.toLowerCase();
-                if (fx == "auto" || fx == "0")         pixelEngine.setMusicEffect(MUSIC_FX_AUTO);
-                else if (fx == "red" || fx == "1")     pixelEngine.setMusicEffect(MUSIC_FX_RED);
-                else if (fx == "green" || fx == "2")   pixelEngine.setMusicEffect(MUSIC_FX_GREEN);
-                else if (fx == "blue" || fx == "3")    pixelEngine.setMusicEffect(MUSIC_FX_BLUE);
-                else if (fx == "cyan" || fx == "4")    pixelEngine.setMusicEffect(MUSIC_FX_CYAN);
-                else if (fx == "purple" || fx == "5")  pixelEngine.setMusicEffect(MUSIC_FX_PURPLE);
-                else if (fx == "amber" || fx == "6")   pixelEngine.setMusicEffect(MUSIC_FX_AMBER);
-                else if (fx == "rainbow" || fx == "7") pixelEngine.setMusicEffect(MUSIC_FX_RAINBOW);
+                if (fx == "auto" || fx == "0")             pixelEngine.setMusicEffect(MUSIC_FX_AUTO);
+                else if (fx == "progress" || fx == "1")    pixelEngine.setMusicEffect(MUSIC_FX_PROGRESS);
+                else if (fx == "red" || fx == "2")         pixelEngine.setMusicEffect(MUSIC_FX_RED);
+                else if (fx == "green" || fx == "3")       pixelEngine.setMusicEffect(MUSIC_FX_GREEN);
+                else if (fx == "blue" || fx == "4")        pixelEngine.setMusicEffect(MUSIC_FX_BLUE);
+                else if (fx == "cyan" || fx == "5")        pixelEngine.setMusicEffect(MUSIC_FX_CYAN);
+                else if (fx == "purple" || fx == "6")      pixelEngine.setMusicEffect(MUSIC_FX_PURPLE);
+                else if (fx == "amber" || fx == "7")       pixelEngine.setMusicEffect(MUSIC_FX_AMBER);
+                else if (fx == "rainbow" || fx == "8")     pixelEngine.setMusicEffect(MUSIC_FX_RAINBOW);
                 changed = true;
             }
 
@@ -452,6 +452,16 @@ public:
                 else if (fx == "cyan" || fx == "2")    pixelEngine.setSSyncEffect(SSYNC_FX_CYAN);
                 else if (fx == "magenta" || fx == "3") pixelEngine.setSSyncEffect(SSYNC_FX_MAGENTA);
                 else if (fx == "amber" || fx == "4")   pixelEngine.setSSyncEffect(SSYNC_FX_AMBER);
+                changed = true;
+            }
+
+            if (_server->hasArg("freq_resp")) {
+                String fr = _server->arg("freq_resp");
+                fr.toLowerCase();
+                if (fr == "low" || fr == "0")          pixelEngine.setFreqResponse(FREQ_RESP_LOW);
+                else if (fr == "mid" || fr == "1")      pixelEngine.setFreqResponse(FREQ_RESP_MID);
+                else if (fr == "high" || fr == "2")     pixelEngine.setFreqResponse(FREQ_RESP_HIGH);
+                else if (fr == "all" || fr == "3")      pixelEngine.setFreqResponse(FREQ_RESP_ALL);
                 changed = true;
             }
 
@@ -481,6 +491,7 @@ public:
             json += "\"music_effect\":" + String((int)pixelEngine.getMusicEffect()) + ",";
             json += "\"ssync_light\":" + String(pixelEngine.getSSyncLightOn() ? "true" : "false") + ",";
             json += "\"ssync_effect\":" + String((int)pixelEngine.getSSyncEffect()) + ",";
+            json += "\"freq_resp\":" + String((int)pixelEngine.getFreqResponse()) + ",";
             json += "\"art_color1\":\"" + String(art1Buf) + "\",";
             json += "\"art_color2\":\"" + String(art2Buf) + "\",";
             json += "\"audio_level\":" + String(pixelEngine.getAudioLevel(), 2);

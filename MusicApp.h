@@ -225,6 +225,12 @@ private:
         _lastScrollMs = millis();
         _dirty = true;
 
+        if (_songs[idx].duration_s > 0) {
+            pixelEngine.setSongProgress((float)startSec / (float)_songs[idx].duration_s);
+        } else {
+            pixelEngine.setSongProgress(0.0f);
+        }
+
         fetchArtwork(idx);
     }
 
@@ -240,6 +246,7 @@ private:
         http.GET();
         http.end();
 
+        pixelEngine.setSongProgress(0.0f);
         _dirty = true;
     }
 
@@ -599,6 +606,11 @@ public:
                     _lastSecondMs = now;
                     _trackPos++;
                     _dirty = true;
+
+                    if (_songs[_selectedIdx].duration_s > 0) {
+                        float prog = (float)_trackPos / (float)_songs[_selectedIdx].duration_s;
+                        pixelEngine.setSongProgress(prog);
+                    }
 
                     if (_songs[_selectedIdx].duration_s > 0 && _trackPos >= _songs[_selectedIdx].duration_s + 1) {
                         onPlaybackEnded();

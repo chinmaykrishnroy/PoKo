@@ -5,6 +5,7 @@
 #include <Arduino_GFX_Library.h>
 #include <esp_task_wdt.h>
 #include "PokoAppState.h"
+#include "PixelEngine.h"
 
 // ─────────────────────────────────────────────────────────────
 //  PokoOTA — Web-based OTA firmware updates and progress screen
@@ -112,6 +113,11 @@ public:
         server->on("/ota/upload", HTTP_POST, [server, gfx]() {
             server->sendHeader("Connection", "close");
             bool ok = !Update.hasError();
+            if (!ok) {
+                pixelEngine.showOtaError();
+            } else {
+                pixelEngine.showOtaProgress(100.0f);
+            }
             server->send(200, "text/plain", ok ? "OK" : "FAIL");
             if (gfx) {
                 gfx->fillScreen(ok ? 0x07E0 : 0xF800);
@@ -130,23 +136,29 @@ public:
                 _otaWritten = 0;
                 _otaLastPct = -1;
                 drawProgress(gfx, 0);
+                pixelEngine.showOtaProgress(0.0f);
                 if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
                     Update.printError(Serial);
+                    pixelEngine.showOtaError();
                 }
             } else if (upload.status == UPLOAD_FILE_WRITE) {
                 if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
                     Update.printError(Serial);
+                    pixelEngine.showOtaError();
                 }
                 _otaWritten += upload.currentSize;
                 if (_otaTotal > 0) {
                     int pct = (_otaWritten * 100) / _otaTotal;
                     drawProgress(gfx, pct);
+                    pixelEngine.showOtaProgress((float)pct);
                 }
             } else if (upload.status == UPLOAD_FILE_END) {
                 if (Update.end(true)) {
                     drawProgress(gfx, 100);
+                    pixelEngine.showOtaProgress(100.0f);
                 } else {
                     Update.printError(Serial);
+                    pixelEngine.showOtaError();
                 }
             }
         });
