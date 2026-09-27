@@ -18,12 +18,13 @@
 #include "MusicApp.h"
 #include "VideoApp.h"
 #include "GalleryApp.h"
+#include "PixelApp.h"
 #include "SettingsApp.h"
 #include "PokoOTA.h"
 #include "PokoAPI.h"
 
 // ─────────────────────────────────────────────────────────────
-//  Poko Core Firmware — Complete 7-App Suite
+//  Poko Core Firmware — Complete 8-App Suite
 //  Board: Waveshare ESP32-S3-LCD-0.85
 //  Display: 128×128 GC9107 IPS
 //  Codec: ES8311 + PA Amp
@@ -43,6 +44,7 @@ SSyncApp*    ssyncAppInstance    = nullptr;
 MusicApp*    musicAppInstance    = nullptr;
 VideoApp*    videoAppInstance    = nullptr;
 GalleryApp*  galleryAppInstance  = nullptr;
+PixelApp*    pixelAppInstance    = nullptr;
 SettingsApp* settingsAppInstance = nullptr;
 SyncedAVPlayer* syncPlugin       = nullptr;
 TCPAudio*       audioPlugin      = nullptr;
@@ -87,6 +89,7 @@ void onAppChange(AppState newState) {
     else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->unload();
     else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->unload();
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->unload();
+    else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->unload();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->unload();
 
     activeApp = newState;
@@ -103,6 +106,7 @@ void onAppChange(AppState newState) {
     else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->load();
     else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->load();
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->load();
+    else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->load();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->load();
 }
 
@@ -117,6 +121,7 @@ void handleDriverReset() {
     else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->load();
     else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->load();
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->load();
+    else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->load();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->load();
 }
 
@@ -130,6 +135,7 @@ void onBtnLeft() {
     else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->onLeft();
     else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->onLeft();
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->onLeft();
+    else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->onLeft();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->onLeft();
 }
 
@@ -142,6 +148,7 @@ void onBtnRight() {
     else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->onRight();
     else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->onRight();
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->onRight();
+    else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->onRight();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->onRight();
 }
 
@@ -199,6 +206,7 @@ void onBtnRightDouble() {
     else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->onEnter();
     else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->onEnter();
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->onEnter();
+    else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->onEnter();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->onEnter();
 }
 
@@ -296,6 +304,7 @@ void setup() {
 
     // 4. WS2812B LEDs
     initLEDs();
+    pixelEngine.loadFromPreferences(prefs);
 
     // 5. Button Input Setup
     btnInput.begin();
@@ -312,7 +321,7 @@ void setup() {
     btnInput.onBothVLong(onComboBothVLong);
     btnInput.onBothUltra(onComboBothUltra);
 
-    // 6. Instantiate UI & All 7 Apps
+    // 6. Instantiate UI & All 8 Apps
     pokoUI = new PokoUI(pokoGfx, onAppChange);
     pokoUI->begin();
 
@@ -333,6 +342,9 @@ void setup() {
 
     galleryAppInstance = new GalleryApp(pokoGfx, onAppChange);
     galleryAppInstance->begin();
+
+    pixelAppInstance = new PixelApp(pokoGfx, onAppChange);
+    pixelAppInstance->begin();
 
     settingsAppInstance = new SettingsApp(pokoGfx, onAppChange);
     settingsAppInstance->begin();
@@ -460,5 +472,11 @@ void loop() {
     else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->update();
     else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->update();
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->update();
+    else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->update();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->update();
+
+    // NeoPixel lighting engine update (with Music & SSync audio states)
+    bool isMusicPlaying = (musicAppInstance && musicAppInstance->isPlaying());
+    bool isSSyncPlaying = (ssyncAppInstance && ssyncAppInstance->isPlaying());
+    pixelEngine.update(isMusicPlaying, isSSyncPlaying);
 }

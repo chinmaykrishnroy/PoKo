@@ -1595,6 +1595,9 @@ private:
             for (uint32_t i = 0; i < samples; i++) {
                 int16_t left = pcmIn[i * 2];
                 int16_t right = pcmIn[i * 2 + 1];
+                if ((i & 0x07) == 0) { // Sample every 8th frame for efficient peak tracking
+                    pixelEngine.feedAudioSample(left, right);
+                }
 
                 // Gain-only startup ramp: no silence is inserted and no frames are
                 // delayed, so Snapcast timing remains exact. Smoothstep prevents

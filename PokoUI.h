@@ -40,7 +40,7 @@ private:
     bool          _dirty    = true;
     uint32_t      _lastStatusMs = 0;
 
-    static constexpr uint8_t TILE_COUNT = 7;
+    static constexpr uint8_t TILE_COUNT = 8;
     PokoTile _tiles[TILE_COUNT] = {
         { "Info",     "System Info",     0x07E0, STATE_INFO,         "i"  },
         { "Clock",    "IST Clock",       0x07FF, STATE_CLOCK,        "12" },
@@ -48,6 +48,7 @@ private:
         { "Music",    "Audio Player",    0xF81F, STATE_MUSIC_UI,     "~"  },
         { "Video",    "Video Stream",    0x001F, STATE_VIDEO_UI,     ">"  },
         { "Gallery",  "Photo Viewer",    0xFD20, STATE_GALLERY_UI,   "#"  },
+        { "Pixels",   "NeoPixel Ring",   0xFBE0, STATE_PIXELS_UI,    "*"  },
         { "Settings", "Preferences",     0x8410, STATE_SETTINGS_UI,  "*"  }
     };
 
@@ -149,6 +150,16 @@ private:
             _gfx->drawRoundRect(cx - 10, cy - 8, 20, 16, 2, color);
             _gfx->fillCircle(cx - 4, cy - 3, 2, color);
             _gfx->fillTriangle(cx - 9, cy + 7, cx + 9, cy + 7, cx, cy - 1, color);
+            break;
+        case STATE_PIXELS_UI:
+            // ── 8-LED ring around center core ──
+            for (int a = 0; a < 8; a++) {
+                float angle = a * (6.2831853f / 8.0f) - 1.5707963f;
+                int dx = cx + (int)(cosf(angle) * 9.5f + 0.5f);
+                int dy = cy + (int)(sinf(angle) * 9.5f + 0.5f);
+                _gfx->fillCircle(dx, dy, 2, color);
+            }
+            _gfx->fillCircle(cx, cy, 3, color);
             break;
         case STATE_SETTINGS_UI:
             // ── 4-tooth gear

@@ -198,12 +198,12 @@ async function renderDashboard(){
   try{await syncDashboard(await getHealth(true));}catch(e){setOnline(false);liveText('dashOnline','Unavailable');}
 }
 
-const APP_NAMES={0:'Launcher',1:'Info',2:'Clock',3:'Video',4:'Music',5:'SSync',6:'Gallery',7:'Settings'};
-const APP_ICONS={0:'home',1:'info',2:'clock',3:'video',4:'music',5:'snapcast',6:'gallery',7:'settings'};
-const APP_COLORS={0:'#3aba7d',1:'#3aba7d',2:'#00c8ff',3:'#6d9ff5',4:'#ef6a73',5:'#e4b94d',6:'#f18450',7:'#9da6b0'};
+const APP_NAMES={0:'Launcher',1:'Info',2:'Clock',3:'Video',4:'Music',5:'SSync',6:'Gallery',7:'Pixels',8:'Settings'};
+const APP_ICONS={0:'home',1:'info',2:'clock',3:'video',4:'music',5:'snapcast',6:'gallery',7:'sparkle',8:'settings'};
+const APP_COLORS={0:'#3aba7d',1:'#3aba7d',2:'#00c8ff',3:'#6d9ff5',4:'#ef6a73',5:'#e4b94d',6:'#f18450',7:'#b05cf5',8:'#9da6b0'};
 
 function quickLaunchApps(){
-  return Object.entries(APP_NAMES).slice(0,8).map(([state,name])=>
+  return Object.entries(APP_NAMES).slice(0,9).map(([state,name])=>
     `<button class="app-tile" data-state="${state}" onclick="launchApp(${state})">
       <span class="app-icon" style="background:${APP_COLORS[state]||'#666'}">${icon(APP_ICONS[state]||'info')}</span>
       <strong>${esc(name)}</strong>
@@ -265,7 +265,7 @@ function renderApps(){
   });
 }
 
-const APP_DESC={0:'Launcher carousel',1:'System information',2:'IST clock display',3:'Video player',4:'Audio player',5:'Snapclient audio',6:'Photo viewer',7:'Device preferences'};
+const APP_DESC={0:'Launcher carousel',1:'System information',2:'IST clock display',3:'Video player',4:'Audio player',5:'Snapclient audio',6:'Photo viewer',7:'NeoPixel light ring',8:'Device preferences'};
 
 // ── Controls ──────────────────────────────────────────────────────────────────
 async function renderControls(){
@@ -307,18 +307,118 @@ async function renderControls(){
       </div>
 
       <div class="form-section">
-        <div class="form-title"><h3>${icon('brightness')} RGB LED Ring</h3></div>
+        <div class="form-title"><h3>${icon('sparkle')} NeoPixel 8-LED Ring Studio</h3></div>
         <div style="padding:14px 15px">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-            <label style="font-size:12px;color:var(--muted)">Custom color</label>
-            <input type="color" id="ledColorPicker" value="#00c8ff" oninput="pickLEDColor(this.value)" style="width:44px;height:28px;padding:2px;border:1px solid var(--line);border-radius:5px;cursor:pointer;background:var(--surface2)">
+          <!-- Live 8-LED Ring & Color Preview Box -->
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--surface2);padding:10px 14px;border-radius:10px;border:1px solid var(--line);margin-bottom:14px">
+            <div style="display:flex;align-items:center;gap:12px">
+              <div id="netSwatch" style="width:42px;height:42px;border-radius:8px;background:${'#'+((d.pixel_r||0).toString(16).padStart(2,'0'))+((d.pixel_g||200).toString(16).padStart(2,'0'))+((d.pixel_b||255).toString(16).padStart(2,'0'))};border:2px solid var(--line);box-shadow:0 0 10px rgba(0,0,0,0.3)"></div>
+              <div>
+                <b id="netHex" style="font-size:13px;display:block">#${((d.pixel_r||0).toString(16).padStart(2,'0'))+((d.pixel_g||200).toString(16).padStart(2,'0'))+((d.pixel_b||255).toString(16).padStart(2,'0'))}</b>
+                <span id="netRgb" style="font-size:11px;color:var(--muted)">R:${d.pixel_r||0} G:${d.pixel_g||200} B:${d.pixel_b||255}</span>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <input type="color" id="ledColorPicker" value="#${((d.pixel_r||0).toString(16).padStart(2,'0'))+((d.pixel_g||200).toString(16).padStart(2,'0'))+((d.pixel_b||255).toString(16).padStart(2,'0'))}" oninput="pickLEDColor(this.value)" style="width:40px;height:32px;padding:2px;border:1px solid var(--line);border-radius:6px;cursor:pointer;background:var(--bg)">
+            </div>
           </div>
-          <div class="actions">
-            <button class="btn" onclick="setLED(255,0,0)">Red</button>
-            <button class="btn" onclick="setLED(0,255,0)">Green</button>
-            <button class="btn" onclick="setLED(0,180,255)">Cyan</button>
-            <button class="btn" onclick="setLED(255,160,0)">Amber</button>
-            <button class="btn" onclick="setLED(0,0,0)">Off</button>
+
+          <!-- Mode Selector -->
+          <label style="font-size:12px;color:var(--muted)">Lighting Mode / Animation Preset</label>
+          <select id="pxModeSelect" onchange="setPixelMode(this.value)" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px">
+            <option value="spinner" ${d.pixel_mode===2?'selected':''}>Ring Spinner (Moving Chase)</option>
+            <option value="solid" ${d.pixel_mode===1?'selected':''}>Solid Color</option>
+            <option value="rainbow" ${d.pixel_mode===3?'selected':''}>Rainbow Spectrum Wave</option>
+            <option value="breathe" ${d.pixel_mode===4?'selected':''}>Sine Breathing Pulse</option>
+            <option value="fire" ${d.pixel_mode===5?'selected':''}>Fire Flicker</option>
+            <option value="music" ${d.pixel_mode===6?'selected':''}>Music Sync (Album Art Dual-Color)</option>
+            <option value="ssync" ${d.pixel_mode===7?'selected':''}>SSync Sync (Snapcast Vol-Hue Beat)</option>
+            <option value="off" ${d.pixel_mode===0?'selected':''}>Off (Black)</option>
+          </select>
+
+          <!-- RGB Sliders -->
+          <div style="margin-top:12px">
+            <label style="font-size:12px;color:#ff5555">Red (0-255)</label>
+            <div class="range-wrap" style="margin-top:4px">
+              <input type="range" id="pxRSlider" min="0" max="255" value="${d.pixel_r||0}" oninput="onRgbChange()">
+              <span class="range-value" id="pxRVal">${d.pixel_r||0}</span>
+            </div>
+            <label style="font-size:12px;color:#55ff55;margin-top:8px;display:block">Green (0-255)</label>
+            <div class="range-wrap" style="margin-top:4px">
+              <input type="range" id="pxGSlider" min="0" max="255" value="${d.pixel_g||200}" oninput="onRgbChange()">
+              <span class="range-value" id="pxGVal">${d.pixel_g||200}</span>
+            </div>
+            <label style="font-size:12px;color:#5588ff;margin-top:8px;display:block">Blue (0-255)</label>
+            <div class="range-wrap" style="margin-top:4px">
+              <input type="range" id="pxBSlider" min="0" max="255" value="${d.pixel_b||255}" oninput="onRgbChange()">
+              <span class="range-value" id="pxBVal">${d.pixel_b||255}</span>
+            </div>
+          </div>
+
+          <!-- Target Pixel Selector -->
+          <label style="font-size:12px;color:var(--muted);margin-top:12px;display:block">Target LED</label>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
+            <button class="btn ${d.pixel_target===8||d.pixel_target==null?'blue':''}" onclick="setPixelTarget(8)" style="font-size:11px;padding:4px 8px">All 8</button>
+            ${[0,1,2,3,4,5,6,7].map(i=>`<button class="btn ${d.pixel_target===i?'blue':''}" onclick="setPixelTarget(${i})" style="font-size:11px;padding:4px 8px">${i+1}</button>`).join('')}
+          </div>
+
+          <!-- LED Brightness -->
+          <label style="font-size:12px;color:var(--muted);margin-top:12px;display:block">Ring Brightness</label>
+          <div class="range-wrap" style="margin-top:4px">
+            <input type="range" id="pxBrightSlider" min="1" max="255" value="${d.pixel_bright||40}" oninput="setPixelBrightness(this.value)">
+            <span class="range-value" id="pxBrightVal">${Math.round((d.pixel_bright||40)*100/255)}%</span>
+          </div>
+
+          <!-- Music Reactive Lighting -->
+          <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)">
+            <label style="font-size:12px;color:var(--accent);font-weight:700">Music Player Reactive Lighting</label>
+            <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+              <label class="switch" style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+                <input type="checkbox" id="musLightCb" ${d.music_light!==false?'checked':''} onchange="setMusicLight(this.checked)"> Music Light (Active on Song Play)
+              </label>
+            </div>
+            <label style="font-size:12px;color:var(--muted);margin-top:8px;display:block">Music Effect (Glows with Song Volume &amp; Waveform)</label>
+            <select id="musFxSelect" onchange="setMusicEffect(this.value)" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px">
+              <option value="auto" ${d.music_effect===0?'selected':''}>Auto (Extract 2 Colors from Album Art)</option>
+              <option value="red" ${d.music_effect===1?'selected':''}>Red Pulse</option>
+              <option value="green" ${d.music_effect===2?'selected':''}>Green Glow</option>
+              <option value="blue" ${d.music_effect===3?'selected':''}>Blue Ocean</option>
+              <option value="cyan" ${d.music_effect===4?'selected':''}>Cyan Neon</option>
+              <option value="purple" ${d.music_effect===5?'selected':''}>Purple Haze</option>
+              <option value="amber" ${d.music_effect===6?'selected':''}>Amber Flame</option>
+              <option value="rainbow" ${d.music_effect===7?'selected':''}>Rainbow Spectrum</option>
+            </select>
+          </div>
+
+          <!-- SSync Reactive Lighting -->
+          <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)">
+            <label style="font-size:12px;color:var(--accent);font-weight:700">SSync (Snapcast) Reactive Lighting</label>
+            <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+              <label class="switch" style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+                <input type="checkbox" id="ssyLightCb" ${d.ssync_light!==false?'checked':''} onchange="setSSyncLight(this.checked)"> SSync Light (Active on Stream)
+              </label>
+            </div>
+            <label style="font-size:12px;color:var(--muted);margin-top:8px;display:block">SSync Effect</label>
+            <select id="ssyFxSelect" onchange="setSSyncEffect(this.value)" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px">
+              <option value="vol_hue" ${d.ssync_effect===0?'selected':''}>Volume Adaptive Hue (Green -&gt; Amber -&gt; Red)</option>
+              <option value="rainbow" ${d.ssync_effect===1?'selected':''}>Rainbow Wave</option>
+              <option value="cyan" ${d.ssync_effect===2?'selected':''}>Cyan Beat Pulse</option>
+              <option value="magenta" ${d.ssync_effect===3?'selected':''}>Magenta Beat Pulse</option>
+              <option value="amber" ${d.ssync_effect===4?'selected':''}>Amber Glow</option>
+            </select>
+          </div>
+
+          <!-- Quick presets -->
+          <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)">
+            <label style="font-size:12px;color:var(--muted);margin-bottom:6px;display:block">Quick Colors</label>
+            <div class="actions">
+              <button class="btn" onclick="applyQuickColor(255,0,0)">Red</button>
+              <button class="btn" onclick="applyQuickColor(0,255,0)">Green</button>
+              <button class="btn" onclick="applyQuickColor(0,200,255)">Cyan</button>
+              <button class="btn" onclick="applyQuickColor(255,140,0)">Amber</button>
+              <button class="btn" onclick="applyQuickColor(180,40,255)">Purple</button>
+              <button class="btn" onclick="setPixelMode('off')">Off</button>
+            </div>
           </div>
         </div>
       </div>
@@ -575,7 +675,34 @@ function setAmpBoost(v){$('ampBoostVal').textContent='+'+v+' dB';clearTimeout(am
 function setSnapVolume(v){fetch('/api/snap?vol='+v);}
 function toggleSnapMute(){fetch('/api/snap?mute=1');}
 function setLED(r,g,b){fetch(`/api/led?r=${r}&g=${g}&b=${b}`);}
-function pickLEDColor(hex){const r=parseInt(hex.substr(1,2),16),g=parseInt(hex.substr(3,2),16),b=parseInt(hex.substr(5,2),16);setLED(r,g,b);}
+function pickLEDColor(hex){
+  const r=parseInt(hex.substr(1,2),16),g=parseInt(hex.substr(3,2),16),b=parseInt(hex.substr(5,2),16);
+  if($('pxRSlider')){$('pxRSlider').value=r;$('pxGSlider').value=g;$('pxBSlider').value=b;onRgbChange();}
+  else{setLED(r,g,b);}
+}
+let pxRgbTimer=null;
+function onRgbChange(){
+  const r=+$('pxRSlider').value,g=+$('pxGSlider').value,b=+$('pxBSlider').value;
+  $('pxRVal').textContent=r;$('pxGVal').textContent=g;$('pxBVal').textContent=b;
+  const hex='#'+[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('');
+  if($('netSwatch'))$('netSwatch').style.background=hex;
+  if($('netHex'))$('netHex').textContent=hex.toUpperCase();
+  if($('netRgb'))$('netRgb').textContent=`R:${r} G:${g} B:${b}`;
+  if($('ledColorPicker'))$('ledColorPicker').value=hex;
+  clearTimeout(pxRgbTimer);
+  pxRgbTimer=setTimeout(()=>fetch(`/api/pixels?r=${r}&g=${g}&b=${b}&mode=solid`),80);
+}
+function setPixelMode(m){fetch('/api/pixels?mode='+m).then(()=>toast('Mode: '+m));}
+function setPixelTarget(t){fetch('/api/pixels?target='+t).then(()=>{toast('Target: '+(t===8?'All 8':'LED '+(t+1)));renderControls();});}
+let pxBrTimer=null;
+function setPixelBrightness(v){$('pxBrightVal').textContent=Math.round(v*100/255)+'%';clearTimeout(pxBrTimer);pxBrTimer=setTimeout(()=>fetch('/api/pixels?brightness='+v),80);}
+function setMusicLight(on){fetch('/api/pixels?music_light='+(on?1:0));}
+function setMusicEffect(fx){fetch('/api/pixels?music_effect='+fx).then(()=>toast('Music FX: '+fx));}
+function setSSyncLight(on){fetch('/api/pixels?ssync_light='+(on?1:0));}
+function setSSyncEffect(fx){fetch('/api/pixels?ssync_effect='+fx).then(()=>toast('SSync FX: '+fx));}
+function applyQuickColor(r,g,b){
+  if($('pxRSlider')){$('pxRSlider').value=r;$('pxGSlider').value=g;$('pxBSlider').value=b;onRgbChange();}
+}
 function setSlideTimer(v){fetch('/api/gallery?timer='+v);}
 function rebootDevice(){if(confirm('Reboot PoKo now?'))fetch('/api/reboot').then(()=>toast('Rebooting...'));}
 async function saveSnap(e){

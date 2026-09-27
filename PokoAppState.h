@@ -12,6 +12,7 @@ enum AppState {
     STATE_MUSIC_UI,       // Music player UI (over TCPAudio backend stream)
     STATE_SSYNC,          // SSync — Snapcast client (direct app, no wrapper)
     STATE_GALLERY_UI,     // Gallery (LittleFS + backend)
+    STATE_PIXELS_UI,      // NeoPixel Studio app
     STATE_SETTINGS_UI,    // On-device settings
     STATE_COUNT           // Sentinel — keep last
 };
@@ -33,7 +34,8 @@ inline int stateToTile(AppState s) {
         case STATE_MUSIC_UI:    return 3;
         case STATE_VIDEO_UI:    return 4;
         case STATE_GALLERY_UI:  return 5;
-        case STATE_SETTINGS_UI: return 6;
+        case STATE_PIXELS_UI:   return 6;
+        case STATE_SETTINGS_UI: return 7;
         default:                return -1;
     }
 }

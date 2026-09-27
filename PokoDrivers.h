@@ -6,6 +6,7 @@
 #include <Arduino_GFX_Library.h>
 #include "PokoPins.h"
 #include "es8311.h"
+#include "PixelEngine.h"
 
 // ─────────────────────────────────────────────────────────────
 //  PokoDrivers — Centralised hardware initialisation helpers
@@ -131,6 +132,7 @@ static int _currentAppVolume  = 75;
 inline void setMasterVolumeLimit(int limit) {
     _masterVolumeLimit = constrain(limit, 0, 100);
     int effectiveVol = (_currentAppVolume * _masterVolumeLimit) / 100;
+    pixelEngine.setEffectiveVolume(effectiveVol);
     if (_es8311Handle) es8311SetVolume(effectiveVol);
 }
 
@@ -141,6 +143,7 @@ inline int getMasterVolumeLimit() {
 inline void setScaledVolume(int appVol0to100) {
     _currentAppVolume = constrain(appVol0to100, 0, 100);
     int effectiveVol = (_currentAppVolume * _masterVolumeLimit) / 100;
+    pixelEngine.setEffectiveVolume(effectiveVol);
     if (_es8311Handle) es8311SetVolume(effectiveVol);
 }
 
@@ -308,31 +311,24 @@ inline bool prepareAudioOutput(uint32_t sampleRate = 44100) {
 }
 
 // ── WS2812B LEDs ─────────────────────────────────────────────
-//  Managed via FastLED. Call initLEDs() once, then use FastLED
-//  API or the helpers below.
-#include <FastLED.h>
-static CRGB _leds[POKO_LED_COUNT];
+//  Managed via PixelEngine and FastLED. Call initLEDs() once.
 
 inline void initLEDs() {
-    FastLED.addLeds<WS2812B, POKO_PIN_LED_DATA, RGB>(_leds, POKO_LED_COUNT);
-    FastLED.setBrightness(30);
-    fill_solid(_leds, POKO_LED_COUNT, CRGB::Black);
-    FastLED.show();
+    pixelEngine.begin();
 }
 
 inline void setAllLEDs(CRGB color) {
-    fill_solid(_leds, POKO_LED_COUNT, color);
-    FastLED.show();
+    pixelEngine.setColor(color.r, color.g, color.b);
+    pixelEngine.setTargetPixel(8);
+    pixelEngine.setMode(PIXEL_MODE_SOLID);
 }
 
 inline void setLEDBrightness(uint8_t b) {
-    FastLED.setBrightness(b);
-    FastLED.show();
+    pixelEngine.setBrightness(b);
 }
 
 inline void turnOffLEDs() {
-    fill_solid(_leds, POKO_LED_COUNT, CRGB::Black);
-    FastLED.show();
+    pixelEngine.setMode(PIXEL_MODE_OFF);
 }
 
 // ── Driver reset (called on 5-second both-hold combo) ────────

@@ -162,6 +162,8 @@ public:
 
     bool isLoaded() const { return _active; }
 
+    bool isPlaying() const { return _player ? _player->isPlaying() : false; }
+
     SnapPlayer* getPlayer() { return _player; }
 
     void onLeft() {

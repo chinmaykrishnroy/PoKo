@@ -69,12 +69,16 @@ private:
     uint32_t  _lastScrollMs = 0;
 
     static Arduino_Canvas* _activeCanvas;
+    static bool            _needsColorExtract;
 
     static bool tftOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
         if (_activeCanvas) {
             _activeCanvas->draw16bitRGBBitmap(x, y, bitmap, w, h);
         } else if (pokoGfx) {
             pokoGfx->draw16bitRGBBitmap(x, y, bitmap, w, h);
+        }
+        if (_needsColorExtract) {
+            pixelEngine.samplePixels(bitmap, (size_t)w * (size_t)h);
         }
         return true;
     }
@@ -184,6 +188,7 @@ private:
             if (total > 100) {
                 _artSize = total;
                 strncpy(_loadedId, _songs[idx].id, sizeof(_loadedId) - 1);
+                _needsColorExtract = true;
             }
         }
         http.end();
@@ -284,12 +289,17 @@ private:
             _canvas->drawRoundRect(32, 16, 64, 64, 6, theme.surface2);
 
             if (_artSize > 100) {
+                if (_needsColorExtract) pixelEngine.startColorExtraction();
                 _activeCanvas = _canvas;
                 TJpgDec.setJpgScale(1);
                 TJpgDec.setSwapBytes(false);
                 TJpgDec.setCallback(tftOutput);
                 TJpgDec.drawJpg(34, 18, _artBuf, _artSize);
                 _activeCanvas = nullptr;
+                if (_needsColorExtract) {
+                    pixelEngine.finishColorExtraction();
+                    _needsColorExtract = false;
+                }
             } else {
                 _canvas->fillRoundRect(34, 18, 60, 60, 4, theme.surface);
                 _canvas->setFont(u8g2_font_helvB14_tf);
@@ -362,12 +372,17 @@ private:
             // Playing screen: Thumbnail in center, scrolling "Name - Artist", progress bar, time/vol, footer
             _canvas->drawRoundRect(32, 14, 64, 64, 4, theme.surface2);
             if (_artSize > 100) {
+                if (_needsColorExtract) pixelEngine.startColorExtraction();
                 _activeCanvas = _canvas;
                 TJpgDec.setJpgScale(1);
                 TJpgDec.setSwapBytes(false);
                 TJpgDec.setCallback(tftOutput);
                 TJpgDec.drawJpg(34, 16, _artBuf, _artSize);
                 _activeCanvas = nullptr;
+                if (_needsColorExtract) {
+                    pixelEngine.finishColorExtraction();
+                    _needsColorExtract = false;
+                }
             } else {
                 _canvas->fillRoundRect(34, 16, 60, 60, 3, theme.surface);
                 _canvas->setFont(u8g2_font_helvB14_tf);
@@ -611,6 +626,11 @@ public:
             renderToCanvas();
         }
     }
+
+    bool isPlaying() const {
+        return _active && (_mode == MODE_PLAYING) && !_paused;
+    }
 };
 
 inline Arduino_Canvas* MusicApp::_activeCanvas = nullptr;
+inline bool            MusicApp::_needsColorExtract = false;

@@ -160,6 +160,7 @@ private:
 
         virtual bool ConsumeSample(int16_t sample[2]) override {
             float v = *_vol;
+            pixelEngine.feedAudioSample(sample[0], sample[1]);
             _buffer[_bufIndex++] = (int16_t)(sample[0] * v);
             _buffer[_bufIndex++] = (int16_t)(sample[1] * v);
 

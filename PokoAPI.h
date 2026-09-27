@@ -67,7 +67,17 @@ public:
             int srvPort = _prefs->getInt("server_port", 8765);
             json += "\"server_host\":\"" + srvHost + "\",";
             json += "\"server_port\":" + String(srvPort) + ",";
-            json += "\"server_addr\":\"" + srvHost + ":" + String(srvPort) + "\"";
+            json += "\"server_addr\":\"" + srvHost + ":" + String(srvPort) + "\",";
+            json += "\"pixel_mode\":" + String((int)pixelEngine.getMode()) + ",";
+            json += "\"pixel_r\":" + String(pixelEngine.getR()) + ",";
+            json += "\"pixel_g\":" + String(pixelEngine.getG()) + ",";
+            json += "\"pixel_b\":" + String(pixelEngine.getB()) + ",";
+            json += "\"pixel_bright\":" + String(pixelEngine.getBrightness()) + ",";
+            json += "\"pixel_target\":" + String(pixelEngine.getTargetPixel()) + ",";
+            json += "\"music_light\":" + String(pixelEngine.getMusicLightOn() ? "true" : "false") + ",";
+            json += "\"music_effect\":" + String((int)pixelEngine.getMusicEffect()) + ",";
+            json += "\"ssync_light\":" + String(pixelEngine.getSSyncLightOn() ? "true" : "false") + ",";
+            json += "\"ssync_effect\":" + String((int)pixelEngine.getSSyncEffect());
             json += "}";
             _server->send(200, "application/json", json);
         });
@@ -361,15 +371,136 @@ public:
             _server->send(200, "application/json", "{\"ok\":true}");
         });
 
-        // WS2812B LED Control
+        // NeoPixel 8-LED Ring Control (/api/pixels)
+        _server->on("/api/pixels", HTTP_ANY, [this]() {
+            bool changed = false;
+
+            if (_server->hasArg("mode")) {
+                String m = _server->arg("mode");
+                m.toLowerCase();
+                if (m == "off" || m == "0")             pixelEngine.setMode(PIXEL_MODE_OFF);
+                else if (m == "solid" || m == "1")       pixelEngine.setMode(PIXEL_MODE_SOLID);
+                else if (m == "spinner" || m == "2")     pixelEngine.setMode(PIXEL_MODE_SPINNER);
+                else if (m == "rainbow" || m == "3")     pixelEngine.setMode(PIXEL_MODE_RAINBOW);
+                else if (m == "breathe" || m == "4")     pixelEngine.setMode(PIXEL_MODE_BREATHE);
+                else if (m == "fire" || m == "5")        pixelEngine.setMode(PIXEL_MODE_FIRE);
+                else if (m == "music" || m == "6")       pixelEngine.setMode(PIXEL_MODE_MUSIC_SYNC);
+                else if (m == "ssync" || m == "7")       pixelEngine.setMode(PIXEL_MODE_SSYNC_SYNC);
+                changed = true;
+            }
+
+            if (_server->hasArg("color")) {
+                String c = _server->arg("color");
+                if (c.startsWith("#")) c = c.substring(1);
+                long rgb = strtol(c.c_str(), NULL, 16);
+                pixelEngine.setColor((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+                changed = true;
+            } else if (_server->hasArg("r") || _server->hasArg("g") || _server->hasArg("b")) {
+                uint8_t r = _server->hasArg("r") ? (uint8_t)constrain(_server->arg("r").toInt(), 0, 255) : pixelEngine.getR();
+                uint8_t g = _server->hasArg("g") ? (uint8_t)constrain(_server->arg("g").toInt(), 0, 255) : pixelEngine.getG();
+                uint8_t b = _server->hasArg("b") ? (uint8_t)constrain(_server->arg("b").toInt(), 0, 255) : pixelEngine.getB();
+                pixelEngine.setColor(r, g, b);
+                changed = true;
+            }
+
+            if (_server->hasArg("target")) {
+                pixelEngine.setTargetPixel((uint8_t)constrain(_server->arg("target").toInt(), 0, 8));
+                changed = true;
+            }
+
+            if (_server->hasArg("brightness")) {
+                pixelEngine.setBrightness((uint8_t)constrain(_server->arg("brightness").toInt(), 1, 255));
+                changed = true;
+            }
+
+            if (_server->hasArg("speed")) {
+                pixelEngine.setSpeed((uint16_t)constrain(_server->arg("speed").toInt(), 20, 2000));
+                changed = true;
+            }
+
+            if (_server->hasArg("music_light")) {
+                String val = _server->arg("music_light");
+                pixelEngine.setMusicLightOn(val == "1" || val == "true" || val == "on");
+                changed = true;
+            }
+
+            if (_server->hasArg("music_effect")) {
+                String fx = _server->arg("music_effect");
+                fx.toLowerCase();
+                if (fx == "auto" || fx == "0")         pixelEngine.setMusicEffect(MUSIC_FX_AUTO);
+                else if (fx == "red" || fx == "1")     pixelEngine.setMusicEffect(MUSIC_FX_RED);
+                else if (fx == "green" || fx == "2")   pixelEngine.setMusicEffect(MUSIC_FX_GREEN);
+                else if (fx == "blue" || fx == "3")    pixelEngine.setMusicEffect(MUSIC_FX_BLUE);
+                else if (fx == "cyan" || fx == "4")    pixelEngine.setMusicEffect(MUSIC_FX_CYAN);
+                else if (fx == "purple" || fx == "5")  pixelEngine.setMusicEffect(MUSIC_FX_PURPLE);
+                else if (fx == "amber" || fx == "6")   pixelEngine.setMusicEffect(MUSIC_FX_AMBER);
+                else if (fx == "rainbow" || fx == "7") pixelEngine.setMusicEffect(MUSIC_FX_RAINBOW);
+                changed = true;
+            }
+
+            if (_server->hasArg("ssync_light")) {
+                String val = _server->arg("ssync_light");
+                pixelEngine.setSSyncLightOn(val == "1" || val == "true" || val == "on");
+                changed = true;
+            }
+
+            if (_server->hasArg("ssync_effect")) {
+                String fx = _server->arg("ssync_effect");
+                fx.toLowerCase();
+                if (fx == "vol_hue" || fx == "0")      pixelEngine.setSSyncEffect(SSYNC_FX_VOL_HUE);
+                else if (fx == "rainbow" || fx == "1") pixelEngine.setSSyncEffect(SSYNC_FX_RAINBOW);
+                else if (fx == "cyan" || fx == "2")    pixelEngine.setSSyncEffect(SSYNC_FX_CYAN);
+                else if (fx == "magenta" || fx == "3") pixelEngine.setSSyncEffect(SSYNC_FX_MAGENTA);
+                else if (fx == "amber" || fx == "4")   pixelEngine.setSSyncEffect(SSYNC_FX_AMBER);
+                changed = true;
+            }
+
+            if (changed) {
+                pixelEngine.saveToPreferences(*_prefs);
+            }
+
+            char hexBuf[10];
+            snprintf(hexBuf, sizeof(hexBuf), "#%02X%02X%02X", pixelEngine.getR(), pixelEngine.getG(), pixelEngine.getB());
+            char art1Buf[10], art2Buf[10];
+            CRGB a1 = pixelEngine.getArtColor1();
+            CRGB a2 = pixelEngine.getArtColor2();
+            snprintf(art1Buf, sizeof(art1Buf), "#%02X%02X%02X", a1.r, a1.g, a1.b);
+            snprintf(art2Buf, sizeof(art2Buf), "#%02X%02X%02X", a2.r, a2.g, a2.b);
+
+            String json = "{";
+            json += "\"ok\":true,";
+            json += "\"mode\":" + String((int)pixelEngine.getMode()) + ",";
+            json += "\"r\":" + String(pixelEngine.getR()) + ",";
+            json += "\"g\":" + String(pixelEngine.getG()) + ",";
+            json += "\"b\":" + String(pixelEngine.getB()) + ",";
+            json += "\"color\":\"" + String(hexBuf) + "\",";
+            json += "\"brightness\":" + String(pixelEngine.getBrightness()) + ",";
+            json += "\"target\":" + String(pixelEngine.getTargetPixel()) + ",";
+            json += "\"speed\":" + String(pixelEngine.getSpeed()) + ",";
+            json += "\"music_light\":" + String(pixelEngine.getMusicLightOn() ? "true" : "false") + ",";
+            json += "\"music_effect\":" + String((int)pixelEngine.getMusicEffect()) + ",";
+            json += "\"ssync_light\":" + String(pixelEngine.getSSyncLightOn() ? "true" : "false") + ",";
+            json += "\"ssync_effect\":" + String((int)pixelEngine.getSSyncEffect()) + ",";
+            json += "\"art_color1\":\"" + String(art1Buf) + "\",";
+            json += "\"art_color2\":\"" + String(art2Buf) + "\",";
+            json += "\"audio_level\":" + String(pixelEngine.getAudioLevel(), 2);
+            json += "}";
+            _server->send(200, "application/json", json);
+        });
+
+        // WS2812B Quick LED Control (backward compatible)
         _server->on("/api/led", HTTP_GET, [this]() {
             if (_server->hasArg("r") && _server->hasArg("g") && _server->hasArg("b")) {
                 uint8_t r = constrain(_server->arg("r").toInt(), 0, 255);
                 uint8_t g = constrain(_server->arg("g").toInt(), 0, 255);
                 uint8_t b = constrain(_server->arg("b").toInt(), 0, 255);
-                setAllLEDs(CRGB(r, g, b));
+                pixelEngine.setColor(r, g, b);
+                pixelEngine.setTargetPixel(8);
+                pixelEngine.setMode(PIXEL_MODE_SOLID);
+                pixelEngine.saveToPreferences(*_prefs);
             } else if (_server->hasArg("off")) {
-                turnOffLEDs();
+                pixelEngine.setMode(PIXEL_MODE_OFF);
+                pixelEngine.saveToPreferences(*_prefs);
             }
             _server->send(200, "application/json", "{\"ok\":true}");
         });
