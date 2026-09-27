@@ -26,10 +26,43 @@ extern VideoApp* videoAppInstance;
 extern GalleryApp* galleryAppInstance;
 extern void handleDriverReset();
 
+// Helper to safely escape characters for JSON string values
+inline String escapeJson(const String& s) {
+    String out = "";
+    out.reserve(s.length() + 8);
+    for (size_t i = 0; i < s.length(); i++) {
+        char c = s[i];
+        if (c == '"') {
+            out += "\\\"";
+        } else if (c == '\\') {
+            out += "\\\\";
+        } else if (c == '\b') {
+            out += "\\b";
+        } else if (c == '\f') {
+            out += "\\f";
+        } else if (c == '\n') {
+            out += "\\n";
+        } else if (c == '\r') {
+            out += "\\r";
+        } else if (c == '\t') {
+            out += "\\t";
+        } else if ((uint8_t)c < 0x20) {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "\\u%04x", (uint8_t)c);
+            out += buf;
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
 class PokoAPI {
 private:
     WebServer*   _server;
     Preferences* _prefs;
+    bool         _uploadSuccess = false;
+    String       _uploadErrMsg  = "";
 
 public:
     PokoAPI(WebServer* srv, Preferences* prf)
@@ -45,8 +78,8 @@ public:
         // Health / Status endpoint
         _server->on("/api/health", HTTP_GET, [this]() {
             String json = "{";
-            json += "\"ip\":\"" + (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "n/a") + "\",";
-            json += "\"ssid\":\"" + WiFi.SSID() + "\",";
+            json += "\"ip\":\"" + escapeJson(WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "n/a") + "\",";
+            json += "\"ssid\":\"" + escapeJson(WiFi.SSID()) + "\",";
             json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
             json += "\"heap_free\":" + String(ESP.getFreeHeap()) + ",";
             json += "\"psram_free\":" + String(ESP.getFreePsram()) + ",";
@@ -61,13 +94,13 @@ public:
             json += "\"gallery_timer\":" + String(_prefs->getInt("gallery_timer", 0)) + ",";
             String snapHost = _prefs->getString("snap_host", "192.168.0.20");
             int snapPort = _prefs->getInt("snap_port", 1704);
-            json += "\"snap_host\":\"" + snapHost + "\",";
+            json += "\"snap_host\":\"" + escapeJson(snapHost) + "\",";
             json += "\"snap_port\":" + String(snapPort) + ",";
             String srvHost = _prefs->getString("server_host", "192.168.0.15");
             int srvPort = _prefs->getInt("server_port", 8765);
-            json += "\"server_host\":\"" + srvHost + "\",";
+            json += "\"server_host\":\"" + escapeJson(srvHost) + "\",";
             json += "\"server_port\":" + String(srvPort) + ",";
-            json += "\"server_addr\":\"" + srvHost + ":" + String(srvPort) + "\",";
+            json += "\"server_addr\":\"" + escapeJson(srvHost + ":" + String(srvPort)) + "\",";
             json += "\"pixel_mode\":" + String((int)pixelEngine.getMode()) + ",";
             json += "\"pixel_r\":" + String(pixelEngine.getR()) + ",";
             json += "\"pixel_g\":" + String(pixelEngine.getG()) + ",";
@@ -75,7 +108,7 @@ public:
             json += "\"pixel_bright\":" + String(pixelEngine.getBrightness()) + ",";
             json += "\"pixel_target\":" + String(pixelEngine.getTargetPixel()) + ",";
             json += "\"target_mask\":" + String((int)pixelEngine.getTargetMask()) + ",";
-            json += "\"target_label\":\"" + String(pixelEngine.getTargetMaskLabel()) + "\",";
+            json += "\"target_label\":\"" + escapeJson(pixelEngine.getTargetMaskLabel()) + "\",";
             json += "\"music_light\":" + String(pixelEngine.getMusicLightOn() ? "true" : "false") + ",";
             json += "\"music_effect\":" + String((int)pixelEngine.getMusicEffect()) + ",";
             json += "\"ssync_light\":" + String(pixelEngine.getSSyncLightOn() ? "true" : "false") + ",";
@@ -162,8 +195,12 @@ public:
                 }
             }
             if (_server->hasArg("mute")) {
+                String mStr = _server->arg("mute");
+                mStr.toLowerCase();
+                mStr.trim();
+                bool m = (mStr == "1" || mStr == "true" || mStr == "yes" || mStr == "on");
                 if (ssyncAppInstance && ssyncAppInstance->getPlayer()) {
-                    ssyncAppInstance->getPlayer()->toggleMute();
+                    ssyncAppInstance->getPlayer()->setMute(m);
                 }
             }
             String j = (ssyncAppInstance) ? ssyncAppInstance->apiJson() : "{}";
@@ -203,7 +240,7 @@ public:
                             if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
                                 if (!first) json += ",";
                                 first = false;
-                                json += "{\"name\":\"" + fname + "\",\"size\":" + String((unsigned long)f.size()) + "}";
+                                json += "{\"name\":\"" + escapeJson(fname) + "\",\"size\":" + String((unsigned long)f.size()) + "}";
                             }
                         }
                         f = dir.openNextFile();
@@ -272,14 +309,29 @@ public:
         // Upload LittleFS image (128x128 JPEG)
         _server->on("/api/gallery/upload", HTTP_POST, [this]() {
             _server->sendHeader("Connection", "close");
-            _server->send(200, "application/json", "{\"ok\":true}");
-            if (galleryAppInstance && activeApp == STATE_GALLERY_UI) {
-                galleryAppInstance->reloadList();
+            if (_uploadSuccess) {
+                _server->send(200, "application/json", "{\"ok\":true}");
+                if (galleryAppInstance && activeApp == STATE_GALLERY_UI) {
+                    galleryAppInstance->reloadList();
+                }
+            } else {
+                String err = (_uploadErrMsg.length() > 0) ? _uploadErrMsg : "Upload write failed";
+                _server->send(500, "application/json", "{\"ok\":false,\"error\":\"" + escapeJson(err) + "\"}");
             }
         }, [this]() {
             HTTPUpload& upload = _server->upload();
             static File uploadFile;
             if (upload.status == UPLOAD_FILE_START) {
+                _uploadSuccess = true;
+                _uploadErrMsg = "";
+                size_t total = LittleFS.totalBytes();
+                size_t used  = LittleFS.usedBytes();
+                if (total > 0 && (total - used) < 4096) {
+                    _uploadSuccess = false;
+                    _uploadErrMsg = "Storage is full";
+                    Serial.println("[gallery] upload rejected: LittleFS storage full");
+                    return;
+                }
                 if (!LittleFS.exists("/photos")) {
                     LittleFS.mkdir("/photos");
                 }
@@ -294,16 +346,34 @@ public:
                 String path = "/photos/" + fname;
                 Serial.printf("[gallery] start upload %s\n", path.c_str());
                 uploadFile = LittleFS.open(path, "w");
+                if (!uploadFile) {
+                    _uploadSuccess = false;
+                    _uploadErrMsg = "Failed to create destination file";
+                    Serial.println("[gallery] upload file open failed");
+                }
             } else if (upload.status == UPLOAD_FILE_WRITE) {
-                if (uploadFile) {
-                    uploadFile.write(upload.buf, upload.currentSize);
+                if (_uploadSuccess && uploadFile) {
+                    size_t written = uploadFile.write(upload.buf, upload.currentSize);
+                    if (written != upload.currentSize) {
+                        _uploadSuccess = false;
+                        _uploadErrMsg = "Write failed: storage full";
+                        Serial.println("[gallery] upload write failed: disk full");
+                    }
                 }
             } else if (upload.status == UPLOAD_FILE_END) {
                 if (uploadFile) {
                     uploadFile.close();
+                }
+                if (_uploadSuccess && upload.totalSize == 0) {
+                    _uploadSuccess = false;
+                    _uploadErrMsg = "Empty file received";
+                }
+                if (_uploadSuccess) {
                     Serial.printf("[gallery] uploaded %u bytes successfully\n", (unsigned int)upload.totalSize);
                 }
             } else if (upload.status == UPLOAD_FILE_ABORTED) {
+                _uploadSuccess = false;
+                _uploadErrMsg = "Upload aborted";
                 if (uploadFile) {
                     uploadFile.close();
                 }

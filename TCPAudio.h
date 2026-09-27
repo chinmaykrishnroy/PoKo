@@ -27,6 +27,7 @@ private:
     volatile bool   _playStarted;
     volatile uint32_t _disconnectStartMs;
     volatile float  _volume;
+    WiFiClient* volatile _activeClient = nullptr;
 
     class AudioStreamTCP : public AudioFileSource {
     private:
@@ -203,6 +204,7 @@ private:
             if (client) {
                 Serial.println("[tcpaudio] Client connected, starting MP3 stream decode");
                 ensureAudioOutput(44100);
+                _activeClient = &client;
                 _clientConnected = true;
                 _playStarted = true;
                 _disconnectStartMs = 0;
@@ -234,6 +236,7 @@ private:
                 delete file;
 
                 client.stop();
+                _activeClient = nullptr;
                 _clientConnected = false;
                 _abortStream = false;
                 Serial.println("[tcpaudio] Client disconnected");
@@ -262,6 +265,9 @@ public:
     void stopStream() {
         if (_clientConnected) {
             _abortStream = true;
+            if (_activeClient && _activeClient->connected()) {
+                _activeClient->stop();
+            }
             uint32_t startWait = millis();
             while (_clientConnected && millis() - startWait < 300) {
                 vTaskDelay(pdMS_TO_TICKS(5));
@@ -313,17 +319,16 @@ public:
 
     void unload() {
         if (_isLoaded) {
-            stopStream();
             _isRunning = false;
+            stopStream();
+            _server.end();
             _isLoaded = false;
-            uint32_t deadline = millis() + 1500;
+            uint32_t deadline = millis() + 2000;
             while (_netTaskHandle != NULL && millis() < deadline) {
-                vTaskDelay(pdMS_TO_TICKS(5));
+                vTaskDelay(pdMS_TO_TICKS(10));
             }
             if (_netTaskHandle != NULL) {
-                _server.end();
-                vTaskDelete((TaskHandle_t)_netTaskHandle);
-                _netTaskHandle = NULL;
+                Serial.println("[tcpaudio] Warning: task shutdown timeout");
             }
             _clientConnected = false;
         }

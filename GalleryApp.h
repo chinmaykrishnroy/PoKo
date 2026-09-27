@@ -125,7 +125,7 @@ private:
             WiFiClient client;
             HTTPClient http;
             http.begin(client, url);
-            http.setTimeout(3000);
+            http.setTimeout(1000);
             int code = http.GET();
             if (code == 200) {
                 JsonDocument doc;
@@ -206,14 +206,14 @@ private:
                 WiFiClient client;
                 HTTPClient http;
                 http.begin(client, url);
-                http.setTimeout(3000);
+                http.setTimeout(1000);
                 int code = http.GET();
                 if (code == 200) {
                     int len = http.getSize();
                     WiFiClient* stream = http.getStreamPtr();
                     size_t totalRead = 0;
                     uint32_t startMs = millis();
-                    while (http.connected() && (len < 0 || totalRead < (size_t)len) && (millis() - startMs < 2500)) {
+                    while (http.connected() && (len < 0 || totalRead < (size_t)len) && (millis() - startMs < 1000)) {
                         size_t avail = stream->available();
                         if (avail) {
                             size_t toRead = avail;

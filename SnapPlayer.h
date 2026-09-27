@@ -1993,7 +1993,11 @@ public:
     }
 
     void toggleMute() {
-        _serverMuted = !_serverMuted;
+        setMute(!_serverMuted);
+    }
+
+    void setMute(bool mute) {
+        _serverMuted = mute;
         setScaledVolume(_serverMuted ? 0 : _serverVolume);
         _volumePublishPending = true;
     }

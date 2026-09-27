@@ -49,6 +49,8 @@ private:
     volatile bool   _clientConnected;
     volatile bool   _audioConnected;
     volatile bool   _videoConnected;
+    WiFiClient* volatile _activeAudioClient = nullptr;
+    WiFiClient* volatile _activeVideoClient = nullptr;
     bool            _wasConnected;
     volatile float  _volume;
     bool            _allocationFailed;
@@ -170,6 +172,7 @@ private:
             }
 
             client.setNoDelay(true);
+            _activeAudioClient = &client;
             _audioConnected = true;
             _clientConnected = true;
             bool receivedPacket = false;
@@ -212,6 +215,7 @@ private:
             }
 
             client.stop();
+            _activeAudioClient = nullptr;
             _audioConnected = false;
             _clientConnected = _videoConnected;
         }
@@ -233,6 +237,7 @@ private:
             }
 
             client.setNoDelay(true);
+            _activeVideoClient = &client;
             _videoConnected = true;
             _clientConnected = true;
             bool receivedPacket = false;
@@ -282,6 +287,7 @@ private:
             }
 
             client.stop();
+            _activeVideoClient = nullptr;
             _videoConnected = false;
             _clientConnected = _audioConnected;
         }
@@ -506,24 +512,22 @@ public:
         if (!_isLoaded && !_allocationFailed) return;
 
         _isRunning = false;
-        uint32_t deadline = millis() + 1200;
+        if (_activeAudioClient && _activeAudioClient->connected()) {
+            _activeAudioClient->stop();
+        }
+        if (_activeVideoClient && _activeVideoClient->connected()) {
+            _activeVideoClient->stop();
+        }
+        _server.end();
+        _videoServer.end();
+
+        uint32_t deadline = millis() + 2000;
         while (((_netTaskHandle != NULL) || (_videoTaskHandle != NULL) || (_audioTaskHandle != NULL)) && millis() < deadline) {
-            vTaskDelay(pdMS_TO_TICKS(5));
+            vTaskDelay(pdMS_TO_TICKS(10));
         }
 
-        if (_netTaskHandle != NULL) {
-            _server.end();
-            vTaskDelete(_netTaskHandle);
-            _netTaskHandle = NULL;
-        }
-        if (_videoTaskHandle != NULL) {
-            _videoServer.end();
-            vTaskDelete(_videoTaskHandle);
-            _videoTaskHandle = NULL;
-        }
-        if (_audioTaskHandle != NULL) {
-            vTaskDelete(_audioTaskHandle);
-            _audioTaskHandle = NULL;
+        if (_netTaskHandle != NULL || _videoTaskHandle != NULL || _audioTaskHandle != NULL) {
+            Serial.println("[synced] Warning: task shutdown timeout");
         }
 
         releaseResources();

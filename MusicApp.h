@@ -104,7 +104,7 @@ private:
         HTTPClient http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/library/audio?page=1&page_size=" + String(MAX_SONGS) + "&icons=false";
         http.begin(url);
-        http.setTimeout(3500);
+        http.setTimeout(1000);
 
         int httpCode = http.GET();
         if (httpCode == HTTP_CODE_OK) {
@@ -166,14 +166,14 @@ private:
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
                      "/api/library/audio/" + String(_songs[idx].id) + "/thumbnail.jpg?size=60";
         http.begin(url);
-        http.setTimeout(2500);
+        http.setTimeout(1000);
 
         int code = http.GET();
         if (code == HTTP_CODE_OK) {
             WiFiClient* stream = http.getStreamPtr();
             size_t total = 0;
             uint32_t startWait = millis();
-            while (http.connected() && (total < 16384) && (millis() - startWait < 2000)) {
+            while (http.connected() && (total < 16384) && (millis() - startWait < 1000)) {
                 int avail = stream->available();
                 if (avail > 0) {
                     int r = stream->read(_artBuf + total, min(avail, (int)(16384 - total)));
@@ -212,26 +212,33 @@ private:
                      "/api/audio/" + String(_songs[idx].id) + "/play?start=" + String(startSec) +
                      "&switch=false&notify=false&async=true";
         http.begin(url);
-        http.setTimeout(3000);
-        http.GET();
+        http.setTimeout(1000);
+        int httpCode = http.GET();
         http.end();
 
-        _mode = MODE_PLAYING;
-        _paused = false;
-        _trackPos = startSec;
-        _playStartMs = millis() - (startSec * 1000UL);
-        _lastSecondMs = millis();
-        _scrollOffset = 0;
-        _lastScrollMs = millis();
-        _dirty = true;
+        if (httpCode >= 200 && httpCode < 300) {
+            _mode = MODE_PLAYING;
+            _paused = false;
+            _trackPos = startSec;
+            _playStartMs = millis() - (startSec * 1000UL);
+            _lastSecondMs = millis();
+            _scrollOffset = 0;
+            _lastScrollMs = millis();
+            _dirty = true;
+            _serverError = false;
 
-        if (_songs[idx].duration_s > 0) {
-            pixelEngine.setSongProgress((float)startSec / (float)_songs[idx].duration_s);
+            if (_songs[idx].duration_s > 0) {
+                pixelEngine.setSongProgress((float)startSec / (float)_songs[idx].duration_s);
+            } else {
+                pixelEngine.setSongProgress(0.0f);
+            }
+
+            fetchArtwork(idx);
         } else {
-            pixelEngine.setSongProgress(0.0f);
+            Serial.printf("[music] requestPlay failed with code %d\n", httpCode);
+            _serverError = true;
+            _dirty = true;
         }
-
-        fetchArtwork(idx);
     }
 
     void requestStop() {
@@ -242,7 +249,7 @@ private:
         HTTPClient http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false&async=true";
         http.begin(url);
-        http.setTimeout(1500);
+        http.setTimeout(800);
         http.GET();
         http.end();
 

@@ -72,7 +72,11 @@ inline esp_err_t initI2S(uint32_t sampleRate = 44100,
 inline bool initES8311(uint32_t sampleRate = 44100) {
     // ES8311 internal PLL requires MCLK actively driven on pin 8.
     // Ensure I2S is initialized and running before codec configuration.
-    initI2S(sampleRate, 2, 16);
+    esp_err_t i2sErr = initI2S(sampleRate, 2, 16);
+    if (i2sErr != ESP_OK) {
+        Serial.printf("[ES8311] initI2S failed: %d\n", (int)i2sErr);
+        return false;
+    }
 
     Wire.begin(POKO_PIN_I2C_SDA, POKO_PIN_I2C_SCL);
 
@@ -292,7 +296,11 @@ inline bool ensureAudioOutput(uint32_t sampleRate = 44100) {
             return false;
         }
     } else {
-        es8311_sample_frequency_config(_es8311Handle, sampleRate * 256, sampleRate);
+        esp_err_t freqErr = es8311_sample_frequency_config(_es8311Handle, sampleRate * 256, sampleRate);
+        if (freqErr != ESP_OK) {
+            Serial.printf("[audio] es8311_sample_frequency_config failed: %d\n", (int)freqErr);
+            return false;
+        }
     }
 
     // Power on speaker amplifier
@@ -341,8 +349,9 @@ inline void driverReset(Arduino_GFX* gfx) {
         es8311_delete(_es8311Handle);
         _es8311Handle = nullptr;
     }
-    initES8311(44100);
-    initI2S(44100);
+    if (!initES8311(44100)) {
+        Serial.println("[poko] driverReset initES8311 failed");
+    }
     gfx->begin();
     gfx->fillScreen(RGB565_BLACK);
     initBacklight();

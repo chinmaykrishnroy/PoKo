@@ -38,48 +38,54 @@ private:
     uint32_t _rightHoldStartMs  = 0;
     uint32_t _rightLastRepeatMs = 0;
 
-    // Dual-button combo tracking
-    bool     _comboHolding     = false;
-    bool     _comboLongFired   = false;
-    bool     _comboVLongFired  = false;
-    bool     _comboUltraFired  = false;
-    uint32_t _comboStartMs     = 0;
+    // Dual-button combo & click tracking
+    bool     _comboHolding       = false;
+    bool     _comboLongFired     = false;
+    bool     _comboVLongFired    = false;
+    bool     _comboUltraFired    = false;
+    uint32_t _comboStartMs       = 0;
+    bool     _suppressSingle     = false;
+
+    // Dual-button short click / double click detection
+    uint8_t  _dualClickCount     = 0;
+    uint32_t _lastDualReleaseMs  = 0;
+    bool     _dualCandidate      = false;
 
     static ButtonInput* _instance;
 
     static void _cbClickLeft() {
-        if (_instance && _instance->_onLeft) {
+        if (_instance && !_instance->_suppressSingle && _instance->_onLeft) {
             Serial.println("[btn] Left (BOOT) Click");
             _instance->_onLeft();
         }
     }
     static void _cbDblClickLeft() {
-        if (_instance && _instance->_onLeftDouble) {
+        if (_instance && !_instance->_suppressSingle && _instance->_onLeftDouble) {
             Serial.println("[btn] Left (BOOT) Double-Click");
             _instance->_onLeftDouble();
         }
     }
     static void _cbLongLeft() {
-        if (_instance && _instance->_onLongLeft) {
+        if (_instance && !_instance->_suppressSingle && _instance->_onLongLeft) {
             Serial.println("[btn] Left (BOOT) Long-Press");
             _instance->_onLongLeft();
         }
     }
 
     static void _cbClickRight() {
-        if (_instance && _instance->_onRight) {
+        if (_instance && !_instance->_suppressSingle && _instance->_onRight) {
             Serial.println("[btn] Right (KEY) Click");
             _instance->_onRight();
         }
     }
     static void _cbDblClickRight() {
-        if (_instance && _instance->_onRightDouble) {
+        if (_instance && !_instance->_suppressSingle && _instance->_onRightDouble) {
             Serial.println("[btn] Right (KEY) Double-Click");
             _instance->_onRightDouble();
         }
     }
     static void _cbLongRight() {
-        if (_instance && _instance->_onLongRight) {
+        if (_instance && !_instance->_suppressSingle && _instance->_onLongRight) {
             Serial.println("[btn] Right (KEY) Long-Press");
             _instance->_onLongRight();
         }
@@ -138,29 +144,35 @@ public:
     void onBothUltra(SimpleCb cb)     { _onBothUltra     = cb; }
 
     void update() {
-        _btnLeft.tick();
-        _btnRight1.tick();
-        _btnRight2.tick();
-
-        // Dual-button hold detection
         bool lPressed = (digitalRead(POKO_PIN_BTN_LEFT) == LOW);
         bool rPressed = (digitalRead(POKO_PIN_BTN_RIGHT1) == LOW) ||
                         (digitalRead(POKO_PIN_BTN_RIGHT2) == LOW);
 
         uint32_t now = millis();
+
         if (lPressed && rPressed) {
+            // Both buttons are held together
             _leftHoldStartMs = 0;
             _rightHoldStartMs = 0;
+
             if (!_comboHolding) {
                 _comboHolding    = true;
                 _comboStartMs    = now;
                 _comboLongFired  = false;
                 _comboVLongFired = false;
                 _comboUltraFired = false;
+                _suppressSingle  = true;
+                _dualCandidate   = true;
+                // Suppress OneButton so single-button clicks/longpresses don't fire
+                _btnLeft.reset();
+                _btnRight1.reset();
+                _btnRight2.reset();
             } else {
                 uint32_t held = now - _comboStartMs;
                 if (!_comboLongFired && held >= 2000) {
                     _comboLongFired = true;
+                    _dualCandidate  = false;
+                    _dualClickCount = 0;
                     Serial.println("[combo] Both held 2s");
                     if (_onBothLong) _onBothLong();
                 }
@@ -176,36 +188,80 @@ public:
                 }
             }
         } else {
-            _comboHolding = false;
+            // At least one button is NOT pressed
+            if (_comboHolding) {
+                // Just released from dual-button press
+                _comboHolding = false;
+                _btnLeft.reset();
+                _btnRight1.reset();
+                _btnRight2.reset();
+
+                // If released before 2s hold (and within 600ms of dual press), it's a dual click candidate
+                if (_dualCandidate && !_comboLongFired && (now - _comboStartMs < 600)) {
+                    _dualClickCount++;
+                    _lastDualReleaseMs = now;
+                    if (_dualClickCount >= 2) {
+                        Serial.println("[combo] Both Double-Click");
+                        _dualClickCount = 0;
+                        _dualCandidate = false;
+                        if (_onBothDouble) _onBothDouble();
+                    }
+                } else {
+                    _dualCandidate = false;
+                    _dualClickCount = 0;
+                }
+            }
+
+            // Only clear suppression when both buttons are fully released
+            if (!lPressed && !rPressed) {
+                _suppressSingle = false;
+            }
+
+            // Check if dual single-click pending window expired
+            if (_dualClickCount == 1 && (now - _lastDualReleaseMs > 350)) {
+                Serial.println("[combo] Both Click");
+                _dualClickCount = 0;
+                _dualCandidate = false;
+                if (_onBothClick) _onBothClick();
+            }
 
             // Single button continuous press-and-hold (e.g. volume ramp)
-            if (lPressed && !rPressed) {
-                if (_leftHoldStartMs == 0) {
-                    _leftHoldStartMs = now;
-                    _leftLastRepeatMs = now;
-                } else if (now - _leftHoldStartMs >= 450) {
-                    if (now - _leftLastRepeatMs >= 100) {
+            if (!_suppressSingle) {
+                if (lPressed && !rPressed) {
+                    if (_leftHoldStartMs == 0) {
+                        _leftHoldStartMs = now;
                         _leftLastRepeatMs = now;
-                        if (_onLeftHolding) _onLeftHolding();
+                    } else if (now - _leftHoldStartMs >= 450) {
+                        if (now - _leftLastRepeatMs >= 100) {
+                            _leftLastRepeatMs = now;
+                            if (_onLeftHolding) _onLeftHolding();
+                        }
                     }
+                } else {
+                    _leftHoldStartMs = 0;
                 }
-            } else {
-                _leftHoldStartMs = 0;
-            }
 
-            if (rPressed && !lPressed) {
-                if (_rightHoldStartMs == 0) {
-                    _rightHoldStartMs = now;
-                    _rightLastRepeatMs = now;
-                } else if (now - _rightHoldStartMs >= 450) {
-                    if (now - _rightLastRepeatMs >= 100) {
+                if (rPressed && !lPressed) {
+                    if (_rightHoldStartMs == 0) {
+                        _rightHoldStartMs = now;
                         _rightLastRepeatMs = now;
-                        if (_onRightHolding) _onRightHolding();
+                    } else if (now - _rightHoldStartMs >= 450) {
+                        if (now - _rightLastRepeatMs >= 100) {
+                            _rightLastRepeatMs = now;
+                            if (_onRightHolding) _onRightHolding();
+                        }
                     }
+                } else {
+                    _rightHoldStartMs = 0;
                 }
-            } else {
-                _rightHoldStartMs = 0;
             }
+        }
+
+        // Only tick OneButton if not in dual-button combo mode
+        if (!_comboHolding && !_suppressSingle) {
+            _btnLeft.tick();
+            _btnRight1.tick();
+            _btnRight2.tick();
         }
     }
 };

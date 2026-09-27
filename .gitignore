@@ -20,6 +20,7 @@ venv/
 *.db
 *.db-shm
 *.db-wal
+server/config.yml
 uploads/
 .test-tmp/
 

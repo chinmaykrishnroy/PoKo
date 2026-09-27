@@ -28,12 +28,10 @@ display:
 
 library:
   read_folders:
-    - C:\Users\aarav\Desktop\Music
-    - C:\Users\aarav\Videos
-    - C:\Users\aarav\Music
-    - C:\Users\aarav\Downloads
-    - C:\Users\aarav\Pictures
-  write_folder: C:\Users\aarav\Videos\
+    - ./media/music
+    - ./media/videos
+    - ./media/pictures
+  write_folder: ./media/videos/
   page_size: 10
   probe_on_scan: false
   db_path: poko.db

@@ -93,7 +93,6 @@ void onAppChange(AppState newState) {
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->unload();
 
     activeApp = newState;
-    prefs.putInt("app_state", (int)activeApp);
 
     // Blank screen cleanly between apps
     pokoGfx->fillScreen(RGB565_BLACK);
@@ -113,6 +112,18 @@ void onAppChange(AppState newState) {
 // ── Driver Reset Handler (Combo: Both held 5s) ────────────────
 void handleDriverReset() {
     Serial.println("[poko] performing driver reset");
+    // Ensure all audio streaming tasks are safely stopped before resetting drivers
+    if (activeApp == STATE_SSYNC && ssyncAppInstance) {
+        ssyncAppInstance->unload();
+    } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {
+        musicAppInstance->unload();
+    } else if (activeApp == STATE_VIDEO_UI && videoAppInstance) {
+        videoAppInstance->unload();
+    }
+    if (audioPlugin) audioPlugin->stopStream();
+    if (syncPlugin) syncPlugin->unload();
+    vTaskDelay(pdMS_TO_TICKS(50));
+
     driverReset(pokoGfx);
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->redraw();
     else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->load();
@@ -358,8 +369,8 @@ void setup() {
     audioPlugin = new TCPAudio(1235);
 
     // 7. WiFi & Network Services
-    savedSSID = prefs.getString("wifi_ssid", "X");
-    savedPass = prefs.getString("wifi_pass", "the2.4password");
+    savedSSID = prefs.getString("wifi_ssid", "");
+    savedPass = prefs.getString("wifi_pass", "");
 
     // Configure NTP time sync for GMT+5:30 (19800s offset)
     configTime(19800, 0, "pool.ntp.org", "time.google.com");
@@ -471,6 +482,12 @@ void loop() {
         ArduinoOTA.handle();
         if (WiFi.status() != WL_CONNECTED) {
             Serial.println("[wifi] lost connection -> reconnecting");
+            WiFi.disconnect();
+            if (savedSSID.length() > 0) {
+                WiFi.begin(savedSSID.c_str(), savedPass.c_str());
+            } else {
+                WiFi.reconnect();
+            }
             wifiState = STATE_WIFI_CONNECTING;
             wifiTimer = millis();
             if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
