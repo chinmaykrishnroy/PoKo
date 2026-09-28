@@ -71,33 +71,33 @@ public:
             _activeSource = AUDIO_SSYNC;
             _suspendedSource = AUDIO_NONE;
             if (_snapPlayer) {
-                _snapPlayer->resumeAudio();
+                if (!_snapPlayer->isLoaded()) {
+                    _snapPlayer->load();
+                } else {
+                    _snapPlayer->resumeAudio();
+                }
             }
             return true;
         }
 
         if (source == AUDIO_MUSIC) {
-            // Suspend SSync if loaded
+            // Unload background SSync completely to eliminate Wi-Fi & CPU contention
             if (_snapPlayer && _snapPlayer->isLoaded()) {
-                _suspendedSource = AUDIO_SSYNC;
-                _snapPlayer->suspendAudio();
-                delay(20);
+                _snapPlayer->unload();
             }
+            _suspendedSource = AUDIO_NONE;
             _activeSource = AUDIO_MUSIC;
             return true;
         }
 
         if (source == AUDIO_VIDEO) {
-            // Suspend SSync if loaded
             if (_snapPlayer && _snapPlayer->isLoaded()) {
-                _suspendedSource = AUDIO_SSYNC;
-                _snapPlayer->suspendAudio();
-                delay(20);
+                _snapPlayer->unload();
             }
-            // Stop Music if active
             if (_musicStopFn) {
                 _musicStopFn();
             }
+            _suspendedSource = AUDIO_NONE;
             _activeSource = AUDIO_VIDEO;
             return true;
         }
@@ -109,18 +109,23 @@ public:
     void release(AudioSource source) {
         if (_activeSource != source) return;
 
-        Serial.printf("[audioMgr] release source %d (suspended=%d)\n", (int)source, (int)_suspendedSource);
+        Serial.printf("[audioMgr] release source %d\n", (int)source);
         _activeSource = AUDIO_NONE;
+        _suspendedSource = AUDIO_NONE;
+    }
 
-        // Auto-resume suspended background SSync
-        if (_suspendedSource == AUDIO_SSYNC) {
-            Serial.println("[audioMgr] auto-resuming suspended SSync");
-            _activeSource = AUDIO_SSYNC;
-            _suspendedSource = AUDIO_NONE;
-            if (_snapPlayer) {
-                _snapPlayer->resumeAudio();
-            }
+    void stopActiveSession() {
+        Serial.printf("[audioMgr] stopActiveSession (active=%d)\n", (int)_activeSource);
+        AudioSource cur = _activeSource;
+        _activeSource = AUDIO_NONE;
+        _suspendedSource = AUDIO_NONE;
+        if (cur == AUDIO_MUSIC && _musicStopFn) {
+            _musicStopFn();
+        } else if (cur == AUDIO_SSYNC && _snapPlayer) {
+            _snapPlayer->stop();
+            _snapPlayer->unload();
         }
+        closeOverlay();
     }
 
     void stopAll() {
@@ -129,6 +134,7 @@ public:
         _activeSource = AUDIO_NONE;
         if (_snapPlayer) {
             _snapPlayer->stop();
+            _snapPlayer->unload();
         }
         if (_musicStopFn) {
             _musicStopFn();
@@ -219,7 +225,7 @@ public:
     void drawStatusDot(Arduino_Canvas* canvas, int16_t x, int16_t y, int16_t r = 2) {
         if (!canvas || _activeSource == AUDIO_NONE) return;
 
-        bool blinkPhase = ((millis() / 350) % 2 == 0);
+        bool blinkPhase = ((millis() / 300) % 2 == 0);
         uint16_t color = getSourceColor();
         bool show = false;
 
@@ -320,7 +326,9 @@ public:
         } else {
             gfx->print(playing ? "L:Pause" : "L:Play");
         }
-        gfx->setCursor(82, 117);
+        gfx->setCursor(52, 117);
+        gfx->print("2R:Stop");
+        gfx->setCursor(95, 117);
         gfx->print("R:Open");
     }
 

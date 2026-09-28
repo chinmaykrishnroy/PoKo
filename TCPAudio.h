@@ -59,7 +59,7 @@ private:
         }
 
     public:
-        AudioStreamTCP(WiFiClient* client, volatile bool* isRunning, volatile bool* abortFlag, size_t bufferBytes = 65536)
+        AudioStreamTCP(WiFiClient* client, volatile bool* isRunning, volatile bool* abortFlag, size_t bufferBytes = 131072)
             : _client(client), _isRunning(isRunning), _abort(abortFlag), _capacity(bufferBytes),
               _head(0), _tail(0), _count(0), _prebuffered(false), _ring(nullptr) {
             if (psramFound()) {
@@ -81,12 +81,12 @@ private:
             if (!_ring || _capacity == 0 || (*_abort)) return 0;
             if (!_client || (!_client->connected() && _count == 0)) return 0;
 
-            // Initial pre-buffering (wait for 8KB or timeout)
+            // Initial pre-buffering (~1.5s of audio @ 128kbps) to absorb network jitter
             if (!_prebuffered) {
                 uint32_t preStart = millis();
-                while (_client && _client->connected() && *_isRunning && !(*_abort) && _count < 8192) {
+                while (_client && _client->connected() && *_isRunning && !(*_abort) && _count < 24576) {
                     pump();
-                    if (_count >= 8192 || millis() - preStart > 1200) break;
+                    if (_count >= 24576 || millis() - preStart > 1500) break;
                     vTaskDelay(pdMS_TO_TICKS(5));
                 }
                 _prebuffered = true;
@@ -142,6 +142,7 @@ private:
     class AudioOutputPokoI2S : public AudioOutput {
     private:
         volatile float* _vol;
+        uint32_t        _sampleCount = 0;
         int16_t         _buffer[512];
         int             _bufIndex = 0;
     public:
@@ -149,6 +150,7 @@ private:
 
         virtual bool begin() override {
             _bufIndex = 0;
+            _sampleCount = 0;
             return true;
         }
         virtual bool SetRate(int hz) override {
@@ -161,7 +163,10 @@ private:
 
         virtual bool ConsumeSample(int16_t sample[2]) override {
             float v = *_vol;
-            pixelEngine.feedAudioSample(sample[0], sample[1]);
+            // Downsample audio reactivity to 1-in-8 samples (~5.5 kHz) for 87% lower CPU load
+            if ((_sampleCount++ & 0x07) == 0) {
+                pixelEngine.feedAudioSample(sample[0], sample[1]);
+            }
             _buffer[_bufIndex++] = (int16_t)(sample[0] * v);
             _buffer[_bufIndex++] = (int16_t)(sample[1] * v);
 
@@ -217,13 +222,18 @@ private:
 
                 if (mp3->begin(file, out)) {
                     Serial.println("[tcpaudio] MP3 begin OK, streaming...");
+                    uint32_t frameCount = 0;
                     while (client.connected() && _isRunning && !_abortStream && mp3->isRunning()) {
                         if (!mp3->loop()) {
                             Serial.println("[tcpaudio] MP3 stream ended");
                             mp3->stop();
                             break;
                         }
-                        vTaskDelay(pdMS_TO_TICKS(1));
+                        if ((++frameCount & 0x07) == 0) {
+                            vTaskDelay(pdMS_TO_TICKS(1));
+                        } else {
+                            taskYIELD();
+                        }
                     }
                 } else {
                     Serial.println("[tcpaudio] MP3 begin FAILED");
@@ -306,7 +316,7 @@ public:
             _isLoaded = true;
 
             BaseType_t ok = xTaskCreatePinnedToCore(
-                networkTaskWrapper, "PokoAudNet", 8192, this, 2, (TaskHandle_t*)&_netTaskHandle, 0
+                networkTaskWrapper, "PokoAudNet", 16384, this, 2, (TaskHandle_t*)&_netTaskHandle, 0
             );
             if (ok != pdPASS) {
                 _isRunning = false;

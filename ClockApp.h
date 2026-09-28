@@ -203,7 +203,9 @@ public:
     void update() {
         if (!_active) return;
         uint32_t now = millis();
-        if (now - _lastDrawMs >= 1000) {
+        bool audioBlinking = (audioManager && (audioManager->isSoundPlaying() || audioManager->hasError()));
+        uint32_t interval = audioBlinking ? 100 : 1000;
+        if (now - _lastDrawMs >= interval) {
             _lastDrawMs = now;
             _dirty = true;
         }

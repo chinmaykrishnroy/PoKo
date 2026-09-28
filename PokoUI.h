@@ -306,7 +306,9 @@ public:
 
     void update() {
         uint32_t now = millis();
-        uint32_t updateInterval = (wifiState == STATE_WIFI_CONNECTED) ? 1000 : 350;
+        bool audioBlinking = (audioManager && (audioManager->isSoundPlaying() || audioManager->hasError()));
+        bool wifiBlinking = (wifiState != STATE_WIFI_CONNECTED);
+        uint32_t updateInterval = (audioBlinking || wifiBlinking) ? 100 : 1000;
         if (now - _lastStatusMs >= updateInterval) {
             _lastStatusMs = now;
             drawStatusBar();

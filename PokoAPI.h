@@ -439,6 +439,14 @@ public:
             _server->send(200, "application/json", "{\"ok\":true,\"app\":" + String((int)activeApp) + "}");
         });
 
+        // Audio service control (/api/audio/stop)
+        _server->on("/api/audio/stop", HTTP_ANY, [this]() {
+            if (audioManager) {
+                audioManager->stopActiveSession();
+            }
+            _server->send(200, "application/json", "{\"ok\":true,\"status\":\"stopped\"}");
+        });
+
         // Remote input trigger (/api/input?action=enter / left / right / back)
         _server->on("/api/input", HTTP_GET, [this]() {
             String act = _server->hasArg("action") ? _server->arg("action") : _server->arg("btn");

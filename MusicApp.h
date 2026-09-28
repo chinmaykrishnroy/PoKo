@@ -61,6 +61,8 @@ private:
     uint8_t*  _artBuf       = nullptr;
     size_t    _artSize      = 0;
     char      _loadedId[36] = {0};
+    uint16_t* _artBitmap    = nullptr;
+    bool      _artBitmapValid = false;
 
     uint32_t  _trackPos     = 0;
     uint32_t  _playStartMs  = 0;
@@ -69,17 +71,62 @@ private:
     int       _scrollOffset = 0;
     uint32_t  _lastScrollMs = 0;
 
-    static Arduino_Canvas* _activeCanvas;
-    static bool            _needsColorExtract;
+    static uint16_t* _decodeTarget;
+    static int16_t   _decodeTargetW;
+    static int16_t   _decodeTargetH;
+    static bool      _needsColorExtract;
 
-    static bool tftOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
-        if (_activeCanvas) {
-            _activeCanvas->draw16bitRGBBitmap(x, y, bitmap, w, h);
+    static bool tftDecodeBitmap(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
+        if (_decodeTarget) {
+            for (int16_t j = 0; j < h; j++) {
+                int16_t dstY = y + j;
+                if (dstY < 0 || dstY >= _decodeTargetH) continue;
+                for (int16_t i = 0; i < w; i++) {
+                    int16_t dstX = x + i;
+                    if (dstX < 0 || dstX >= _decodeTargetW) continue;
+                    _decodeTarget[dstY * _decodeTargetW + dstX] = bitmap[j * w + i];
+                }
+            }
         }
         if (_needsColorExtract) {
             pixelEngine.samplePixels(bitmap, (size_t)w * (size_t)h);
         }
         return true;
+    }
+
+    void decodeArtworkToBitmap() {
+        if (_artSize <= 100 || !_artBuf) {
+            _artBitmapValid = false;
+            return;
+        }
+
+        if (!_artBitmap) {
+            if (psramFound()) {
+                _artBitmap = (uint16_t*)heap_caps_malloc(60 * 60 * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            }
+            if (!_artBitmap) {
+                _artBitmap = (uint16_t*)malloc(60 * 60 * sizeof(uint16_t));
+            }
+        }
+        if (!_artBitmap) {
+            _artBitmapValid = false;
+            return;
+        }
+
+        memset(_artBitmap, 0, 60 * 60 * sizeof(uint16_t));
+        _decodeTarget = _artBitmap;
+        _decodeTargetW = 60;
+        _decodeTargetH = 60;
+        _needsColorExtract = true;
+        pixelEngine.startColorExtraction();
+        TJpgDec.setJpgScale(1);
+        TJpgDec.setSwapBytes(false);
+        TJpgDec.setCallback(tftDecodeBitmap);
+        TJpgDec.drawJpg(0, 0, _artBuf, _artSize);
+        pixelEngine.finishColorExtraction();
+        _needsColorExtract = false;
+        _decodeTarget = nullptr;
+        _artBitmapValid = true;
     }
 
     String getServerHost() {
@@ -187,17 +234,7 @@ private:
             if (total > 100) {
                 _artSize = total;
                 strncpy(_loadedId, _songs[idx].id, sizeof(_loadedId) - 1);
-                _needsColorExtract = true;
-                if (!_active || _canvas == nullptr) {
-                    pixelEngine.startColorExtraction();
-                    _activeCanvas = nullptr;
-                    TJpgDec.setJpgScale(1);
-                    TJpgDec.setSwapBytes(false);
-                    TJpgDec.setCallback(tftOutput);
-                    TJpgDec.drawJpg(0, 0, _artBuf, _artSize);
-                    pixelEngine.finishColorExtraction();
-                    _needsColorExtract = false;
-                }
+                decodeArtworkToBitmap();
             }
         }
         http.end();
@@ -315,18 +352,8 @@ private:
             // Album Artwork Frame (y=16..78)
             _canvas->drawRoundRect(32, 16, 64, 64, 6, theme.surface2);
 
-            if (_artSize > 100) {
-                if (_needsColorExtract) pixelEngine.startColorExtraction();
-                _activeCanvas = _canvas;
-                TJpgDec.setJpgScale(1);
-                TJpgDec.setSwapBytes(false);
-                TJpgDec.setCallback(tftOutput);
-                TJpgDec.drawJpg(34, 18, _artBuf, _artSize);
-                _activeCanvas = nullptr;
-                if (_needsColorExtract) {
-                    pixelEngine.finishColorExtraction();
-                    _needsColorExtract = false;
-                }
+            if (_artBitmapValid && _artBitmap) {
+                _canvas->draw16bitRGBBitmap(34, 18, _artBitmap, 60, 60);
             } else {
                 _canvas->fillRoundRect(34, 18, 60, 60, 4, theme.surface);
                 _canvas->setFont(u8g2_font_helvB14_tf);
@@ -398,18 +425,8 @@ private:
         } else {
             // Playing screen: Thumbnail in center, scrolling "Name - Artist", progress bar, time/vol, footer
             _canvas->drawRoundRect(32, 14, 64, 64, 4, theme.surface2);
-            if (_artSize > 100) {
-                if (_needsColorExtract) pixelEngine.startColorExtraction();
-                _activeCanvas = _canvas;
-                TJpgDec.setJpgScale(1);
-                TJpgDec.setSwapBytes(false);
-                TJpgDec.setCallback(tftOutput);
-                TJpgDec.drawJpg(34, 16, _artBuf, _artSize);
-                _activeCanvas = nullptr;
-                if (_needsColorExtract) {
-                    pixelEngine.finishColorExtraction();
-                    _needsColorExtract = false;
-                }
+            if (_artBitmapValid && _artBitmap) {
+                _canvas->draw16bitRGBBitmap(34, 16, _artBitmap, 60, 60);
             } else {
                 _canvas->fillRoundRect(34, 16, 60, 60, 3, theme.surface);
                 _canvas->setFont(u8g2_font_helvB14_tf);
@@ -471,7 +488,7 @@ private:
             _canvas->drawFastHLine(0, 114, 128, theme.line);
             _canvas->setFont(u8g2_font_5x7_tf);
             _canvas->setTextColor(theme.footerText, theme.headerBg);
-            const char* hint = _paused ? "2R:Resume  2L:Browse" : "L:Prv  R:Nxt  2R:Pause";
+            const char* hint = _paused ? "2R:Resume  2L:Stop" : "L:Prv  R:Nxt  2R:Pause";
             _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(64 - w / 2, 124);
             _canvas->print(hint);
@@ -483,6 +500,23 @@ private:
 public:
     MusicApp(Arduino_GFX* gfx, AppSwitchFn exitFn)
         : _gfx(gfx), _exit(exitFn) {}
+
+    ~MusicApp() {
+        if (_artBuf) {
+            if (psramFound()) heap_caps_free(_artBuf);
+            else free(_artBuf);
+            _artBuf = nullptr;
+        }
+        if (_artBitmap) {
+            if (psramFound()) heap_caps_free(_artBitmap);
+            else free(_artBitmap);
+            _artBitmap = nullptr;
+        }
+        if (_canvas) {
+            delete _canvas;
+            _canvas = nullptr;
+        }
+    }
 
     void begin() {
         if (!_canvas) {
@@ -544,24 +578,14 @@ public:
 
         if (_mode == MODE_PLAYING) {
             // Already playing in background! Keep playing, just refresh UI!
-            if (_artSize <= 100) {
-                fetchArtwork(_selectedIdx);
+            if (!_artBitmapValid && _artSize > 100) {
+                decodeArtworkToBitmap();
             }
             renderToCanvas();
             return;
         }
 
         _mode = MODE_BROWSE;
-
-        if (audioManager) {
-            audioManager->request(AUDIO_MUSIC);
-        }
-
-        ensureAudioOutput(44100);
-
-        if (audioPlugin) {
-            audioPlugin->load();
-        }
 
         if (_songCount == 0) {
             fetchSongList();
@@ -720,5 +744,7 @@ public:
     }
 };
 
-inline Arduino_Canvas* MusicApp::_activeCanvas = nullptr;
-inline bool            MusicApp::_needsColorExtract = false;
+inline uint16_t* MusicApp::_decodeTarget = nullptr;
+inline int16_t   MusicApp::_decodeTargetW = 0;
+inline int16_t   MusicApp::_decodeTargetH = 0;
+inline bool      MusicApp::_needsColorExtract = false;

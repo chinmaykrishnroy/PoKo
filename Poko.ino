@@ -245,6 +245,8 @@ void onBtnLeftDouble() {
         galleryAppInstance->onBack();
     } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {
         musicAppInstance->onBack();
+    } else if (activeApp == STATE_SSYNC && ssyncAppInstance) {
+        ssyncAppInstance->onBack();
     } else if (activeApp == STATE_VIDEO_UI && videoAppInstance) {
         videoAppInstance->onBack();
     } else if (activeApp != STATE_LAUNCHER) {
@@ -255,6 +257,7 @@ void onBtnLeftDouble() {
 void onBtnRightDouble() {
     Serial.println("[action] Right Double-Click -> Enter / Action");
     if (audioManager && audioManager->isOverlayOpen()) {
+        audioManager->stopActiveSession();
         audioManager->closeOverlay();
         pokoGfx->fillScreen(RGB565_BLACK);
         if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
