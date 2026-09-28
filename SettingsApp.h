@@ -27,6 +27,7 @@ private:
     bool     _dirty     = true;
     uint8_t  _selected  = 0;
     uint8_t  _scroll    = 0;
+    uint32_t _lastBlinkMs = 0;
 
     static constexpr uint8_t ITEM_COUNT   = 8;
     static constexpr uint8_t ROW_H        = 16;
@@ -63,6 +64,10 @@ private:
         _canvas->setTextColor(theme.headerText, theme.headerBg);
         _canvas->setCursor(3, 10);
         _canvas->print("Settings");
+
+        if (audioManager) {
+            audioManager->drawStatusDot(_canvas, 52, 6, 2);
+        }
 
         char countBuf[8];
         snprintf(countBuf, sizeof(countBuf), "%d/%d", _selected + 1, ITEM_COUNT);
@@ -267,6 +272,12 @@ public:
 
     void update() {
         if (!_active) return;
+        uint32_t now = millis();
+        bool audioBlinking = (audioManager && (audioManager->isSoundPlaying() || audioManager->hasError()));
+        if (audioBlinking && (now - _lastBlinkMs >= 100)) {
+            _lastBlinkMs = now;
+            _dirty = true;
+        }
         if (_dirty) {
             _dirty = false;
             renderToCanvas();

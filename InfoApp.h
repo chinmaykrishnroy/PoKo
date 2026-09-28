@@ -34,6 +34,7 @@ private:
     bool          _dirty      = true;
     uint8_t       _scroll     = 0;
     uint32_t      _lastDrawMs = 0;
+    uint32_t      _lastBlinkMs = 0;
 
     static constexpr uint8_t ROW_H         = 14;
     static constexpr uint8_t TOP_Y         = 14;
@@ -121,6 +122,10 @@ private:
         _canvas->setTextColor(theme.headerText, theme.headerBg);
         _canvas->setCursor(3, 10);
         _canvas->print("System Info");
+
+        if (audioManager) {
+            audioManager->drawStatusDot(_canvas, 70, 6, 2);
+        }
 
         char countBuf[8];
         snprintf(countBuf, sizeof(countBuf), "%d/%d", _scroll + 1, _rowCount);
@@ -239,6 +244,11 @@ public:
     void update() {
         if (!_active) return;
         uint32_t now = millis();
+        bool audioBlinking = (audioManager && (audioManager->isSoundPlaying() || audioManager->hasError()));
+        if (audioBlinking && (now - _lastBlinkMs >= 100)) {
+            _lastBlinkMs = now;
+            _dirty = true;
+        }
         if (now - _lastDrawMs >= 1000) {
             buildRows();
             _dirty = true;

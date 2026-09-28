@@ -288,6 +288,9 @@ private:
             Serial.printf("[music] requestPlay failed with code %d\n", httpCode);
             _serverError = true;
             _dirty = true;
+            if (audioManager) {
+                audioManager->release(AUDIO_MUSIC);
+            }
         }
     }
 

@@ -52,6 +52,7 @@ private:
     int      _photoCount      = 0;
     uint32_t _lastActivityMs  = 0;
     uint32_t _lastSlideMs     = 0;
+    uint32_t _lastBlinkMs     = 0;
 
     GalleryItem _photos[MAX_GALLERY_PHOTOS];
 
@@ -256,6 +257,10 @@ private:
             _canvas->setCursor(3, 11);
             _canvas->print("Gallery");
 
+            if (audioManager) {
+                audioManager->drawStatusDot(_canvas, 44, 6, 2);
+            }
+
             _canvas->setTextColor(theme.muted, theme.headerBg);
             _canvas->setFont(u8g2_font_5x7_tf);
             _canvas->setCursor(104, 11);
@@ -315,6 +320,10 @@ private:
             _canvas->setTextColor(theme.accent, theme.headerBg);
             _canvas->setCursor(3, 11);
             _canvas->print("Gallery");
+
+            if (audioManager) {
+                audioManager->drawStatusDot(_canvas, 44, 6, 2);
+            }
 
             // Source badge: [LFS] or [SRV]
             bool isLfs = (_photos[_photoIdx].source == PHOTO_LITTLEFS);
@@ -487,6 +496,13 @@ public:
     void update() {
         if (!_active) return;
         uint32_t now = millis();
+
+        // Audio indicator dot blinking when not fullscreen
+        bool audioBlinking = (audioManager && (audioManager->isSoundPlaying() || audioManager->hasError()));
+        if (audioBlinking && !_fullscreen && (now - _lastBlinkMs >= 100)) {
+            _lastBlinkMs = now;
+            _dirty = true;
+        }
 
         // 2-Second Inactivity Fullscreen Transition
         if (!_fullscreen && _photoCount > 0 && (now - _lastActivityMs >= 2000)) {

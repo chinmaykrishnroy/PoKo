@@ -75,6 +75,10 @@ private:
         _canvas->setCursor(3, 11);
         _canvas->print("Pixels");
 
+        if (audioManager) {
+            audioManager->drawStatusDot(_canvas, 42, 6, 2);
+        }
+
         // Header item counter
         char countBuf[8];
         snprintf(countBuf, sizeof(countBuf), "%d/%d", _selected + 1, ITEM_COUNT);

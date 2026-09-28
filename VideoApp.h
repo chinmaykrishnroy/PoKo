@@ -207,14 +207,24 @@ private:
                      "/play?audio=true&aspect=square&profile=balanced&start=0&switch=false&notify=false&async=true";
         http.begin(url);
         http.setTimeout(3000);
-        http.GET();
+        int httpCode = http.GET();
         http.end();
 
-        _mode = MODE_PLAYING;
-        _playStartMs = millis();
-        _dirty = true;
-
-        fetchThumbnail(idx);
+        if (httpCode >= 200 && httpCode < 300) {
+            _mode = MODE_PLAYING;
+            _playStartMs = millis();
+            _dirty = true;
+            fetchThumbnail(idx);
+        } else {
+            Serial.printf("[video] requestPlay failed with code %d\n", httpCode);
+            _dirty = true;
+            if (syncPlugin) {
+                syncPlugin->reset();
+            }
+            if (audioManager) {
+                audioManager->release(AUDIO_VIDEO);
+            }
+        }
     }
 
     void requestStop() {
@@ -227,6 +237,11 @@ private:
 
         if (syncPlugin) {
             syncPlugin->reset();
+            syncPlugin->unload();
+        }
+
+        if (audioManager) {
+            audioManager->release(AUDIO_VIDEO);
         }
 
         _mode = MODE_BROWSE;
@@ -356,16 +371,6 @@ public:
         _dirty  = true;
         _mode   = MODE_BROWSE;
         begin();
-
-        if (audioManager) {
-            audioManager->request(AUDIO_VIDEO);
-        }
-
-        ensureAudioOutput(44100);
-
-        if (syncPlugin) {
-            syncPlugin->load();
-        }
 
         if (_videoCount == 0) {
             fetchVideoList();

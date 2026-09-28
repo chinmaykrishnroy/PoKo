@@ -260,6 +260,12 @@ void onBtnLongRight() {
 
 // ── Dual Button Combos ────────────────────────────────────────
 void onComboBothClick() {
+    Serial.println("[combo] both click -> Toggle Audio Play/Pause or LED");
+    if (audioManager && audioManager->hasActiveSession()) {
+        audioManager->togglePlayPause();
+        if (pokoUI && activeApp == STATE_LAUNCHER) pokoUI->updateStatusBar();
+        return;
+    }
     static bool ledOn = false;
     ledOn = !ledOn;
     if (ledOn) {
@@ -310,28 +316,28 @@ void setup() {
     // Preferences & Settings
     prefs.begin("poko", false);
 
-    // Check clean shutdown flag
+    // Hardware reset reason & clean shutdown check
+    esp_reset_reason_t rstReason = esp_reset_reason();
+    bool isCrashRecovery = (rstReason == ESP_RST_PANIC || 
+                            rstReason == ESP_RST_INT_WDT || 
+                            rstReason == ESP_RST_TASK_WDT || 
+                            rstReason == ESP_RST_WDT);
     bool cleanShutdown = prefs.getBool("clean_shutdown", false);
     prefs.putBool("clean_shutdown", false);
-    Serial.printf("[poko] boot: clean_shutdown=%s\n", cleanShutdown ? "true" : "false");
+    Serial.printf("[poko] boot: reset_reason=%d, clean_shutdown=%s\n", (int)rstReason, cleanShutdown ? "true" : "false");
 
     AppState initialApp = STATE_LAUNCHER;
     int savedApp = prefs.getInt("last_app", (int)STATE_LAUNCHER);
-    bool snapWasPlaying = prefs.getBool("snap_was_playing", false);
-    bool snapAuto = prefs.getBool("snap_auto", true);
 
-    // State keeping: Always restore safe apps, especially SSync if active or playing before shutdown
-    if (savedApp == STATE_SSYNC || (snapWasPlaying && snapAuto)) {
-        initialApp = STATE_SSYNC;
-        Serial.println("[poko] state keeping: restoring SSync after shutdown");
-    } else if (cleanShutdown || savedApp == STATE_CLOCK || savedApp == STATE_INFO ||
-               savedApp == STATE_SETTINGS_UI || savedApp == STATE_PIXELS_UI || savedApp == STATE_GALLERY_UI) {
-        if (savedApp >= 0 && savedApp < STATE_COUNT && savedApp != STATE_VIDEO_UI && savedApp != STATE_MUSIC_UI) {
+    // Independent foreground app restoration: Restore previous safe foreground app unless recovering from crash
+    if (!isCrashRecovery) {
+        if (savedApp >= 0 && savedApp < STATE_COUNT && 
+            savedApp != STATE_VIDEO_UI && savedApp != STATE_MUSIC_UI) {
             initialApp = (AppState)savedApp;
-            Serial.printf("[poko] restoring previous safe app: %d\n", (int)initialApp);
+            Serial.printf("[poko] restoring previous safe foreground app: %d\n", (int)initialApp);
         }
     } else {
-        Serial.println("[poko] booting to Launcher");
+        Serial.println("[poko] crash recovery: booting safely to Launcher");
     }
 
     // LittleFS Storage for offline photos & assets

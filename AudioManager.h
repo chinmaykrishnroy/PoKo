@@ -70,7 +70,7 @@ public:
 
         if (source == AUDIO_SSYNC) {
             // Stop older music playback if active
-            if (_musicStopFn) {
+            if (_activeSource == AUDIO_MUSIC && _musicStopFn) {
                 _musicStopFn();
             }
             vTaskDelay(pdMS_TO_TICKS(50));
@@ -79,7 +79,7 @@ public:
             if (_snapPlayer) {
                 if (!_snapPlayer->isLoaded()) {
                     _snapPlayer->load();
-                } else {
+                } else if (_snapPlayer->isSuspended()) {
                     _snapPlayer->resumeAudio();
                 }
             }
@@ -87,24 +87,31 @@ public:
         }
 
         if (source == AUDIO_MUSIC) {
-            // Unload background SSync completely to eliminate Wi-Fi & CPU contention
-            if (_snapPlayer && _snapPlayer->isLoaded()) {
-                _snapPlayer->unload();
+            // Suspend background SSync so it can be resumed when Music finishes
+            if (_activeSource == AUDIO_SSYNC && _snapPlayer && _snapPlayer->isLoaded()) {
+                Serial.println("[audioMgr] suspending SSync for Music playback");
+                _snapPlayer->suspendAudio();
+                _suspendedSource = AUDIO_SSYNC;
+            } else {
+                _suspendedSource = AUDIO_NONE;
             }
             vTaskDelay(pdMS_TO_TICKS(50));
-            _suspendedSource = AUDIO_NONE;
             _activeSource = AUDIO_MUSIC;
             return true;
         }
 
         if (source == AUDIO_VIDEO) {
-            if (_snapPlayer && _snapPlayer->isLoaded()) {
-                _snapPlayer->unload();
-            }
-            if (_musicStopFn) {
+            if (_activeSource == AUDIO_MUSIC && _musicStopFn) {
                 _musicStopFn();
             }
-            _suspendedSource = AUDIO_NONE;
+            if (_activeSource == AUDIO_SSYNC && _snapPlayer && _snapPlayer->isLoaded()) {
+                Serial.println("[audioMgr] suspending SSync for Video playback");
+                _snapPlayer->suspendAudio();
+                _suspendedSource = AUDIO_SSYNC;
+            } else {
+                _suspendedSource = AUDIO_NONE;
+            }
+            vTaskDelay(pdMS_TO_TICKS(50));
             _activeSource = AUDIO_VIDEO;
             return true;
         }
@@ -116,9 +123,19 @@ public:
     void release(AudioSource source) {
         if (_activeSource != source) return;
 
-        Serial.printf("[audioMgr] release source %d\n", (int)source);
+        Serial.printf("[audioMgr] release source %d (suspended=%d)\n", (int)source, (int)_suspendedSource);
         _activeSource = AUDIO_NONE;
-        _suspendedSource = AUDIO_NONE;
+
+        if (_suspendedSource == AUDIO_SSYNC) {
+            Serial.println("[audioMgr] restoring suspended SSync audio session");
+            _activeSource = AUDIO_SSYNC;
+            _suspendedSource = AUDIO_NONE;
+            if (_snapPlayer && _snapPlayer->isLoaded()) {
+                _snapPlayer->resumeAudio();
+            }
+        } else {
+            _suspendedSource = AUDIO_NONE;
+        }
     }
 
     bool hasActiveSession() const {
@@ -126,14 +143,16 @@ public:
     }
 
     void stopActiveSession() {
-        Serial.printf("[audioMgr] stopActiveSession (active=%d)\n", (int)_activeSource);
+        Serial.printf("[audioMgr] stopActiveSession (active=%d, suspended=%d)\n",
+                      (int)_activeSource, (int)_suspendedSource);
         AudioSource cur = _activeSource;
+        AudioSource susp = _suspendedSource;
         _activeSource = AUDIO_NONE;
         _suspendedSource = AUDIO_NONE;
-        if ((cur == AUDIO_MUSIC || cur == AUDIO_NONE) && _musicStopFn) {
+        if ((cur == AUDIO_MUSIC || susp == AUDIO_MUSIC || cur == AUDIO_NONE) && _musicStopFn) {
             _musicStopFn();
         }
-        if ((cur == AUDIO_SSYNC || cur == AUDIO_NONE) && _snapPlayer && _snapPlayer->isLoaded()) {
+        if ((cur == AUDIO_SSYNC || susp == AUDIO_SSYNC || cur == AUDIO_NONE) && _snapPlayer && _snapPlayer->isLoaded()) {
             _snapPlayer->stop();
             _snapPlayer->unload();
         }
