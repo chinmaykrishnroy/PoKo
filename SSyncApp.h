@@ -253,8 +253,8 @@ public:
         j += "\"playing\":" + String(_player->isPlaying() ? "true" : "false") + ",";
         j += "\"volume\":" + String(_player->getVolume()) + ",";
         j += "\"muted\":" + String(_player->isMuted() ? "true" : "false") + ",";
-        j += "\"server\":\"" + _player->getServerHost() + ":" + String(_player->getServerPort()) + "\",";
-        j += "\"codec\":\"" + _player->getCodec() + "\",";
+        j += "\"server\":\"" + escapeJson(_player->getServerHost() + ":" + String(_player->getServerPort())) + "\",";
+        j += "\"codec\":\"" + escapeJson(_player->getCodec()) + "\",";
         j += "\"buffer_ms\":" + String(_player->getBufferMs()) + ",";
         j += "\"latency_ms\":" + String(_player->getLatencyMs());
         j += "}";

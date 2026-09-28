@@ -28,14 +28,54 @@ typedef const char* (*AudioStrFn)();
 
 class AudioManager {
 private:
-    AudioSource _activeSource    = AUDIO_NONE;
-    AudioSource _suspendedSource = AUDIO_NONE;
-    SnapPlayer* _snapPlayer      = nullptr;
-    AudioActionFn _musicStopFn    = nullptr;
-    AudioActionFn _musicToggleFn  = nullptr;
+    AudioSource   _activeSource    = AUDIO_NONE;
+    AudioSource   _suspendedSource = AUDIO_NONE;
+    SnapPlayer*   _snapPlayer      = nullptr;
+    AudioActionFn _musicStopFn     = nullptr;
+    AudioActionFn _musicToggleFn   = nullptr;
     AudioQueryFn  _musicIsPlayingFn = nullptr;
     AudioStrFn    _musicGetTitleFn = nullptr;
-    AudioQueryFn  _musicErrorFn = nullptr;
+    AudioQueryFn  _musicErrorFn    = nullptr;
+    AudioActionFn _videoStopFn     = nullptr;
+
+    void deactivateSource(AudioSource src, bool suspend = false) {
+        if (src == AUDIO_NONE) return;
+        Serial.printf("[audioMgr] deactivating source %d (suspend=%d)\n", (int)src, (int)suspend);
+        if (src == AUDIO_SSYNC) {
+            if (_snapPlayer && _snapPlayer->isLoaded()) {
+                if (suspend) {
+                    _snapPlayer->suspendAudio();
+                } else {
+                    _snapPlayer->stop();
+                    _snapPlayer->unload();
+                }
+            }
+        } else if (src == AUDIO_MUSIC) {
+            if (_musicStopFn) _musicStopFn();
+        } else if (src == AUDIO_VIDEO) {
+            if (_videoStopFn) _videoStopFn();
+        }
+    }
+
+    bool activateSource(AudioSource src) {
+        if (src == AUDIO_NONE) return true;
+        Serial.printf("[audioMgr] activating source %d\n", (int)src);
+        if (src == AUDIO_SSYNC) {
+            if (_snapPlayer) {
+                if (!_snapPlayer->isLoaded()) {
+                    _snapPlayer->load();
+                } else if (_snapPlayer->isSuspended()) {
+                    _snapPlayer->resumeAudio();
+                }
+            }
+            return true;
+        } else if (src == AUDIO_MUSIC) {
+            return true;
+        } else if (src == AUDIO_VIDEO) {
+            return true;
+        }
+        return true;
+    }
 
 public:
     AudioManager() {}
@@ -48,75 +88,60 @@ public:
         _musicGetTitleFn = getTitleFn;
         _musicErrorFn = errorFn;
     }
+    void setVideoHandlers(AudioActionFn stopFn) {
+        _videoStopFn = stopFn;
+    }
 
     AudioSource activeSource() const { return _activeSource; }
     AudioSource suspendedSource() const { return _suspendedSource; }
+    void setSuspendedSource(AudioSource src) { _suspendedSource = src; }
 
-    bool request(AudioSource source) {
-        if (source == AUDIO_NONE) {
-            stopAll();
-            return true;
-        }
-
-        if (_activeSource == source) {
-            if (source == AUDIO_SSYNC && _snapPlayer && _snapPlayer->isSuspended()) {
+    bool request(AudioSource requested) {
+        if (requested == _activeSource) {
+            if (requested == AUDIO_SSYNC && _snapPlayer && _snapPlayer->isSuspended()) {
                 _snapPlayer->resumeAudio();
             }
             return true;
         }
 
-        Serial.printf("[audioMgr] request source %d (active=%d, suspended=%d)\n",
-                      (int)source, (int)_activeSource, (int)_suspendedSource);
+        if (requested == AUDIO_NONE) {
+            stopAll();
+            return true;
+        }
 
-        if (source == AUDIO_SSYNC) {
-            // Stop older music playback if active
-            if (_activeSource == AUDIO_MUSIC && _musicStopFn) {
-                _musicStopFn();
-            }
-            vTaskDelay(pdMS_TO_TICKS(50));
-            _activeSource = AUDIO_SSYNC;
-            _suspendedSource = AUDIO_NONE;
-            if (_snapPlayer) {
-                if (!_snapPlayer->isLoaded()) {
-                    _snapPlayer->load();
-                } else if (_snapPlayer->isSuspended()) {
-                    _snapPlayer->resumeAudio();
+        Serial.printf("[audioMgr] request transition %d -> %d (suspended=%d)\n",
+                      (int)_activeSource, (int)requested, (int)_suspendedSource);
+
+        AudioSource previous = _activeSource;
+
+        if (previous != AUDIO_NONE) {
+            bool canSuspend = (previous == AUDIO_SSYNC && (requested == AUDIO_MUSIC || requested == AUDIO_VIDEO));
+            if (canSuspend) {
+                deactivateSource(previous, true);
+                _suspendedSource = AUDIO_SSYNC;
+            } else {
+                deactivateSource(previous, false);
+                if (requested == AUDIO_SSYNC) {
+                    _suspendedSource = AUDIO_NONE;
                 }
             }
-            return true;
+            vTaskDelay(pdMS_TO_TICKS(40));
         }
 
-        if (source == AUDIO_MUSIC) {
-            // Suspend background SSync so it can be resumed when Music finishes
-            if (_activeSource == AUDIO_SSYNC && _snapPlayer && _snapPlayer->isLoaded()) {
-                Serial.println("[audioMgr] suspending SSync for Music playback");
-                _snapPlayer->suspendAudio();
-                _suspendedSource = AUDIO_SSYNC;
-            } else {
+        if (!activateSource(requested)) {
+            Serial.printf("[audioMgr] failed to activate %d, rolling back\n", (int)requested);
+            if (_suspendedSource != AUDIO_NONE) {
+                AudioSource susp = _suspendedSource;
                 _suspendedSource = AUDIO_NONE;
-            }
-            vTaskDelay(pdMS_TO_TICKS(50));
-            _activeSource = AUDIO_MUSIC;
-            return true;
-        }
-
-        if (source == AUDIO_VIDEO) {
-            if (_activeSource == AUDIO_MUSIC && _musicStopFn) {
-                _musicStopFn();
-            }
-            if (_activeSource == AUDIO_SSYNC && _snapPlayer && _snapPlayer->isLoaded()) {
-                Serial.println("[audioMgr] suspending SSync for Video playback");
-                _snapPlayer->suspendAudio();
-                _suspendedSource = AUDIO_SSYNC;
+                activateSource(susp);
+                _activeSource = susp;
             } else {
-                _suspendedSource = AUDIO_NONE;
+                _activeSource = AUDIO_NONE;
             }
-            vTaskDelay(pdMS_TO_TICKS(50));
-            _activeSource = AUDIO_VIDEO;
-            return true;
+            return false;
         }
 
-        _activeSource = source;
+        _activeSource = requested;
         return true;
     }
 
@@ -126,15 +151,12 @@ public:
         Serial.printf("[audioMgr] release source %d (suspended=%d)\n", (int)source, (int)_suspendedSource);
         _activeSource = AUDIO_NONE;
 
-        if (_suspendedSource == AUDIO_SSYNC) {
-            Serial.println("[audioMgr] restoring suspended SSync audio session");
-            _activeSource = AUDIO_SSYNC;
+        if (_suspendedSource != AUDIO_NONE) {
+            AudioSource toRestore = _suspendedSource;
             _suspendedSource = AUDIO_NONE;
-            if (_snapPlayer && _snapPlayer->isLoaded()) {
-                _snapPlayer->resumeAudio();
-            }
-        } else {
-            _suspendedSource = AUDIO_NONE;
+            Serial.printf("[audioMgr] restoring suspended source %d\n", (int)toRestore);
+            activateSource(toRestore);
+            _activeSource = toRestore;
         }
     }
 
@@ -142,33 +164,47 @@ public:
         return (_activeSource != AUDIO_NONE) || (_snapPlayer && _snapPlayer->isLoaded());
     }
 
-    void stopActiveSession() {
-        Serial.printf("[audioMgr] stopActiveSession (active=%d, suspended=%d)\n",
-                      (int)_activeSource, (int)_suspendedSource);
+    void stopAll() {
+        Serial.printf("[audioMgr] stopAll (active=%d, suspended=%d)\n", (int)_activeSource, (int)_suspendedSource);
         AudioSource cur = _activeSource;
         AudioSource susp = _suspendedSource;
         _activeSource = AUDIO_NONE;
         _suspendedSource = AUDIO_NONE;
-        if ((cur == AUDIO_MUSIC || susp == AUDIO_MUSIC || cur == AUDIO_NONE) && _musicStopFn) {
-            _musicStopFn();
+
+        // 1. Stop active foreground producer first
+        if (cur != AUDIO_NONE) {
+            deactivateSource(cur, false);
         }
-        if ((cur == AUDIO_SSYNC || susp == AUDIO_SSYNC || cur == AUDIO_NONE) && _snapPlayer && _snapPlayer->isLoaded()) {
-            _snapPlayer->stop();
-            _snapPlayer->unload();
+        // 2. Stop suspended background producer second
+        if (susp != AUDIO_NONE && susp != cur) {
+            deactivateSource(susp, false);
         }
     }
 
-    void stopAll() {
-        Serial.println("[audioMgr] stopAll");
-        _suspendedSource = AUDIO_NONE;
-        _activeSource = AUDIO_NONE;
+    void stopActiveSession() {
+        stopAll();
+    }
+
+    void setVolume(int vol, bool persist = true) {
+        int v = constrain(vol, 0, 100);
+        setScaledVolume(v);
         if (_snapPlayer) {
-            _snapPlayer->stop();
-            _snapPlayer->unload();
+            _snapPlayer->setVolumePercent(v);
         }
-        if (_musicStopFn) {
-            _musicStopFn();
+        if (persist) {
+            Preferences p;
+            p.begin("poko", false);
+            p.putInt("volume", v);
+            p.end();
         }
+    }
+
+    int getVolume() const {
+        return getCurrentAppVolume();
+    }
+
+    void rampVolume(int delta) {
+        setVolume(getCurrentAppVolume() + delta, true);
     }
 
     bool isPlaying() const {

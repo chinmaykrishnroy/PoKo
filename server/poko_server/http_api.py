@@ -340,9 +340,19 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
             if not text.strip():
                 self._json({"ok": False, "error": "config text is empty"}, HTTPStatus.BAD_REQUEST)
                 return
+            temp_path = self.backend.config_path.parent / f".{self.backend.config_path.name}.tmp"
+            try:
+                temp_path.write_text(text, encoding="utf-8")
+                load_config(temp_path)
+            except Exception as exc:
+                if temp_path.exists():
+                    temp_path.unlink(missing_ok=True)
+                self._json({"ok": False, "error": f"Invalid YAML configuration: {exc}"}, HTTPStatus.BAD_REQUEST)
+                return
+
             old_host = self.backend.config.host
             old_port = self.backend.config.port
-            self.backend.config_path.write_text(text, encoding="utf-8")
+            temp_path.replace(self.backend.config_path)
             self.backend.reload_config()
             self.backend.index.start_background_scan()
             restart_required = self.backend.config.host != old_host or self.backend.config.port != old_port

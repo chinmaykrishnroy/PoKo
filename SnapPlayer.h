@@ -1307,7 +1307,6 @@ private:
                         _targetPlayLocalTimeUs = _firstChunkServerTsUs + (int64_t)effMs * 1000LL - _diffToServerUs;
                         _samplesPlayed = 0;
                         _playStarted = true;
-                        if (_prefs) _prefs->putBool("snap_was_playing", true);
                     }
 
                     _decodedFramesThisChunk = 0;

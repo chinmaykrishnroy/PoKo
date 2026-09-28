@@ -288,6 +288,10 @@ private:
             Serial.printf("[music] requestPlay failed with code %d\n", httpCode);
             _serverError = true;
             _dirty = true;
+            if (audioPlugin) {
+                audioPlugin->stopStream();
+                audioPlugin->unload();
+            }
             if (audioManager) {
                 audioManager->release(AUDIO_MUSIC);
             }
@@ -645,19 +649,21 @@ public:
     }
 
     void volumeRampDown() {
-        int v = getCurrentAppVolume();
-        if (v > 0) {
-            setScaledVolume(max(0, v - 2));
-            _dirty = true;
+        if (audioManager) audioManager->rampVolume(-2);
+        else {
+            int v = getCurrentAppVolume();
+            if (v > 0) setScaledVolume(max(0, v - 2));
         }
+        _dirty = true;
     }
 
     void volumeRampUp() {
-        int v = getCurrentAppVolume();
-        if (v < 100) {
-            setScaledVolume(min(100, v + 2));
-            _dirty = true;
+        if (audioManager) audioManager->rampVolume(2);
+        else {
+            int v = getCurrentAppVolume();
+            if (v < 100) setScaledVolume(min(100, v + 2));
         }
+        _dirty = true;
     }
 
     void onBack() {

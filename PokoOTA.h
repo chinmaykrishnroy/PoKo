@@ -116,19 +116,28 @@ public:
 
         server->on("/ota/upload", HTTP_POST, [server, gfx]() {
             server->sendHeader("Connection", "close");
-            bool ok = !Update.hasError();
+            bool ok = (!Update.hasError() && Update.isFinished());
             if (!ok) {
                 pixelEngine.showOtaError();
-            } else {
-                pixelEngine.showOtaProgress(100.0f);
+                server->send(500, "text/plain", "FAIL: firmware update failed");
+                if (gfx) {
+                    gfx->fillScreen(0xF800);
+                    gfx->setFont(u8g2_font_helvB10_tf);
+                    gfx->setTextColor(RGB565_BLACK);
+                    gfx->setCursor(20, 68);
+                    gfx->print("FAILED!");
+                }
+                return;
             }
-            server->send(200, "text/plain", ok ? "OK" : "FAIL");
+
+            pixelEngine.showOtaProgress(100.0f);
+            server->send(200, "text/plain", "OK");
             if (gfx) {
-                gfx->fillScreen(ok ? 0x07E0 : 0xF800);
+                gfx->fillScreen(0x07E0);
                 gfx->setFont(u8g2_font_helvB10_tf);
                 gfx->setTextColor(RGB565_BLACK);
                 gfx->setCursor(20, 68);
-                gfx->print(ok ? "SUCCESS!" : "FAILED!");
+                gfx->print("SUCCESS!");
             }
             {
                 Preferences p;

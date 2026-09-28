@@ -155,9 +155,15 @@ static bool i2c_reg8_read(uint8_t dev_addr, uint8_t reg_addr, uint8_t *data, uin
     printf("endTransmission: %u\n", error);
     return false;
   }
-  Wire.requestFrom(dev_addr, len);
+  size_t got = Wire.requestFrom((uint16_t)dev_addr, (size_t)len);
+  if (got != (size_t)len) {
+    return false;
+  }
   for (int i = 0; i < len; i++) {
-    *data++ = Wire.read();
+    if (!Wire.available()) {
+      return false;
+    }
+    *data++ = (uint8_t)Wire.read();
   }
   return true;
 }

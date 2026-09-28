@@ -190,10 +190,14 @@ void onBtnLeftHolding() {
     } else if (activeApp == STATE_VIDEO_UI && videoAppInstance) {
         videoAppInstance->volumeRampDown();
     } else {
-        int cur = getCurrentAppVolume();
-        if (cur > 0) {
-            setScaledVolume(max(0, cur - 2));
-            prefs.putInt("volume", getCurrentAppVolume());
+        if (audioManager) {
+            audioManager->rampVolume(-2);
+        } else {
+            int cur = getCurrentAppVolume();
+            if (cur > 0) {
+                setScaledVolume(max(0, cur - 2));
+                prefs.putInt("volume", getCurrentAppVolume());
+            }
         }
     }
 }
@@ -208,10 +212,14 @@ void onBtnRightHolding() {
     } else if (activeApp == STATE_VIDEO_UI && videoAppInstance) {
         videoAppInstance->volumeRampUp();
     } else {
-        int cur = getCurrentAppVolume();
-        if (cur < 100) {
-            setScaledVolume(min(100, cur + 2));
-            prefs.putInt("volume", getCurrentAppVolume());
+        if (audioManager) {
+            audioManager->rampVolume(2);
+        } else {
+            int cur = getCurrentAppVolume();
+            if (cur < 100) {
+                setScaledVolume(min(100, cur + 2));
+                prefs.putInt("volume", getCurrentAppVolume());
+            }
         }
     }
 }
@@ -549,7 +557,15 @@ void loop() {
                 if (snapService && !snapService->isLoaded()) {
                     Serial.println("[snap] auto-starting background SSync service");
                     snapService->load();
-                    if (audioManager) audioManager->request(AUDIO_SSYNC);
+                    if (audioManager) {
+                        if (audioManager->activeSource() == AUDIO_NONE) {
+                            audioManager->request(AUDIO_SSYNC);
+                        } else {
+                            // Queue SSync as suspended background session so current foreground audio continues uninterrupted
+                            snapService->suspendAudio();
+                            audioManager->setSuspendedSource(AUDIO_SSYNC);
+                        }
+                    }
                 }
             }
         } else if (millis() - wifiTimer > staTimeoutMs) {

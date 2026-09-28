@@ -8,6 +8,8 @@
 #include "PokoDrivers.h"
 
 #include "PokoTheme.h"
+#include "AudioManager.h"
+#include "SnapPlayer.h"
 
 // ─────────────────────────────────────────────────────────────
 //  SettingsApp — On-device settings menu (128×128)
@@ -16,6 +18,7 @@
 
 extern Preferences prefs;
 extern void handleDriverReset();
+extern SnapPlayer* snapService;
 
 class SettingsApp {
 private:
@@ -198,6 +201,23 @@ private:
             case 5: { // SSync Auto (On <-> Off)
                 bool nextAuto = !prefs.getBool("snap_auto", true);
                 prefs.putBool("snap_auto", nextAuto);
+                if (nextAuto) {
+                    if (WiFi.status() == WL_CONNECTED && snapService && !snapService->isLoaded()) {
+                        snapService->load();
+                        if (audioManager) {
+                            if (audioManager->activeSource() == AUDIO_NONE) {
+                                audioManager->request(AUDIO_SSYNC);
+                            } else {
+                                snapService->suspendAudio();
+                                audioManager->setSuspendedSource(AUDIO_SSYNC);
+                            }
+                        }
+                    }
+                } else {
+                    if (audioManager && audioManager->activeSource() == AUDIO_SSYNC) {
+                        audioManager->stopActiveSession();
+                    }
+                }
                 break;
             }
             case 6: { // Reset Drivers

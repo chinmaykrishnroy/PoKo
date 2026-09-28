@@ -462,6 +462,10 @@ public:
 
     void load() {
         if (_isLoaded) return;
+        if (_audioTaskHandle != NULL || _netTaskHandle != NULL || _videoTaskHandle != NULL) {
+            Serial.println("[synced] Warning: worker tasks still active, cannot load");
+            return;
+        }
 
         ensureAudioOutput(44100);
 
@@ -527,15 +531,21 @@ public:
 
         _isRunning = false;
 
+        bool taskTimeout = false;
         // Give tasks up to 400ms each to cleanly exit their loops and delete themselves
         if (_audioTaskDone && _audioTaskHandle != NULL) {
-            xSemaphoreTake(_audioTaskDone, pdMS_TO_TICKS(400));
+            if (xSemaphoreTake(_audioTaskDone, pdMS_TO_TICKS(400)) != pdTRUE) taskTimeout = true;
         }
         if (_netTaskDone && _netTaskHandle != NULL) {
-            xSemaphoreTake(_netTaskDone, pdMS_TO_TICKS(400));
+            if (xSemaphoreTake(_netTaskDone, pdMS_TO_TICKS(400)) != pdTRUE) taskTimeout = true;
         }
         if (_videoTaskDone && _videoTaskHandle != NULL) {
-            xSemaphoreTake(_videoTaskDone, pdMS_TO_TICKS(400));
+            if (xSemaphoreTake(_videoTaskDone, pdMS_TO_TICKS(400)) != pdTRUE) taskTimeout = true;
+        }
+
+        if (taskTimeout) {
+            Serial.println("[synced] Warning: task shutdown timeout, preserving buffers to avoid use-after-free");
+            return;
         }
 
         _audioTaskHandle = NULL;

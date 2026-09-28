@@ -42,3 +42,34 @@ inline int stateToTile(AppState s) {
 
 // Callback type used by apps to request a state transition
 typedef void (*AppSwitchFn)(AppState);
+
+// Helper to safely escape characters for JSON string values
+inline String escapeJson(const String& s) {
+    String out = "";
+    out.reserve(s.length() + 8);
+    for (size_t i = 0; i < s.length(); i++) {
+        char c = s[i];
+        if (c == '"') {
+            out += "\\\"";
+        } else if (c == '\\') {
+            out += "\\\\";
+        } else if (c == '\b') {
+            out += "\\b";
+        } else if (c == '\f') {
+            out += "\\f";
+        } else if (c == '\n') {
+            out += "\\n";
+        } else if (c == '\r') {
+            out += "\\r";
+        } else if (c == '\t') {
+            out += "\\t";
+        } else if ((uint8_t)c < 0x20) {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "\\u%04x", (uint8_t)c);
+            out += buf;
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}

@@ -304,6 +304,10 @@ public:
 
     void load() {
         if (!_isLoaded) {
+            if (_netTaskHandle != NULL) {
+                Serial.println("[tcpaudio] Warning: previous task still running, cannot load");
+                return;
+            }
             ensureAudioOutput(44100);
 
             if (!_netTaskDone) {
@@ -311,10 +315,6 @@ public:
             }
             if (_netTaskDone) {
                 xSemaphoreTake(_netTaskDone, 0);
-            }
-
-            while (_netTaskHandle != NULL) {
-                vTaskDelay(pdMS_TO_TICKS(2));
             }
 
             _isRunning = true;
@@ -339,7 +339,10 @@ public:
             stopStream();
             _isLoaded = false;
             if (_netTaskDone && _netTaskHandle != NULL) {
-                xSemaphoreTake(_netTaskDone, pdMS_TO_TICKS(1500));
+                if (xSemaphoreTake(_netTaskDone, pdMS_TO_TICKS(1500)) != pdTRUE) {
+                    Serial.println("[tcpaudio] Error: task shutdown timeout, preserving handle");
+                    return;
+                }
             }
             _netTaskHandle = NULL;
             _clientConnected = false;

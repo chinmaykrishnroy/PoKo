@@ -30,37 +30,6 @@ extern void onBtnRight();
 extern void onBtnLeftDouble();
 extern void onBtnRightDouble();
 
-// Helper to safely escape characters for JSON string values
-inline String escapeJson(const String& s) {
-    String out = "";
-    out.reserve(s.length() + 8);
-    for (size_t i = 0; i < s.length(); i++) {
-        char c = s[i];
-        if (c == '"') {
-            out += "\\\"";
-        } else if (c == '\\') {
-            out += "\\\\";
-        } else if (c == '\b') {
-            out += "\\b";
-        } else if (c == '\f') {
-            out += "\\f";
-        } else if (c == '\n') {
-            out += "\\n";
-        } else if (c == '\r') {
-            out += "\\r";
-        } else if (c == '\t') {
-            out += "\\t";
-        } else if ((uint8_t)c < 0x20) {
-            char buf[8];
-            snprintf(buf, sizeof(buf), "\\u%04x", (uint8_t)c);
-            out += buf;
-        } else {
-            out += c;
-        }
-    }
-    return out;
-}
-
 class PokoAPI {
 private:
     WebServer*   _server;
@@ -325,9 +294,13 @@ public:
         }, [this]() {
             HTTPUpload& upload = _server->upload();
             static File uploadFile;
+            static String targetPath;
+            const size_t MAX_GALLERY_SIZE = 65536; // 64 KB limit
+
             if (upload.status == UPLOAD_FILE_START) {
                 _uploadSuccess = true;
                 _uploadErrMsg = "";
+                targetPath = "";
                 size_t total = LittleFS.totalBytes();
                 size_t used  = LittleFS.usedBytes();
                 if (total > 0 && (total - used) < 4096) {
@@ -347,21 +320,34 @@ public:
                 if (fname.length() == 0) fname = "photo_" + String(millis()) + ".jpg";
                 if (!fname.endsWith(".jpg") && !fname.endsWith(".jpeg")) fname += ".jpg";
 
-                String path = "/photos/" + fname;
-                Serial.printf("[gallery] start upload %s\n", path.c_str());
-                uploadFile = LittleFS.open(path, "w");
+                targetPath = "/photos/" + fname;
+                Serial.printf("[gallery] start upload %s -> /photos/upload.tmp\n", targetPath.c_str());
+                if (LittleFS.exists("/photos/upload.tmp")) {
+                    LittleFS.remove("/photos/upload.tmp");
+                }
+                uploadFile = LittleFS.open("/photos/upload.tmp", "w");
                 if (!uploadFile) {
                     _uploadSuccess = false;
-                    _uploadErrMsg = "Failed to create destination file";
-                    Serial.println("[gallery] upload file open failed");
+                    _uploadErrMsg = "Failed to create temporary upload file";
+                    Serial.println("[gallery] upload temp file open failed");
                 }
             } else if (upload.status == UPLOAD_FILE_WRITE) {
                 if (_uploadSuccess && uploadFile) {
+                    if (upload.totalSize > MAX_GALLERY_SIZE) {
+                        _uploadSuccess = false;
+                        _uploadErrMsg = "File size exceeds 64 KB limit";
+                        Serial.println("[gallery] upload rejected: size exceeded 64 KB");
+                        uploadFile.close();
+                        LittleFS.remove("/photos/upload.tmp");
+                        return;
+                    }
                     size_t written = uploadFile.write(upload.buf, upload.currentSize);
                     if (written != upload.currentSize) {
                         _uploadSuccess = false;
                         _uploadErrMsg = "Write failed: storage full";
                         Serial.println("[gallery] upload write failed: disk full");
+                        uploadFile.close();
+                        LittleFS.remove("/photos/upload.tmp");
                     }
                 }
             } else if (upload.status == UPLOAD_FILE_END) {
@@ -371,9 +357,31 @@ public:
                 if (_uploadSuccess && upload.totalSize == 0) {
                     _uploadSuccess = false;
                     _uploadErrMsg = "Empty file received";
-                }
-                if (_uploadSuccess) {
-                    Serial.printf("[gallery] uploaded %u bytes successfully\n", (unsigned int)upload.totalSize);
+                    LittleFS.remove("/photos/upload.tmp");
+                } else if (_uploadSuccess && upload.totalSize > MAX_GALLERY_SIZE) {
+                    _uploadSuccess = false;
+                    _uploadErrMsg = "File size exceeds 64 KB limit";
+                    LittleFS.remove("/photos/upload.tmp");
+                } else if (_uploadSuccess) {
+                    if (targetPath.length() > 0) {
+                        if (LittleFS.exists(targetPath)) {
+                            LittleFS.remove(targetPath);
+                        }
+                        if (LittleFS.rename("/photos/upload.tmp", targetPath)) {
+                            Serial.printf("[gallery] uploaded %u bytes successfully as %s\n", (unsigned int)upload.totalSize, targetPath.c_str());
+                        } else {
+                            _uploadSuccess = false;
+                            _uploadErrMsg = "Failed to finalize upload";
+                            LittleFS.remove("/photos/upload.tmp");
+                            Serial.println("[gallery] atomic rename failed");
+                        }
+                    } else {
+                        _uploadSuccess = false;
+                        _uploadErrMsg = "Invalid target path";
+                        LittleFS.remove("/photos/upload.tmp");
+                    }
+                } else {
+                    LittleFS.remove("/photos/upload.tmp");
                 }
             } else if (upload.status == UPLOAD_FILE_ABORTED) {
                 _uploadSuccess = false;
@@ -381,6 +389,8 @@ public:
                 if (uploadFile) {
                     uploadFile.close();
                 }
+                LittleFS.remove("/photos/upload.tmp");
+                Serial.println("[gallery] upload aborted");
             }
         });
 

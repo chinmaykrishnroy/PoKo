@@ -66,6 +66,7 @@ private:
     uint32_t  _lastScrollMs = 0;
 
     static Arduino_Canvas* _activeCanvas;
+    static VideoApp*       _instance;
 
     static bool tftOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
         if (_activeCanvas) {
@@ -220,6 +221,7 @@ private:
             _dirty = true;
             if (syncPlugin) {
                 syncPlugin->reset();
+                syncPlugin->unload();
             }
             if (audioManager) {
                 audioManager->release(AUDIO_VIDEO);
@@ -357,12 +359,21 @@ private:
 
 public:
     VideoApp(Arduino_GFX* gfx, AppSwitchFn exitFn)
-        : _gfx(gfx), _exit(exitFn) {}
+        : _gfx(gfx), _exit(exitFn) {
+        _instance = this;
+    }
+
+    static void stopPlaybackStatic() {
+        if (_instance) _instance->requestStop();
+    }
 
     void begin() {
         if (!_canvas) {
             _canvas = new Arduino_Canvas(128, 128, _gfx, 0, 0);
             _canvas->begin();
+        }
+        if (audioManager) {
+            audioManager->setVideoHandlers(stopPlaybackStatic);
         }
     }
 
@@ -433,13 +444,19 @@ public:
     }
 
     void volumeRampDown() {
-        int v = getCurrentAppVolume();
-        if (v > 0) setScaledVolume(max(0, v - 2));
+        if (audioManager) audioManager->rampVolume(-2);
+        else {
+            int v = getCurrentAppVolume();
+            if (v > 0) setScaledVolume(max(0, v - 2));
+        }
     }
 
     void volumeRampUp() {
-        int v = getCurrentAppVolume();
-        if (v < 100) setScaledVolume(min(100, v + 2));
+        if (audioManager) audioManager->rampVolume(2);
+        else {
+            int v = getCurrentAppVolume();
+            if (v < 100) setScaledVolume(min(100, v + 2));
+        }
     }
 
     void onBack() {
@@ -502,3 +519,4 @@ public:
 };
 
 inline Arduino_Canvas* VideoApp::_activeCanvas = nullptr;
+inline VideoApp*       VideoApp::_instance     = nullptr;
