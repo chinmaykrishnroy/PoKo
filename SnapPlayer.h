@@ -1274,7 +1274,7 @@ private:
                         continue;
                     }
 
-                    if (!_receivedCodecHeader || _timeSyncCount < 10 || chunkDataBytes == 0) {
+                    if (!_receivedCodecHeader || _timeSyncCount < 10 || chunkDataBytes == 0 || _isSuspended) {
                         if (!discardBytes(client, availablePayload)) break;
                         continue;
                     }
@@ -1461,7 +1461,7 @@ private:
                 continue;
             }
 
-            if (_sampleRate > 0 && _sampleRate != activeRate) {
+            if (_sampleRate > 0 && (_sampleRate != activeRate || poko_i2s_rate != activeRate)) {
                 deinitI2S();
                 activeRate = _sampleRate;
                 if (!initI2S(activeRate)) {
@@ -1998,16 +1998,28 @@ public:
         _playReleased = false;
         _playStarted = false;
         _samplesPlayed = 0;
+        _expectedNextChunkTsUs = 0;
+        _producerAwaitingResync = true;
+        resetPllState();
     }
 
     void resumeAudio() {
         if (!_isLoaded || !_isSuspended) return;
         Serial.println("[snap] audio resuming");
-        _isSuspended = false;
+        // Reconfigure and stabilize I2S hardware FIRST, while still suspended,
+        // so audioTask cannot race or touch poko_tx_handle while it is being re-initialized.
         if (_sampleRate > 0) {
             ensureAudioOutput(_sampleRate);
         }
+        _pcmBuf.drain();
+        _playReleased = false;
+        _playStarted = false;
+        _samplesPlayed = 0;
+        _expectedNextChunkTsUs = 0;
+        _producerAwaitingResync = false;
+        resetPllState();
         _resyncRequested = true;
+        _isSuspended = false;
     }
 
     void stop() {

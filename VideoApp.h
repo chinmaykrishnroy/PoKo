@@ -384,12 +384,13 @@ public:
         _active = false;
         if (_mode == MODE_PLAYING) {
             requestStop();
-        }
-        if (audioManager) {
-            audioManager->release(AUDIO_VIDEO);
-        }
-        if (syncPlugin) {
-            syncPlugin->unload();
+        } else {
+            if (audioManager) {
+                audioManager->release(AUDIO_VIDEO);
+            }
+            if (syncPlugin) {
+                syncPlugin->unload();
+            }
         }
         if (_canvas) {
             delete _canvas;

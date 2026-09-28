@@ -59,6 +59,9 @@ private:
     TaskHandle_t         _netTaskHandle;
     TaskHandle_t         _videoTaskHandle;
     TaskHandle_t         _audioTaskHandle;
+    SemaphoreHandle_t    _netTaskDone = nullptr;
+    SemaphoreHandle_t    _videoTaskDone = nullptr;
+    SemaphoreHandle_t    _audioTaskDone = nullptr;
     QueueHandle_t        _videoQueue;
     QueueHandle_t        _emptyQueue;
     StreamBufferHandle_t _audioStream;
@@ -222,6 +225,7 @@ private:
 
         _server.end();
         _netTaskHandle = NULL;
+        if (_netTaskDone) xSemaphoreGive(_netTaskDone);
         vTaskDelete(NULL);
     }
 
@@ -294,6 +298,7 @@ private:
 
         _videoServer.end();
         _videoTaskHandle = NULL;
+        if (_videoTaskDone) xSemaphoreGive(_videoTaskDone);
         vTaskDelete(NULL);
     }
 
@@ -365,16 +370,18 @@ private:
             }
 
             size_t written = 0;
+            if (!_isRunning) break;
             if (!poko_tx_handle) {
                 ensureAudioOutput(44100);
             }
-            if (poko_tx_handle) {
-                i2s_channel_write(poko_tx_handle, stereo, outIdx * sizeof(int16_t), &written, pdMS_TO_TICKS(50));
+            if (poko_tx_handle && _isRunning) {
+                i2s_channel_write(poko_tx_handle, stereo, outIdx * sizeof(int16_t), &written, pdMS_TO_TICKS(30));
             }
             _samplesPlayed += monoSamples;
         }
 
         _audioTaskHandle = NULL;
+        if (_audioTaskDone) xSemaphoreGive(_audioTaskDone);
         vTaskDelete(NULL);
     }
 
@@ -498,6 +505,13 @@ public:
         _videoConnected = false;
         _wasConnected = false;
 
+        if (!_netTaskDone) _netTaskDone = xSemaphoreCreateBinary();
+        if (!_videoTaskDone) _videoTaskDone = xSemaphoreCreateBinary();
+        if (!_audioTaskDone) _audioTaskDone = xSemaphoreCreateBinary();
+        if (_netTaskDone) xSemaphoreTake(_netTaskDone, 0);
+        if (_videoTaskDone) xSemaphoreTake(_videoTaskDone, 0);
+        if (_audioTaskDone) xSemaphoreTake(_audioTaskDone, 0);
+
         if (xTaskCreatePinnedToCore(audioTaskWrapper, "SyncAudio", 4096, this, 3, &_audioTaskHandle, 0) != pdPASS ||
             xTaskCreatePinnedToCore(networkTaskWrapper, "SyncAudNet", 8192, this, 2, &_netTaskHandle, 0) != pdPASS ||
             xTaskCreatePinnedToCore(videoTaskWrapper, "SyncVidNet", 8192, this, 2, &_videoTaskHandle, 0) != pdPASS) {
@@ -512,23 +526,25 @@ public:
         if (!_isLoaded && !_allocationFailed) return;
 
         _isRunning = false;
-        if (_activeAudioClient && _activeAudioClient->connected()) {
-            _activeAudioClient->stop();
-        }
-        if (_activeVideoClient && _activeVideoClient->connected()) {
-            _activeVideoClient->stop();
-        }
-        _server.end();
-        _videoServer.end();
 
-        uint32_t deadline = millis() + 2000;
-        while (((_netTaskHandle != NULL) || (_videoTaskHandle != NULL) || (_audioTaskHandle != NULL)) && millis() < deadline) {
-            vTaskDelay(pdMS_TO_TICKS(10));
+        // Give tasks up to 400ms each to cleanly exit their loops and delete themselves
+        if (_audioTaskDone && _audioTaskHandle != NULL) {
+            xSemaphoreTake(_audioTaskDone, pdMS_TO_TICKS(400));
+        }
+        if (_netTaskDone && _netTaskHandle != NULL) {
+            xSemaphoreTake(_netTaskDone, pdMS_TO_TICKS(400));
+        }
+        if (_videoTaskDone && _videoTaskHandle != NULL) {
+            xSemaphoreTake(_videoTaskDone, pdMS_TO_TICKS(400));
         }
 
-        if (_netTaskHandle != NULL || _videoTaskHandle != NULL || _audioTaskHandle != NULL) {
-            Serial.println("[synced] Warning: task shutdown timeout");
-        }
+        _audioTaskHandle = NULL;
+        _netTaskHandle = NULL;
+        _videoTaskHandle = NULL;
+        _activeAudioClient = nullptr;
+        _activeVideoClient = nullptr;
+
+        vTaskDelay(pdMS_TO_TICKS(25)); // Allow Core 0 idle task to reclaim FreeRTOS task stacks
 
         releaseResources();
         _isLoaded = false;
