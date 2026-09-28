@@ -121,10 +121,10 @@ These controls are active across the entire system regardless of the open applic
 ---
 
 ### 3.9 Hardware & System Info (`InfoApp`)
-- **Footer**: `L:Prv  R:Nxt  2R:Exit`
+- **Footer**: `L:Prv  R:Nxt  2L/R:Exit`
 - **`L`**: Scroll list up (continuous bidirectional wrap-around loop).
 - **`R`**: Scroll list down (continuous bidirectional wrap-around loop).
-- **`2R`**: Exit to Launcher.
+- **`2L`** or **`2R`**: Exit to Launcher (450ms double-click window for reliability).
 - **Hold `R`**: Force refresh of all live hardware metrics.
 
 ---

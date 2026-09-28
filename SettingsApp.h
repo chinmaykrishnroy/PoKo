@@ -73,7 +73,8 @@ public:
         const auto& theme = currentTheme();
 
         // Header (y=0..13)
-        _canvas->fillRect(0, 0, 128, 13, theme.headerBg);
+        _canvas->fillRect(0, 0, 128, 14, theme.headerBg);
+        _canvas->drawFastHLine(0, 13, 128, theme.line);  // bottom border
         _canvas->setFont(u8g2_font_profont10_mf);
         _canvas->setTextColor(theme.headerText, theme.headerBg);
         _canvas->setCursor(3, 10);

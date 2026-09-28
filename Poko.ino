@@ -109,12 +109,13 @@ void showThemedLoadingScreen(AppState state) {
 
     if (dark) {
         // ── DARK THEME LOADING SCREEN ─────────────────────────────
-        // Pure deep black background, elevated dark card, cyan accent pill,
-        // crisp white text, medium grey subtitle.
+        // Pure black background, subtle outline border, cyan accent pill,
+        // white text rendered directly on black — no surface fill that could
+        // appear "lighter/faded" against the surrounding black.
         pokoGfx->fillScreen(0x0000);
 
-        pokoGfx->fillRoundRect(12, 32, 104, 64, 6, 0x1082); // theme.surface
-        pokoGfx->drawRoundRect(12, 32, 104, 64, 6, 0x18C3); // theme.surface2 border
+        // Outline-only rounded rect (no fill — avoids lighter card against black bg)
+        pokoGfx->drawRoundRect(12, 32, 104, 64, 6, 0x18C3);  // dim cyan border
 
         // Glowing cyan accent bar
         pokoGfx->fillRoundRect(48, 40, 32, 3, 1, 0x07FF);
@@ -122,7 +123,7 @@ void showThemedLoadingScreen(AppState state) {
         char titleBuf[24];
         snprintf(titleBuf, sizeof(titleBuf), "Loading %s...", appName);
         pokoGfx->setFont(u8g2_font_helvB08_tf);
-        pokoGfx->setTextColor(0xFFFF, 0x1082);
+        pokoGfx->setTextColor(0xFFFF, 0x0000);  // white on pure black — no card bg
         pokoGfx->getTextBounds(titleBuf, 0, 0, &x1, &y1, &w, &h);
         if (w > 92) {
             const char* fallback = "Loading App...";
@@ -135,7 +136,7 @@ void showThemedLoadingScreen(AppState state) {
         }
 
         pokoGfx->setFont(u8g2_font_5x7_tf);
-        pokoGfx->setTextColor(0x8410, 0x1082);
+        pokoGfx->setTextColor(0x4208, 0x0000);  // dim grey on black
         const char* sub = "PLEASE WAIT";
         pokoGfx->getTextBounds(sub, 0, 0, &x1, &y1, &w, &h);
         pokoGfx->setCursor(64 - w / 2, 79);
@@ -358,6 +359,8 @@ void onBtnLeftDouble() {
             if (pokoUI) pokoUI->updateStatusBar();
             return;
         }
+    } else if (activeApp == STATE_INFO && infoAppInstance) {
+        infoAppInstance->onBack();
     } else if (activeApp == STATE_GALLERY_UI && galleryAppInstance) {
         galleryAppInstance->onBack();
     } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {

@@ -44,6 +44,10 @@ private:
     uint32_t _downLastRepeatMs  = 0;
     uint32_t _upHoldStartMs     = 0;
     uint32_t _upLastRepeatMs    = 0;
+    // Set true once the ramp callback actually fires so the OneButton long-press
+    // callback (at 650ms) is suppressed — prevents double-action (ramp + long-press).
+    bool     _downRampFired     = false;
+    bool     _upRampFired       = false;
 
     // Dual-button combo tracking (DOWN + UP held simultaneously)
     bool     _comboHolding       = false;
@@ -73,7 +77,8 @@ private:
         }
     }
     static void _cbLongDown() {
-        if (_instance && !_instance->_suppressSingle && _instance->_onLongDown) {
+        // Suppress if volume ramp already started (ramp fires at 450ms, long-press at 650ms)
+        if (_instance && !_instance->_suppressSingle && !_instance->_downRampFired && _instance->_onLongDown) {
             Serial.println("[btn] DOWN Long-Press");
             _instance->_onLongDown();
         }
@@ -92,7 +97,8 @@ private:
         }
     }
     static void _cbLongUp() {
-        if (_instance && !_instance->_suppressSingle && _instance->_onLongUp) {
+        // Suppress if volume ramp already started (ramp fires at 450ms, long-press at 650ms)
+        if (_instance && !_instance->_suppressSingle && !_instance->_upRampFired && _instance->_onLongUp) {
             Serial.println("[btn] UP Long-Press");
             _instance->_onLongUp();
         }
@@ -127,11 +133,11 @@ public:
 
     void begin() {
         // DOWN & UP navigation button timings
-        _btnDown.setClickMs(350);
+        _btnDown.setClickMs(450);  // 450ms window to detect double-click vs two singles
         _btnDown.setPressMs(650);
         _btnDown.setDebounceMs(20);
 
-        _btnUp.setClickMs(350);
+        _btnUp.setClickMs(450);  // 450ms window to detect double-click vs two singles
         _btnUp.setPressMs(650);
         _btnUp.setDebounceMs(20);
 
@@ -283,11 +289,13 @@ public:
                     } else if (now - _downHoldStartMs >= 450) {
                         if (now - _downLastRepeatMs >= 100) {
                             _downLastRepeatMs = now;
+                            _downRampFired = true;  // suppress OneButton long-press from here on
                             if (_onDownHolding) _onDownHolding();
                         }
                     }
                 } else {
                     _downHoldStartMs = 0;
+                    _downRampFired = false;
                 }
 
                 if (upPressed && !downPressed) {
@@ -297,11 +305,13 @@ public:
                     } else if (now - _upHoldStartMs >= 450) {
                         if (now - _upLastRepeatMs >= 100) {
                             _upLastRepeatMs = now;
+                            _upRampFired = true;  // suppress OneButton long-press from here on
                             if (_onUpHolding) _onUpHolding();
                         }
                     }
                 } else {
                     _upHoldStartMs = 0;
+                    _upRampFired = false;
                 }
             }
         }
