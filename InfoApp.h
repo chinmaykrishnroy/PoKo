@@ -89,7 +89,8 @@ private:
         }
 
         if (powerManager) {
-            add("Perf", powerManager->isUsbPerfMax() ? "MaxPerf" : "Managed", POKO_CLR_TEXT);
+            bool maxPerf = powerManager->isMaxPerfActive();
+            add("Perf", maxPerf ? "USB/MaxPerf" : "Batt/160MHz", maxPerf ? pokoClrGreen() : pokoClrCyan());
         }
 
         // 2. Firmware Version & Build

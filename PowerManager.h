@@ -310,6 +310,16 @@ public:
             }
         }
 
+        // 1b. CPU Frequency Scaling — 240 MHz on USB/charging (MaxPerf), 160 MHz on battery
+        {
+            bool wantMax = isMaxPerfActive() || hasLock(POWER_LOCK_OTA) || hasLock(POWER_LOCK_REALTIME_NET);
+            uint32_t targetMhz = wantMax ? 240 : 160;
+            if (getCpuFrequencyMhz() != targetMhz) {
+                setCpuFrequencyMhz(targetMhz);
+                Serial.printf("[power] CPU -> %u MHz (%s)\n", targetMhz, wantMax ? "MaxPerf/USB" : "Battery/Managed");
+            }
+        }
+
         // 2. Audio Subsystem Lock & Speaker PA Coordination (Session vs Active Rendering)
         if (_audio) {
             AudioSource src = _audio->activeSource();

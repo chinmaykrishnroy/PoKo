@@ -23,7 +23,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - **Dark loading screen "faded card"** — Removed filled card surface (`0x1082`); text now drawn on pure black so no lighter overlay is visible.
 - **Settings app header missing bottom border** — `fillRect` height extended from 13 → 14 px; `drawFastHLine` separator added at y=13.
-- **InfoApp double-click not exiting** — Explicit `STATE_INFO` case added to `onBtnLeftDouble()` dispatcher; click window widened from 350 ms → 450 ms for reliable double-tap detection.
+- **InfoApp double-click exit** — Added unified rapid-click timestamp tracking (`INFO_EXIT_MS = 600ms`) across both `L` and `R` buttons. Two quick clicks on either button immediately exit the app, while single clicks smoothly scroll up/down.
+- **Power-aware CPU scaling & Perf indicator** — Implemented dynamic CPU frequency throttling: automatically scales to 160 MHz when running on battery power to conserve energy, and returns to 240 MHz (MaxPerf) when plugged into USB power/charging. Updated InfoApp `Perf` row to reflect the real hardware operational state (`USB/MaxPerf` vs `Batt/160MHz`).
 - **InfoApp footer** updated from `2R:Exit` → `2L/R:Exit` to reflect that either double-click exits.
 - **SSync volume hold triggering mute** — `SSyncApp::onLongRight()` made a no-op; mute/unmute is exclusively triggered by double-R click (`onBtnRightDouble`). Additionally, `ButtonInput` now sets `_upRampFired`/`_downRampFired` flags when the volume ramp starts (450 ms hold), which suppresses OneButton's long-press callback (650 ms) for the same physical hold — eliminates the race entirely.
 - **Light theme accent visibility** — Changed light theme accent from `0x001F` (blue, invisible on white) to `0x01F4` (Deep Royal Navy/Teal).

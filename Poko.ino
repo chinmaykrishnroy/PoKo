@@ -59,6 +59,11 @@ SnapPlayer*   snapService        = nullptr;
 
 AppState activeApp = STATE_LAUNCHER;
 
+// Manual rapid-click tracking for InfoApp exit.
+// ANY button clicked twice within INFO_EXIT_MS exits to launcher — bypasses OneButton timing entirely.
+static const uint32_t INFO_EXIT_MS = 600;
+static uint32_t _infoLastClickMs  = 0;  // last single-click timestamp while in InfoApp
+
 // ── WiFi State Machine ────────────────────────────────────────
 WifiModeState wifiState = STATE_WIFI_CONNECTING;
 unsigned long wifiTimer = 0;
@@ -206,6 +211,7 @@ void onAppChange(AppState newState) {
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->unload();
 
     activeApp = newState;
+    _infoLastClickMs = 0;  // reset InfoApp rapid-exit tracker on every app switch
 
     // Show themed loading screen between apps to eliminate black freeze flash
     if (newState == STATE_LAUNCHER) {
@@ -273,12 +279,27 @@ bool handleButtonWakeCheck(bool isVolumeAction = false) {
     return true;
 }
 
+// Returns true if this is the second click within INFO_EXIT_MS and we should exit.
+// Resets the tracker after a non-consecutive click so the user gets a clean state.
+static bool infoRapidClickExit() {
+    uint32_t now = millis();
+    if (now - _infoLastClickMs < INFO_EXIT_MS) {
+        _infoLastClickMs = 0;  // reset so triple-click doesn't keep exiting
+        return true;
+    }
+    _infoLastClickMs = now;
+    return false;
+}
+
 // ── Button & Combo Callbacks ──────────────────────────────────
 void onBtnLeft() {
     if (!handleButtonWakeCheck(false)) return;
     Serial.println("[action] Left (BOOT) Clicked");
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->navigateLeft();
-    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onLeft();
+    else if (activeApp == STATE_INFO && infoAppInstance) {
+        if (infoRapidClickExit()) { infoAppInstance->onBack(); return; }
+        infoAppInstance->onLeft();
+    }
     else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->onLeft();
     else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->onLeft();
     else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->onLeft();
@@ -292,7 +313,10 @@ void onBtnRight() {
     if (!handleButtonWakeCheck(false)) return;
     Serial.println("[action] Right (KEY) Clicked");
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->navigateRight();
-    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onRight();
+    else if (activeApp == STATE_INFO && infoAppInstance) {
+        if (infoRapidClickExit()) { infoAppInstance->onBack(); return; }
+        infoAppInstance->onRight();
+    }
     else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->onRight();
     else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->onRight();
     else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->onRight();
