@@ -64,6 +64,7 @@ private:
         return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
     }
 
+public:
     void renderToCanvas() {
         if (!_canvas) return;
         const auto& theme = currentTheme();
@@ -244,7 +245,7 @@ private:
         _canvas->drawFastHLine(0, FOOTER_Y, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(theme.footerText, theme.headerBg);
-        const char* hint = "L/R:Nav  2R:Set  Hold:Adj";
+        const char* hint = "L:Prv  R:Nxt  2R:Set";
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
         _canvas->print(hint);

@@ -4,6 +4,7 @@
 #include <Preferences.h>
 #include <esp_sleep.h>
 #include <esp_wifi.h>
+#include <functional>
 #include "PokoPins.h"
 #include "PokoDrivers.h"
 #include "BatteryManager.h"
@@ -50,32 +51,34 @@ enum ActivitySource : uint8_t {
 
 class PowerManager {
 private:
-    BatteryManager*   _battery;
-    AudioManager*     _audio;
-    Preferences*      _prefs;
+    BatteryManager*       _battery;
+    AudioManager*         _audio;
+    Preferences*          _prefs;
+    std::function<void()> _wakeCb = nullptr;
 
-    uint32_t          _locks               = POWER_LOCK_NONE;
-    DisplayPowerState _displayState        = DISPLAY_POWER_ACTIVE;
+    uint32_t              _locks               = POWER_LOCK_NONE;
+    DisplayPowerState     _displayState        = DISPLAY_POWER_ACTIVE;
 
-    uint32_t          _lastActivityMs      = 0;
-    uint32_t          _lastAudioActiveMs   = 0;
-    uint32_t          _lastDimStepMs       = 0;
+    uint32_t              _lastActivityMs      = 0;
+    uint32_t              _lastAudioActiveMs   = 0;
+    uint32_t              _lastDimStepMs       = 0;
 
     // Timeout settings (in seconds)
-    uint32_t          _dimTimeoutSec       = 15;
-    uint32_t          _sleepTimeoutSec     = 30;
-    uint32_t          _autoOffSec          = 900; // 15 min default
-    bool              _ambientClockEnabled = false;
+    uint32_t              _dimTimeoutSec       = 15;
+    uint32_t              _sleepTimeoutSec     = 30;
+    uint32_t              _autoOffSec          = 900; // 15 min default
+    bool                  _ambientClockEnabled = false;
 
     // Backlight ramp
-    uint8_t           _targetDuty          = 204; // 80% default
-    uint8_t           _currentDuty         = 204;
-    bool              _wifiSleepEnabled    = false;
-    bool              _paStandbyDone       = false;
-    bool              _usbPerfMax          = true;
-    SemaphoreHandle_t _lockMutex           = nullptr;
+    uint8_t               _targetDuty          = 204; // 80% default
+    uint8_t               _currentDuty         = 204;
+    bool                  _wifiSleepEnabled    = false;
+    bool                  _paStandbyDone       = false;
+    bool                  _usbPerfMax          = true;
+    SemaphoreHandle_t     _lockMutex           = nullptr;
 
 public:
+    void setWakeCallback(std::function<void()> cb) { _wakeCb = cb; }
     uint8_t percentToDuty(int pct) const {
         pct = constrain(pct, 0, 100);
         return (uint8_t)((pct * 255) / 100);
@@ -189,6 +192,7 @@ public:
 
         if (wasAsleep) {
             displayWake();
+            if (_wakeCb) _wakeCb();
         }
 
         int userBr = getUserBrightnessPercent();
@@ -292,6 +296,12 @@ public:
         if (_battery) {
             _battery->update();
 
+            // USB plug-in auto-wake: when plugged in while screen is off, turn screen on immediately
+            if (_battery->consumePluggedInEvent()) {
+                Serial.println("[power] USB plugged in -> waking display");
+                wakeDisplay();
+            }
+
             // Hardware Battery Protection: Cut off power if cell voltage < 3.25V sustained (only if battery actually present!)
             if (_battery->isPresent() && _battery->isCritical()) {
                 Serial.println("[power] CRITICAL BATTERY VOLTAGE (<3.25V)! Shutting down immediately to protect cell.");
@@ -300,20 +310,18 @@ public:
             }
         }
 
-        // 2. Audio Subsystem Lock & Speaker PA Coordination
-        bool audioActive = false;
+        // 2. Audio Subsystem Lock & Speaker PA Coordination (Session vs Active Rendering)
         if (_audio) {
             AudioSource src = _audio->activeSource();
-            if (src != AUDIO_NONE) {
-                audioActive = true;
+            bool isRendering = _audio->isSoundPlaying();
+
+            if (isRendering) {
                 _lastAudioActiveMs = now;
                 acquireLock(POWER_LOCK_AUDIO);
 
-                // SSync and Video require low-latency Wi-Fi
+                // SSync and Video only lock low-latency Wi-Fi while actively rendering
                 if (src == AUDIO_SSYNC || src == AUDIO_VIDEO) {
                     acquireLock(POWER_LOCK_REALTIME_NET);
-                } else {
-                    releaseLock(POWER_LOCK_REALTIME_NET);
                 }
 
                 // If speaker amp was in standby, wake it up cleanly
@@ -322,8 +330,12 @@ public:
                     _paStandbyDone = false;
                 }
             } else {
-                releaseLock(POWER_LOCK_AUDIO);
+                // Audio is not actively rendering: allow Wi-Fi modem sleep on battery
                 releaseLock(POWER_LOCK_REALTIME_NET);
+
+                if (src == AUDIO_NONE) {
+                    releaseLock(POWER_LOCK_AUDIO);
+                }
 
                 // Put speaker amp to standby after 3 seconds of continuous audio idle
                 if (!_paStandbyDone && (now - _lastAudioActiveMs >= 3000)) {

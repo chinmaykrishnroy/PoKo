@@ -8,8 +8,10 @@
 #include "PixelEngine.h"
 #include "SnapPlayer.h"
 #include "AudioManager.h"
+#include "PowerManager.h"
 
-extern SnapPlayer* snapService;
+extern SnapPlayer*   snapService;
+extern PowerManager* powerManager;
 
 // ─────────────────────────────────────────────────────────────
 //  PokoOTA — Web-based OTA firmware updates and progress screen
@@ -118,6 +120,7 @@ public:
             server->sendHeader("Connection", "close");
             bool ok = (!Update.hasError() && Update.isFinished());
             if (!ok) {
+                if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
                 pixelEngine.showOtaError();
                 server->send(500, "text/plain", "FAIL: firmware update failed");
                 if (gfx) {
@@ -139,6 +142,7 @@ public:
                 gfx->setCursor(20, 68);
                 gfx->print("SUCCESS!");
             }
+            if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
             {
                 Preferences p;
                 p.begin("poko", false);
@@ -150,6 +154,11 @@ public:
         }, [server, switchCb, gfx]() {
             HTTPUpload& upload = server->upload();
             if (upload.status == UPLOAD_FILE_START) {
+                // Wake display to full brightness and hold power lock during OTA
+                if (powerManager) {
+                    powerManager->wakeDisplay();
+                    powerManager->acquireLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
+                }
                 if (audioManager) audioManager->stopAll();
                 if (snapService && snapService->isLoaded()) {
                     snapService->unload();
@@ -167,8 +176,10 @@ public:
                 if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
                     Update.printError(Serial);
                     pixelEngine.showOtaError();
+                    if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
                 }
             } else if (upload.status == UPLOAD_FILE_WRITE) {
+                esp_task_wdt_reset(); // Keep watchdog alive during large file writes
                 if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
                     Update.printError(Serial);
                     pixelEngine.showOtaError();
@@ -181,6 +192,17 @@ public:
                         pixelEngine.showOtaProgress((float)pct);
                     }
                 }
+            } else if (upload.status == UPLOAD_FILE_ABORTED) {
+                Update.abort();
+                if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
+                pixelEngine.showOtaError();
+                if (gfx) {
+                    gfx->fillScreen(0xF800);
+                    gfx->setFont(u8g2_font_helvB10_tf);
+                    gfx->setTextColor(RGB565_BLACK);
+                    gfx->setCursor(20, 68);
+                    gfx->print("ABORTED!");
+                }
             } else if (upload.status == UPLOAD_FILE_END) {
                 if (Update.end(true)) {
                     drawProgress(gfx, 100);
@@ -188,6 +210,7 @@ public:
                 } else {
                     Update.printError(Serial);
                     pixelEngine.showOtaError();
+                    if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
                 }
             }
         });

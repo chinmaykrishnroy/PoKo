@@ -97,8 +97,9 @@ These controls are active across the entire system regardless of the open applic
 ---
 
 ### 3.8 System Settings (`SettingsApp`)
-- **`L`**: Move selection up to previous setting.
-- **`R`**: Move selection down to next setting.
+- **Footer**: `L:Prv  R:Nxt  2R:Set`
+- **`L`**: Move selection up to previous setting (loops around).
+- **`R`**: Move selection down to next setting (loops around).
 - **`2R`**: Cycle value / toggle setting / execute action:
   1. **Theme**: Dark $\leftrightarrow$ Light
   2. **Master Vol**: 20% $\rightarrow$ 40% $\rightarrow$ 60% $\rightarrow$ 80% $\rightarrow$ 100%
@@ -120,8 +121,9 @@ These controls are active across the entire system regardless of the open applic
 ---
 
 ### 3.9 Hardware & System Info (`InfoApp`)
-- **`L`**: Scroll list up.
-- **`R`**: Scroll list down.
+- **Footer**: `L:Prv  R:Nxt  2R:Exit`
+- **`L`**: Scroll list up (continuous bidirectional wrap-around loop).
+- **`R`**: Scroll list down (continuous bidirectional wrap-around loop).
 - **`2R`**: Exit to Launcher.
 - **Hold `R`**: Force refresh of all live hardware metrics.
 

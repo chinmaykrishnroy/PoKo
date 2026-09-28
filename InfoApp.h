@@ -68,77 +68,77 @@ private:
             _rowCount++;
         };
 
-        char buf[26];
+        char buf[24];
 
-        // 1. Battery & Power
+        // 1. Battery & Power Subsystem
         if (batteryManager.isPresent()) {
             int pct = batteryManager.getPercentage();
             float v = batteryManager.getVoltage();
             bool chg = batteryManager.isCharging();
-            snprintf(buf, sizeof(buf), "%d%% (%.2fV)", pct, v);
+            snprintf(buf, sizeof(buf), "%d%% %.2fV", pct, v);
             uint16_t batCol = chg ? POKO_CLR_GREEN : (pct <= 15 ? POKO_CLR_ERR : (pct <= 30 ? POKO_CLR_WARN : POKO_CLR_GREEN));
-            add("Battery", buf, batCol);
+            add("Bat", buf, batCol);
 
-            const char* stateStr = chg ? "Charging" : (batteryManager.isFull() ? "Full (100%)" : (batteryManager.isCritical() ? "Critical (<3.25V)" : "Discharging"));
-            add("Bat State", stateStr, chg ? POKO_CLR_GREEN : (batteryManager.isCritical() ? POKO_CLR_ERR : POKO_CLR_TEXT));
+            const char* stateStr = chg ? "Charging" : (batteryManager.isFull() ? "Full" : (batteryManager.isCritical() ? "Critical" : "Dischg"));
+            add("State", stateStr, chg ? POKO_CLR_GREEN : (batteryManager.isCritical() ? POKO_CLR_ERR : POKO_CLR_TEXT));
         } else {
-            add("Battery", "None (USB Only)", POKO_CLR_ACCENT);
-            add("Power Src", "5V USB VBUS", POKO_CLR_GREEN);
+            add("Bat", "None (USB)", POKO_CLR_ACCENT);
+            add("Pwr", "5V VBUS", POKO_CLR_GREEN);
         }
 
         if (powerManager) {
-            add("USB Perf", powerManager->isUsbPerfMax() ? "Max Perf (240MHz)" : "Managed", POKO_CLR_TEXT);
+            add("Perf", powerManager->isUsbPerfMax() ? "MaxPerf" : "Managed", POKO_CLR_TEXT);
         }
 
         // 2. Firmware Version & Build
-        add("Version", "v1.2.0 (PoKo)", POKO_CLR_ACCENT);
+        add("Ver", "v1.2.0", POKO_CLR_ACCENT);
         add("Build", __DATE__, POKO_CLR_DIM);
 
         // 3. Reset Reason
         esp_reset_reason_t rst = esp_reset_reason();
         const char* rstStr = "Unknown";
-        if (rst == ESP_RST_POWERON) rstStr = "Power-On";
-        else if (rst == ESP_RST_SW) rstStr = "Software Restart";
-        else if (rst == ESP_RST_DEEPSLEEP) rstStr = "Deep Sleep Wake";
-        else if (rst == ESP_RST_PANIC) rstStr = "Exception/Crash";
+        if (rst == ESP_RST_POWERON) rstStr = "Pwr-On";
+        else if (rst == ESP_RST_SW) rstStr = "Reboot";
+        else if (rst == ESP_RST_DEEPSLEEP) rstStr = "SleepWake";
+        else if (rst == ESP_RST_PANIC) rstStr = "Crash";
         else if (rst == ESP_RST_INT_WDT || rst == ESP_RST_TASK_WDT || rst == ESP_RST_WDT) rstStr = "Watchdog";
         else if (rst == ESP_RST_BROWNOUT) rstStr = "Brownout";
-        add("Reset Rsn", rstStr, (rst == ESP_RST_PANIC || rst == ESP_RST_WDT) ? POKO_CLR_ERR : POKO_CLR_DIM);
+        add("Reset", rstStr, (rst == ESP_RST_PANIC || rst == ESP_RST_WDT) ? POKO_CLR_ERR : POKO_CLR_DIM);
 
         // 4. Memory (Heap & PSRAM)
         uint32_t freeH   = ESP.getFreeHeap();
         uint32_t minH    = ESP.getMinFreeHeap();
         uint32_t freePSR = ESP.getFreePsram();
-        snprintf(buf, sizeof(buf), "%u KB free", (unsigned)(freeH / 1024));
+        snprintf(buf, sizeof(buf), "%u KB", (unsigned)(freeH / 1024));
         add("Heap", buf, freeH < 50000 ? POKO_CLR_WARN : POKO_CLR_GREEN);
 
-        snprintf(buf, sizeof(buf), "%u KB min", (unsigned)(minH / 1024));
-        add("Min Heap", buf, minH < 35000 ? POKO_CLR_WARN : POKO_CLR_TEXT);
+        snprintf(buf, sizeof(buf), "%u KB", (unsigned)(minH / 1024));
+        add("MinHp", buf, minH < 35000 ? POKO_CLR_WARN : POKO_CLR_TEXT);
 
-        snprintf(buf, sizeof(buf), "%.2f / 8 MB", freePSR / (1024.0f * 1024.0f));
+        snprintf(buf, sizeof(buf), "%.2f/8MB", freePSR / (1024.0f * 1024.0f));
         add("PSRAM", buf, POKO_CLR_TEXT);
 
         // 5. Hardware Specifications
-        snprintf(buf, sizeof(buf), "%u MHz (Dual)", (unsigned)getCpuFrequencyMhz());
+        snprintf(buf, sizeof(buf), "%u MHz", (unsigned)getCpuFrequencyMhz());
         add("CPU", buf, POKO_CLR_TEXT);
 
         esp_chip_info_t ci;
         esp_chip_info(&ci);
-        snprintf(buf, sizeof(buf), "ESP32-S3 r%d", ci.revision);
+        snprintf(buf, sizeof(buf), "S3 r%d", ci.revision);
         add("SoC", buf, POKO_CLR_DIM);
 
-        snprintf(buf, sizeof(buf), "%u MB (QIO)", (unsigned)(ESP.getFlashChipSize() / (1024 * 1024)));
+        snprintf(buf, sizeof(buf), "%u MB QIO", (unsigned)(ESP.getFlashChipSize() / (1024 * 1024)));
         add("Flash", buf, POKO_CLR_TEXT);
 
         snprintf(buf, sizeof(buf), "%u KB", (unsigned)(ESP.getSketchSize() / 1024));
-        add("App Size", buf, POKO_CLR_DIM);
+        add("AppSz", buf, POKO_CLR_DIM);
 
         // 6. Display & Power Subsystem
-        add("Display", "128x128 GC9107", POKO_CLR_DIM);
+        add("Disp", "GC9107", POKO_CLR_DIM);
 
         int curBr = powerManager ? powerManager->getUserBrightnessPercent() : 80;
-        snprintf(buf, sizeof(buf), "%d%% (PWM)", curBr);
-        add("Backlight", buf, POKO_CLR_TEXT);
+        snprintf(buf, sizeof(buf), "%d%%", curBr);
+        add("BLite", buf, POKO_CLR_TEXT);
 
         const char* dispPwr = "Active";
         if (powerManager) {
@@ -147,42 +147,44 @@ private:
             else if (dps == DISPLAY_POWER_SLEEP) dispPwr = "Sleep";
             else if (dps == DISPLAY_POWER_OFF) dispPwr = "Off";
         }
-        add("Pwr State", dispPwr, POKO_CLR_ACCENT);
+        add("P-St", dispPwr, POKO_CLR_ACCENT);
 
         uint32_t locks = powerManager ? powerManager->getLocks() : 0;
         if (locks == 0) {
             snprintf(buf, sizeof(buf), "None");
         } else {
             String lStr = "";
-            if (locks & POWER_LOCK_AUDIO) lStr += "Audio ";
+            if (locks & POWER_LOCK_AUDIO) lStr += "Aud ";
             if (locks & POWER_LOCK_REALTIME_NET) lStr += "Net ";
             if (locks & POWER_LOCK_DISPLAY) lStr += "Disp ";
             if (locks & POWER_LOCK_OTA) lStr += "OTA ";
             snprintf(buf, sizeof(buf), "%s", lStr.c_str());
         }
-        add("Pwr Locks", buf, locks ? POKO_CLR_WARN : POKO_CLR_DIM);
+        add("Locks", buf, locks ? POKO_CLR_WARN : POKO_CLR_DIM);
 
         // 7. Audio Subsystem
-        add("Codec", "ES8311 (I2S)", POKO_CLR_DIM);
-        const char* aSrc = "Idle / None";
+        add("Codec", "ES8311", POKO_CLR_DIM);
+        const char* aSrc = "Idle";
         if (audioManager) {
             AudioSource as = audioManager->activeSource();
-            if (as == AUDIO_SSYNC) aSrc = "SSync (Snap)";
-            else if (as == AUDIO_MUSIC) aSrc = "Music Player";
-            else if (as == AUDIO_VIDEO) aSrc = "Video AV";
+            if (as == AUDIO_SSYNC) aSrc = "SSync";
+            else if (as == AUDIO_MUSIC) aSrc = "Music";
+            else if (as == AUDIO_VIDEO) aSrc = "Video";
         }
-        add("Audio Src", aSrc, (audioManager && audioManager->activeSource() != AUDIO_NONE) ? POKO_CLR_GREEN : POKO_CLR_DIM);
+        add("Audio", aSrc, (audioManager && audioManager->activeSource() != AUDIO_NONE) ? POKO_CLR_GREEN : POKO_CLR_DIM);
 
-        add("Amp PA", isSpeakerAmpEnabled() ? "Active (On)" : "Standby (Off)", isSpeakerAmpEnabled() ? POKO_CLR_GREEN : POKO_CLR_DIM);
+        add("Amp", isSpeakerAmpEnabled() ? "Active" : "Standby", isSpeakerAmpEnabled() ? POKO_CLR_GREEN : POKO_CLR_DIM);
 
-        snprintf(buf, sizeof(buf), "%d%% (+%ddB)", getCurrentAppVolume(), getAmpBoostDb());
-        add("Volume", buf, POKO_CLR_TEXT);
+        snprintf(buf, sizeof(buf), "%d%% +%ddB", getCurrentAppVolume(), getAmpBoostDb());
+        add("Vol", buf, POKO_CLR_TEXT);
 
         // 8. Network (Wi-Fi & Storage)
-        String ip = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "No STA (AP)";
+        String ip = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "No STA";
         add("IP", ip, POKO_CLR_ACCENT);
 
-        add("SSID", WiFi.SSID().length() ? WiFi.SSID() : (WiFi.getMode() & WIFI_AP ? "POKO_SETUP" : "Disconnected"), POKO_CLR_TEXT);
+        String ssid = WiFi.SSID();
+        if (ssid.length() > 12) ssid = ssid.substring(0, 11) + "..";
+        add("SSID", ssid.length() ? ssid : (WiFi.getMode() & WIFI_AP ? "AP_SETUP" : "None"), POKO_CLR_TEXT);
 
         if (WiFi.status() == WL_CONNECTED) {
             snprintf(buf, sizeof(buf), "%d dBm", WiFi.RSSI());
@@ -190,11 +192,11 @@ private:
         }
 
         uint8_t mac[6]; WiFi.macAddress(mac);
-        snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        snprintf(buf, sizeof(buf), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         add("MAC", buf, POKO_CLR_DIM);
 
-        snprintf(buf, sizeof(buf), "%u / %u KB", (unsigned)(LittleFS.usedBytes() / 1024), (unsigned)(LittleFS.totalBytes() / 1024));
-        add("LittleFS", buf, POKO_CLR_DIM);
+        snprintf(buf, sizeof(buf), "%u/%uKB", (unsigned)(LittleFS.usedBytes() / 1024), (unsigned)(LittleFS.totalBytes() / 1024));
+        add("FS", buf, POKO_CLR_DIM);
 
         // 9. Time & Uptime
         uint32_t sec = millis() / 1000;
@@ -209,12 +211,13 @@ private:
         struct tm timeinfo;
         localtime_r(&now, &timeinfo);
         if (timeinfo.tm_year > (2020 - 1900)) {
-            char timeBuf[20];
+            char timeBuf[12];
             strftime(timeBuf, sizeof(timeBuf), "%H:%M:%S", &timeinfo);
             add("Time", timeBuf, POKO_CLR_ACCENT);
         }
     }
 
+public:
     void renderToCanvas() {
         if (!_canvas) return;
         const auto& theme = currentTheme();
@@ -256,9 +259,18 @@ private:
             _canvas->setCursor(3, textY);
             _canvas->print(_rows[ri].label);
 
+            uint16_t wLbl = 0, wVal = 0;
+            _canvas->getTextBounds(_rows[ri].label, 0, 0, &x1, &y1, &wLbl, &h);
+            _canvas->getTextBounds(_rows[ri].value, 0, 0, &x1, &y1, &wVal, &h);
+
+            // Right-aligned value with guaranteed minimum spacing after label
+            int16_t valX = 123 - wVal;
+            if (valX < 3 + wLbl + 4) {
+                valX = 3 + wLbl + 4;
+            }
+
             _canvas->setTextColor(_rows[ri].valColor, i % 2 == 0 ? theme.surface : theme.bg);
-            _canvas->getTextBounds(_rows[ri].value, 0, 0, &x1, &y1, &w, &h);
-            _canvas->setCursor(123 - w, textY);
+            _canvas->setCursor(valX, textY);
             _canvas->print(_rows[ri].value);
         }
 
@@ -270,12 +282,12 @@ private:
             _canvas->drawFastVLine(126, barY, barH, theme.accent);
         }
 
-        // Footer (y=114..127) - Filled with navigation guide
+        // Footer (y=114..127) - Navigation guide
         _canvas->fillRect(0, FOOTER_Y, 128, 14, theme.headerBg);
         _canvas->drawFastHLine(0, FOOTER_Y, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(theme.footerText, theme.headerBg);
-        const char* footerHint = "L:Prev  R:Next  2R:Exit";
+        const char* footerHint = "L:Prv  R:Nxt  2R:Exit";
         _canvas->getTextBounds(footerHint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
         _canvas->print(footerHint);
@@ -315,17 +327,25 @@ public:
     bool isLoaded() const { return _active; }
 
     void onLeft() {
+        if (_rowCount <= ROWS_VISIBLE) return;
         if (_scroll > 0) {
             _scroll--;
-            _dirty = true;
+        } else {
+            // Loop wrap-around to bottom
+            _scroll = _rowCount - ROWS_VISIBLE;
         }
+        _dirty = true;
     }
 
     void onRight() {
+        if (_rowCount <= ROWS_VISIBLE) return;
         if (_scroll + ROWS_VISIBLE < _rowCount) {
             _scroll++;
-            _dirty = true;
+        } else {
+            // Loop wrap-around to top
+            _scroll = 0;
         }
+        _dirty = true;
     }
 
     void onBack() {

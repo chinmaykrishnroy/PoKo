@@ -31,7 +31,7 @@
 //  Board: Waveshare ESP32-S3-LCD-0.85
 //  Display: 128×128 GC9107 IPS
 //  Codec: ES8311 + PA Amp
-//  Controls: BOOT (GPIO 0) = Left, KEY (GPIO 5 & 4) = Right
+//  Controls: L = BOOT (GPIO 0), R = PLUS (GPIO 4), PWR = Dedicated Power (GPIO 5)
 // ─────────────────────────────────────────────────────────────
 
 WebServer   server(80);
@@ -360,29 +360,57 @@ void setup() {
     // Preferences & Settings
     prefs.begin("poko", false);
     batteryManager.begin();
+    Wire.setTimeOut(50); // 50ms bus timeout prevents hardware lockups
 
-    // Hardware reset reason & clean shutdown check
+    // Hardware reset reason & crash recovery check
     esp_reset_reason_t rstReason = esp_reset_reason();
     bool isCrashRecovery = (rstReason == ESP_RST_PANIC || 
                             rstReason == ESP_RST_INT_WDT || 
                             rstReason == ESP_RST_TASK_WDT || 
-                            rstReason == ESP_RST_WDT);
+                            rstReason == ESP_RST_WDT ||
+                            rstReason == ESP_RST_BROWNOUT);
     bool cleanShutdown = prefs.getBool("clean_shutdown", false);
     prefs.putBool("clean_shutdown", false);
-    Serial.printf("[poko] boot: reset_reason=%d, clean_shutdown=%s\n", (int)rstReason, cleanShutdown ? "true" : "false");
+
+    // Track consecutive crashes to prevent endless reboot loops
+    uint32_t crashCount = prefs.getUInt("crash_count", 0);
+    if (isCrashRecovery) {
+        crashCount++;
+        prefs.putUInt("crash_count", crashCount);
+        Serial.printf("[poko] crash detected (consecutive=%u, reason=%d)\n", crashCount, (int)rstReason);
+    }
+
+    bool safeMode = (crashCount >= 3);
+    if (safeMode) {
+        Serial.println("[poko] *** SAFE MODE ACTIVATED: 3+ consecutive crashes ***");
+        prefs.putBool("snap_auto", false);
+        prefs.putInt("brightness", 40);
+        prefs.putUInt("crash_count", 0);
+    }
+    Serial.printf("[poko] boot: reset_reason=%d, clean_shutdown=%s, safe_mode=%s\n",
+                  (int)rstReason, cleanShutdown ? "true" : "false", safeMode ? "YES" : "no");
+
+    // Task Watchdog Timer (TWDT) with 15s timeout to catch infinite loops or driver deadlocks
+    esp_task_wdt_config_t twdt_config = {
+        .timeout_ms = 15000,
+        .idle_core_mask = 0,
+        .trigger_panic = true,
+    };
+    esp_task_wdt_reconfigure(&twdt_config);
+    esp_task_wdt_add(NULL);
 
     AppState initialApp = STATE_LAUNCHER;
     int savedApp = prefs.getInt("last_app", (int)STATE_LAUNCHER);
 
-    // Independent foreground app restoration: Restore previous safe foreground app unless recovering from crash
-    if (!isCrashRecovery) {
+    // Restore previous safe foreground app unless recovering from crash or in safe mode
+    if (!isCrashRecovery && !safeMode) {
         if (savedApp >= 0 && savedApp < STATE_COUNT && 
             savedApp != STATE_VIDEO_UI && savedApp != STATE_MUSIC_UI) {
             initialApp = (AppState)savedApp;
             Serial.printf("[poko] restoring previous safe foreground app: %d\n", (int)initialApp);
         }
     } else {
-        Serial.println("[poko] crash recovery: booting safely to Launcher");
+        Serial.println("[poko] crash recovery / safe mode: booting safely to Launcher");
     }
 
     // LittleFS Storage for offline photos & assets
@@ -498,6 +526,25 @@ void setup() {
     syncPlugin = new SyncedAVPlayer(pokoGfx, 1236);
     audioPlugin = new TCPAudio(1235);
 
+    // Register display wake callback to immediately repaint the active app
+    if (powerManager) {
+        powerManager->setWakeCallback([]() {
+            if (activeApp == STATE_LAUNCHER && pokoUI) {
+                pokoUI->renderDirect();
+            } else if (activeApp == STATE_INFO && infoAppInstance) {
+                infoAppInstance->renderToCanvas();
+            } else if (activeApp == STATE_CLOCK && clockAppInstance) {
+                clockAppInstance->load();
+            } else if (activeApp == STATE_SSYNC && ssyncAppInstance) {
+                ssyncAppInstance->renderToCanvas();
+            } else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance) {
+                settingsAppInstance->renderToCanvas();
+            } else if (activeApp == STATE_PIXELS_UI && pixelAppInstance) {
+                pixelAppInstance->renderToCanvas();
+            }
+        });
+    }
+
     // 7. WiFi & Network Services
     savedSSID = prefs.getString("wifi_ssid", "");
     savedPass = prefs.getString("wifi_pass", "");
@@ -554,11 +601,20 @@ void setup() {
     int savedBr = prefs.getInt("brightness", 80);
     setBacklightPercent(savedBr);
 
-    Serial.println(">>> POKO 7-APP SUITE READY <<<");
+    Serial.println(">>> POKO 8-APP SUITE READY <<<");
 }
 
 // ── Arduino Main Loop ─────────────────────────────────────────
 void loop() {
+    esp_task_wdt_reset(); // Keep Task Watchdog alive
+
+    // Clear consecutive crash counter after 30 seconds of stable runtime
+    static bool crashCountCleared = false;
+    if (!crashCountCleared && millis() > 30000) {
+        crashCountCleared = true;
+        prefs.putUInt("crash_count", 0);
+    }
+
     // Process button input and combos
     btnInput.update();
     if (audioManager) audioManager->update();
@@ -576,7 +632,10 @@ void loop() {
             if (!otaInit) {
                 ArduinoOTA.setHostname("Poko");
                 ArduinoOTA.onStart([]() {
-                    if (powerManager) powerManager->acquireLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
+                    if (powerManager) {
+                        powerManager->wakeDisplay();
+                        powerManager->acquireLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
+                    }
                     if (audioManager) audioManager->stopAll();
                     if (snapService && snapService->isLoaded()) {
                         snapService->unload();

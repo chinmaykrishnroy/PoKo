@@ -242,30 +242,237 @@ async function getHealth(force=false){
 }
 
 async function launchApp(state){
-  try{await api('/api/app?state='+state);toast('App launched');healthCache=null;setTimeout(()=>{getHealth(true).then(syncDashboard).catch(()=>{})},600);}
+  try{
+    await api('/api/app?state='+state);
+    toast('App launched: '+(APP_NAMES[state]||state));
+    healthCache=null;
+    setTimeout(()=>{
+      getHealth(true).then(d=>{
+        syncDashboard(d);
+        if(activeView==='apps')syncAppsView(d);
+      }).catch(()=>{});
+    },400);
+  }catch(e){toast(e.message,true);}
+}
+
+async function sendKey(k){
+  try{
+    await api('/api/input?action='+k);
+    toast('Button: '+k);
+    setTimeout(()=>{getHealth(true).then(d=>{syncDashboard(d);syncAppsView(d);}).catch(()=>{})},300);
+  }catch(e){toast(e.message,true);}
+}
+async function toggleScreen(){
+  try{await api('/api/power?screen=toggle');toast('Screen toggled');}
   catch(e){toast(e.message,true);}
 }
+async function snapAction(act){
+  try{
+    await api('/api/snap?action='+act);
+    toast('SSync: '+act);
+    refreshSnapStatus();
+  }catch(e){toast(e.message,true);}
+}
+async function refreshSnapStatus(){
+  try{
+    const s=await api('/api/snap');
+    if(!s)return;
+    const txt=s.connected?(s.playing?'PLAYING':(s.suspended?'SUSPENDED':'CONNECTED')):'OFFLINE';
+    liveText('appsSnapStatus',txt);
+    liveText('appsSnapCodec',s.codec||'opus');
+    liveText('appsSnapLatency',(s.latency_ms!=null?s.latency_ms:'--')+' ms');
+    liveText('appsSnapBuf',(s.buffer_ms!=null?s.buffer_ms:'--')+' ms');
+    const elVol=$('appsSnapVol');if(elVol&&!elVol.matches(':active')&&s.volume!=null)elVol.value=s.volume;
+    const mb=$('appsSnapMuteBtn');if(mb)mb.textContent=s.muted?'Unmute':'Mute';
+  }catch(e){}
+}
+
+const APP_DESC={
+  0:'Launcher carousel & app chooser',
+  1:'System hardware, battery & metrics',
+  2:'IST clock & style switcher',
+  3:'MPEG1 video playback stream',
+  4:'TCP audio streaming player',
+  5:'Snapcast multi-room audio sync',
+  6:'Photo frame & slideshow',
+  7:'WS2812 8-LED light studio',
+  8:'Device settings & power profiles'
+};
 
 // ── Applications ──────────────────────────────────────────────────────────────
 function renderApps(){
   const root=$('view-apps');
+  const d=healthCache||{};
+  const curState=d.app_state!=null?d.app_state:0;
+  const curName=APP_NAMES[curState]||'Launcher';
+  const curDesc=APP_DESC[curState]||'';
+  const curColor=APP_COLORS[curState]||'#3aba7d';
+  const curIcon=APP_ICONS[curState]||'home';
+
   root.innerHTML=`
-    <div class="section-head"><div><h2>Applications</h2><p>Launch any app on the device screen.</p></div><button class="btn primary" onclick="launchApp(0)">${icon('home')} Home</button></div>
-    <div class="app-grid">
+    <div class="section-head">
+      <div><h2>Applications</h2><p>Device application state, remote navigation and dedicated app controls.</p></div>
+      <button class="btn primary" onclick="launchApp(0)">${icon('home')} Home</button>
+    </div>
+
+    <!-- Active App Banner & Remote Keypad -->
+    <div class="form-section" style="margin-bottom:16px;border-color:var(--focus);box-shadow:0 2px 8px rgba(0,0,0,0.12)">
+      <div class="form-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="app-icon" id="heroAppIcon" style="width:36px;height:36px;border-radius:8px;background:${curColor};display:grid;place-items:center">${icon(curIcon)}</span>
+          <div>
+            <h3 style="margin:0;font-size:14px">Active App: <strong id="heroAppName">${esc(curName)}</strong></h3>
+            <p style="margin:2px 0 0;font-size:11px;color:var(--muted)" id="heroAppDesc">${esc(curDesc)}</p>
+          </div>
+        </div>
+        <span class="badge good" id="heroAppBadge">LIVE ON DEVICE</span>
+      </div>
+      <div style="padding:10px 15px;background:var(--surface2);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <span style="font-size:12px;font-weight:600;color:var(--muted)">Hardware Remote:</span>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn" onclick="sendKey('prev')">${icon('arrow')} L (Prv)</button>
+          <button class="btn" onclick="sendKey('next')">R (Nxt) ${icon('arrow')}</button>
+          <button class="btn primary" onclick="sendKey('enter')">2R (Set)</button>
+          <button class="btn" onclick="sendKey('back')">2L (Back)</button>
+          <button class="btn" onclick="toggleScreen()">Screen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- App Switcher Grid -->
+    <div class="app-grid" style="margin-bottom:20px">
       ${Object.entries(APP_NAMES).map(([state,name])=>`
-        <button class="app-tile" data-state="${state}" onclick="launchApp(${state})">
+        <button class="app-tile ${String(state)===String(curState)?'active':''}" data-state="${state}" onclick="launchApp(${state})">
           <span class="arr">${icon('arrow')}</span>
           <span class="app-icon" style="background:${APP_COLORS[state]||'#666'}">${icon(APP_ICONS[state]||'info')}</span>
           <strong>${esc(name)}</strong>
           <small>${APP_DESC[state]||''}</small>
         </button>`).join('')}
+    </div>
+
+    <!-- App Specific Controllers -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
+
+      <!-- SSync (Snapcast) Controller -->
+      <div class="form-section">
+        <div class="form-title" style="display:flex;align-items:center;justify-content:space-between">
+          <h3>${icon('snapcast')} SSync (Snapclient)</h3>
+          <span class="badge" id="appsSnapStatus">Checking...</span>
+        </div>
+        <div style="padding:14px 15px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;font-size:12px">
+            <div style="padding:8px 10px;background:var(--surface2);border-radius:6px;border:1px solid var(--line)">
+              <div style="color:var(--muted);font-size:11px">Codec</div>
+              <strong id="appsSnapCodec">opus</strong>
+            </div>
+            <div style="padding:8px 10px;background:var(--surface2);border-radius:6px;border:1px solid var(--line)">
+              <div style="color:var(--muted);font-size:11px">Latency / Buf</div>
+              <strong id="appsSnapLatency">-- ms</strong>
+            </div>
+          </div>
+          <label style="font-size:12px;color:var(--muted)">SSync Volume</label>
+          <div class="range-wrap" style="margin-top:6px">
+            <input type="range" id="appsSnapVol" min="0" max="100" value="100" oninput="setSnapVolume(this.value)">
+            <button class="btn" id="appsSnapMuteBtn" onclick="toggleSnapMute()" style="height:28px;padding:0 8px;font-size:11px">Mute</button>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:12px">
+            <button class="btn primary" style="flex:1" onclick="snapAction('play')">Play / Resume</button>
+            <button class="btn" style="flex:1" onclick="snapAction('pause')">Suspend</button>
+            <button class="btn" onclick="snapAction('reload')">Reload</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Media Player Controller -->
+      <div class="form-section">
+        <div class="form-title"><h3>${icon('music')} Media Playback (Music &amp; Video)</h3></div>
+        <div style="padding:14px 15px">
+          <div style="display:flex;gap:6px;margin-bottom:12px">
+            <button class="btn" style="flex:1" onclick="sendKey('prev')">${icon('arrow')} Prv</button>
+            <button class="btn primary" style="flex:1" onclick="sendKey('enter')">Play / Pause</button>
+            <button class="btn" style="flex:1" onclick="sendKey('next')">Nxt ${icon('arrow')}</button>
+            <button class="btn danger" onclick="api('/api/audio/stop').then(()=>toast('Audio stopped'))">Stop</button>
+          </div>
+          <label style="font-size:12px;color:var(--muted)">App Volume</label>
+          <div class="range-wrap" style="margin-top:6px">
+            <input type="range" id="appsVolSlider" min="0" max="100" value="${d.app_vol||100}" oninput="setAppVolume(this.value)">
+            <span class="range-value" id="appsVolVal">${d.app_vol||100}%</span>
+          </div>
+          <label style="font-size:12px;color:var(--muted);margin-top:10px;display:block">Master Volume Limit</label>
+          <div class="range-wrap" style="margin-top:6px">
+            <input type="range" id="appsMasterVolSlider" min="10" max="100" value="${d.master_vol||75}" oninput="setMasterVolume(this.value)">
+            <span class="range-value" id="appsMasterVolVal">${d.master_vol||75}%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick LED Studio -->
+      <div class="form-section">
+        <div class="form-title"><h3>${icon('sparkle')} NeoPixel 8-LED Ring</h3></div>
+        <div style="padding:14px 15px">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+            <button class="btn" onclick="setPixelMode('spinner')">Chase</button>
+            <button class="btn" onclick="setPixelMode('rainbow')">Rainbow</button>
+            <button class="btn" onclick="setPixelMode('breathe')">Breathe</button>
+            <button class="btn" onclick="setPixelMode('fire')">Fire</button>
+            <button class="btn" onclick="setPixelMode('solid')">Solid</button>
+            <button class="btn" onclick="setPixelMode('off')">Off</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <input type="color" id="appsLedColor" value="#${((d.pixel_r||0).toString(16).padStart(2,'0'))+((d.pixel_g||200).toString(16).padStart(2,'0'))+((d.pixel_b||255).toString(16).padStart(2,'0'))}" oninput="pickLEDColor(this.value)" style="width:40px;height:32px;padding:2px;border:1px solid var(--line);border-radius:6px;cursor:pointer;background:var(--bg)">
+            <span style="font-size:12px;color:var(--muted)">Click swatch to set ring color</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Clock App Quick Modes -->
+      <div class="form-section">
+        <div class="form-title"><h3>${icon('clock')} Clock Styles</h3></div>
+        <div style="padding:14px 15px">
+          <p style="font-size:12px;color:var(--muted);margin:0 0 10px">Switch mode or style on the clock display:</p>
+          <div style="display:flex;gap:6px">
+            <button class="btn primary" style="flex:1" onclick="sendKey('prev')">Cycle Mode (L)</button>
+            <button class="btn" style="flex:1" onclick="sendKey('next')">Cycle Color (R)</button>
+          </div>
+        </div>
+      </div>
+
     </div>`;
-  if(healthCache)document.querySelectorAll('[data-state]').forEach(el=>{
-    el.classList.toggle('active',String(el.dataset.state)===String(healthCache.app_state));
-  });
+
+  refreshSnapStatus();
 }
 
-const APP_DESC={0:'Launcher carousel',1:'System information',2:'IST clock display',3:'Video player',4:'Audio player',5:'Snapclient audio',6:'Photo viewer',7:'NeoPixel light ring',8:'Device preferences'};
+function syncAppsView(d){
+  if(!d)return;
+  const curState=d.app_state!=null?d.app_state:0;
+  const curName=APP_NAMES[curState]||('App '+curState);
+  const curDesc=APP_DESC[curState]||'';
+  const curColor=APP_COLORS[curState]||'#3aba7d';
+  const curIcon=APP_ICONS[curState]||'home';
+
+  liveText('heroAppName',curName);
+  liveText('heroAppDesc',curDesc);
+  const iconEl=$('heroAppIcon');
+  if(iconEl){
+    iconEl.style.background=curColor;
+    iconEl.innerHTML=icon(curIcon);
+  }
+  document.querySelectorAll('[data-state]').forEach(el=>{
+    el.classList.toggle('active',String(el.dataset.state)===String(curState));
+  });
+
+  const volEl=$('appsVolSlider');
+  if(volEl&&!volEl.matches(':active')&&d.app_vol!=null){
+    volEl.value=d.app_vol;
+    liveText('appsVolVal',d.app_vol+'%');
+  }
+  const mvEl=$('appsMasterVolSlider');
+  if(mvEl&&!mvEl.matches(':active')&&d.master_vol!=null){
+    mvEl.value=d.master_vol;
+    liveText('appsMasterVolVal',d.master_vol+'%');
+  }
+  refreshSnapStatus();
+}
 
 // ── Controls ──────────────────────────────────────────────────────────────────
 async function renderControls(){
@@ -805,6 +1012,8 @@ async function pollHealth(){
     setOnline(true);
     // Update dashboard live if visible
     if(activeView==='dashboard')syncDashboard(d);
+    // Update apps view live if visible
+    if(activeView==='apps')syncAppsView(d);
     // Update controls sliders and live snap player status
     if(activeView==='controls'){
       const brEl=$('brSlider');if(brEl&&!brEl.matches(':active')&&d.brightness!=null){brEl.value=d.brightness;$('brVal').textContent=d.brightness+'%';}

@@ -67,6 +67,7 @@ private:
         }
     }
 
+public:
     void renderToCanvas() {
         if (!_canvas) return;
         const auto& theme = currentTheme();
@@ -199,7 +200,7 @@ private:
         _canvas->drawFastHLine(0, FOOTER_Y, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(theme.footerText, theme.headerBg);
-        const char* hint = "L:Prev  R:Next  2R:Set";
+        const char* hint = "L:Prv  R:Nxt  2R:Set";
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
         _canvas->print(hint);

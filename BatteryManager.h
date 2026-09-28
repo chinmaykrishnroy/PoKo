@@ -81,6 +81,10 @@ private:
         return (float)avgMv * 3.0f / 1000.0f;
     }
 
+    uint32_t _lastChgCheckMs    = 0;
+    uint8_t  _chgFilterCount    = 0;
+    bool     _justPluggedIn     = false;
+
 public:
     BatteryManager() {}
 
@@ -134,10 +138,43 @@ public:
         _lastReadMs = millis();
     }
 
-    void update(uint32_t intervalMs = 15000) {
-        if (millis() - _lastReadMs >= intervalMs) {
+    void update(uint32_t intervalMs = 10000) {
+        uint32_t now = millis();
+
+        // 1. Fast charging pin poll (every 50ms) -> Instant plug/unplug detection!
+        if (now - _lastChgCheckMs >= 50) {
+            _lastChgCheckMs = now;
+            bool rawChg = (digitalRead(POKO_PIN_CHARGING) == LOW);
+            if (rawChg != _isCharging) {
+                _chgFilterCount++;
+                if (_chgFilterCount >= 2) { // 2 consecutive samples (100ms debounce)
+                    bool wasCharging = _isCharging;
+                    _isCharging = rawChg;
+                    _chgFilterCount = 0;
+                    if (_isCharging && !wasCharging) {
+                        _justPluggedIn = true;
+                    }
+                    Serial.printf("[bat] Instant charging state change: %s\n", _isCharging ? "CHARGING" : "DISCHARGING");
+                    readNow();
+                    return;
+                }
+            } else {
+                _chgFilterCount = 0;
+            }
+        }
+
+        // 2. Periodic ADC voltage read
+        if (now - _lastReadMs >= intervalMs) {
             readNow();
         }
+    }
+
+    bool  consumePluggedInEvent() {
+        if (_justPluggedIn) {
+            _justPluggedIn = false;
+            return true;
+        }
+        return false;
     }
 
     bool  isPresent() const         { return _voltage >= 2.50f; }

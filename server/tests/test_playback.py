@@ -14,6 +14,11 @@ from server.poko_server.playback import PlaybackManager, SyncedAVStreamer, resol
 from helpers import workspace_tempdir
 
 
+_config_path = Path(__file__).resolve().parents[1] / "config.yml"
+if not _config_path.exists():
+    _config_path = Path(__file__).resolve().parents[1] / "config.example.yml"
+
+
 class FakeDevice(DeviceClient):
     def __init__(self, config):
         super().__init__(config, enabled=False)
@@ -36,7 +41,7 @@ class PlaybackTests(unittest.TestCase):
             def setsockopt(self, *args) -> None:
                 pass
 
-        config = load_config(Path(__file__).resolve().parents[1] / "config.yml")
+        config = load_config(_config_path)
         item = MediaItem(id="v1", kind="video", path=Path("movie.mkv"), title="Movie", extension=".mkv", size_bytes=1)
         streamer = SyncedAVStreamer(item, config)
         fake_socket = FakeSocket()
@@ -46,7 +51,7 @@ class PlaybackTests(unittest.TestCase):
         self.assertIsNone(fake_socket.timeout)
 
     def test_video_quality_profiles_are_bounded(self) -> None:
-        config = load_config(Path(__file__).resolve().parents[1] / "config.yml")
+        config = load_config(_config_path)
         profile, fps, quality = resolve_video_tuning(config, synced=True, profile="quality", fps=99, jpeg_quality=1)
         self.assertEqual(profile, "quality")
         self.assertEqual(fps, 20)
@@ -54,7 +59,7 @@ class PlaybackTests(unittest.TestCase):
 
     def _manager(self):
         with workspace_tempdir() as root:
-            base = load_config(Path(__file__).resolve().parents[1] / "config.yml")
+            base = load_config(_config_path)
             config = replace(base, library=LibraryConfig([root], root / "write", 5, db_path=root / "nexus.db"))
             index = MediaIndex(config, probe_fn=lambda path, ffprobe: {})
             device = FakeDevice(config)

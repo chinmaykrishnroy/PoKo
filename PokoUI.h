@@ -129,7 +129,7 @@ private:
         if (batteryManager.isPresent()) {
             int batPct = batteryManager.getPercentage();
             bool batChg = batteryManager.isCharging();
-            drawBatteryIcon(timeX - 15, 4, batPct, batChg);
+            drawBatteryIcon(timeX - 15, 3, batPct, batChg);
         }
 
         _statusCanvas->flush();
@@ -386,6 +386,14 @@ public:
 
     void update() {
         uint32_t now = millis();
+        static bool lastChg = false;
+        bool curChg = batteryManager.isCharging();
+        if (curChg != lastChg) {
+            lastChg = curChg;
+            _lastStatusMs = now;
+            drawStatusBar();
+        }
+
         bool audioBlinking = (audioManager && (audioManager->isSoundPlaying() || audioManager->hasError()));
         bool wifiBlinking = (wifiState != STATE_WIFI_CONNECTED);
         bool batteryBlinking = batteryManager.isPresent() && (batteryManager.isCharging() || (batteryManager.getPercentage() <= 15));

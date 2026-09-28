@@ -14,10 +14,15 @@ from server.poko_server.http_api import make_server
 from helpers import workspace_tempdir
 
 
+_config_path = Path(__file__).resolve().parents[1] / "config.yml"
+if not _config_path.exists():
+    _config_path = Path(__file__).resolve().parents[1] / "config.example.yml"
+
+
 class HttpApiTests(unittest.TestCase):
     def test_port_is_bound_before_backend_workers_start(self) -> None:
         with workspace_tempdir() as root:
-            base = load_config(Path(__file__).resolve().parents[1] / "config.yml")
+            base = load_config(_config_path)
             config = replace(base, host="127.0.0.1", port=0, library=LibraryConfig([root], root / "write", 5, db_path=root / "nexus.db"))
             first = make_server(config, dry_run=True)
             try:
@@ -31,7 +36,7 @@ class HttpApiTests(unittest.TestCase):
 
     def test_health_and_empty_library(self) -> None:
         with workspace_tempdir() as root:
-            base = load_config(Path(__file__).resolve().parents[1] / "config.yml")
+            base = load_config(_config_path)
             config = replace(base, host="127.0.0.1", port=0, library=LibraryConfig([root], root / "write", 5, db_path=root / "nexus.db"))
             server = make_server(config, dry_run=True)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -52,7 +57,7 @@ class HttpApiTests(unittest.TestCase):
 
     def test_admin_filters_and_dry_run_device_proxy(self) -> None:
         with workspace_tempdir() as root:
-            base = load_config(Path(__file__).resolve().parents[1] / "config.yml")
+            base = load_config(_config_path)
             config = replace(base, host="127.0.0.1", port=0, library=LibraryConfig([root], root / "write", 5, db_path=root / "nexus.db"))
             config_path = root / "config.yml"
             config_path.write_text(config_to_yaml(config), encoding="utf-8")

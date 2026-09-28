@@ -29,6 +29,7 @@ private:
     bool     _dirty      = true;
     uint32_t _lastDrawMs = 0;
 
+public:
     void renderToCanvas() {
         if (!_canvas) return;
         const auto& theme = currentTheme();
