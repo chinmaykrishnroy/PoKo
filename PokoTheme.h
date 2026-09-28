@@ -46,7 +46,7 @@ static const PokoThemePalette POKO_THEME_LIGHT = {
     .footerBg   = 0xDEFB, // Footer background
     .headerText = 0x0000, // Header text
     .footerText = 0x4208, // Footer navigation text
-    .accent     = 0x001F  // Blue
+    .accent     = 0x01F4  // Deep Royal Navy / Teal
 };
 
 inline bool pokoIsDarkTheme = true;

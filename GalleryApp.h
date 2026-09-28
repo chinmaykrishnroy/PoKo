@@ -330,7 +330,7 @@ private:
             // Source badge: [LFS] or [SRV]
             bool isLfs = (_photos[_photoIdx].source == PHOTO_LITTLEFS);
             _canvas->setFont(u8g2_font_5x7_tf);
-            _canvas->setTextColor(isLfs ? 0x07E0 : 0x07FF, theme.headerBg);
+            _canvas->setTextColor(isLfs ? pokoClrGreen() : pokoClrCyan(), theme.headerBg);
             _canvas->setCursor(52, 11);
             _canvas->print(isLfs ? "[LFS]" : "[SRV]");
 

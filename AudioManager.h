@@ -420,11 +420,21 @@ public:
     }
 
     uint16_t getSourceColor() const {
-        switch (_activeSource) {
-            case AUDIO_SSYNC: return 0x07FF; // Cyan
-            case AUDIO_MUSIC: return 0xF81F; // Pink
-            case AUDIO_VIDEO: return 0x001F; // Blue
-            default: return 0;
+        if (isDarkTheme()) {
+            switch (_activeSource) {
+                case AUDIO_SSYNC: return 0x07FF; // Cyan
+                case AUDIO_MUSIC: return 0xF81F; // Pink
+                case AUDIO_VIDEO: return 0x541F; // Blue
+                default: return 0;
+            }
+        } else {
+            // Light Theme: Deep high-contrast tones visible against light headers
+            switch (_activeSource) {
+                case AUDIO_SSYNC: return 0x0400; // Dark Forest Green / Deep Teal
+                case AUDIO_MUSIC: return 0x90B0; // Deep Plum
+                case AUDIO_VIDEO: return 0x0115; // Deep Navy
+                default: return 0;
+            }
         }
     }
 
@@ -436,7 +446,7 @@ public:
         bool show = false;
 
         if (hasError()) {
-            color = 0xF800; // Red
+            color = isDarkTheme() ? 0xF800 : 0xB000; // Red / Deep Crimson
             show = blinkPhase;
         } else if (isSoundPlaying()) {
             show = blinkPhase; // Blinking when actively playing sound

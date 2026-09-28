@@ -83,6 +83,100 @@ String getNetworkStatusMsg() {
     return "Connecting...";
 }
 
+const char* getAppName(AppState state) {
+    switch (state) {
+        case STATE_INFO:        return "Info";
+        case STATE_CLOCK:       return "Clock";
+        case STATE_SSYNC:       return "SSync";
+        case STATE_MUSIC_UI:    return "Music";
+        case STATE_VIDEO_UI:    return "Video";
+        case STATE_GALLERY_UI:  return "Gallery";
+        case STATE_PIXELS_UI:   return "Pixels";
+        case STATE_SETTINGS_UI: return "Settings";
+        case STATE_LAUNCHER:    return "Launcher";
+        default:                return "App";
+    }
+}
+
+// ── Themed App Loading Screen (Separate distinct designs for Dark & Light modes) ────
+void showThemedLoadingScreen(AppState state) {
+    if (!pokoGfx) return;
+    const auto& theme = currentTheme();
+    bool dark = isDarkTheme();
+
+    int16_t x1, y1; uint16_t w, h;
+    const char* appName = getAppName(state);
+
+    if (dark) {
+        // ── DARK THEME LOADING SCREEN ─────────────────────────────
+        // Pure deep black background, elevated dark card, cyan accent pill,
+        // crisp white text, medium grey subtitle.
+        pokoGfx->fillScreen(0x0000);
+
+        pokoGfx->fillRoundRect(12, 32, 104, 64, 6, 0x1082); // theme.surface
+        pokoGfx->drawRoundRect(12, 32, 104, 64, 6, 0x18C3); // theme.surface2 border
+
+        // Glowing cyan accent bar
+        pokoGfx->fillRoundRect(48, 40, 32, 3, 1, 0x07FF);
+
+        char titleBuf[24];
+        snprintf(titleBuf, sizeof(titleBuf), "Loading %s...", appName);
+        pokoGfx->setFont(u8g2_font_helvB08_tf);
+        pokoGfx->setTextColor(0xFFFF, 0x1082);
+        pokoGfx->getTextBounds(titleBuf, 0, 0, &x1, &y1, &w, &h);
+        if (w > 92) {
+            const char* fallback = "Loading App...";
+            pokoGfx->getTextBounds(fallback, 0, 0, &x1, &y1, &w, &h);
+            pokoGfx->setCursor(64 - w / 2, 62);
+            pokoGfx->print(fallback);
+        } else {
+            pokoGfx->setCursor(64 - w / 2, 62);
+            pokoGfx->print(titleBuf);
+        }
+
+        pokoGfx->setFont(u8g2_font_5x7_tf);
+        pokoGfx->setTextColor(0x8410, 0x1082);
+        const char* sub = "PLEASE WAIT";
+        pokoGfx->getTextBounds(sub, 0, 0, &x1, &y1, &w, &h);
+        pokoGfx->setCursor(64 - w / 2, 79);
+        pokoGfx->print(sub);
+
+    } else {
+        // ── LIGHT THEME LOADING SCREEN ────────────────────────────
+        // Pure crisp white background, soft modern off-white card,
+        // deep royal navy accent pill, jet black text, slate subtitle.
+        pokoGfx->fillScreen(0xFFFF);
+
+        pokoGfx->fillRoundRect(12, 32, 104, 64, 6, 0xF7BE); // theme.surface
+        pokoGfx->drawRoundRect(12, 32, 104, 64, 6, 0xCE79); // theme.line border
+
+        // Deep Royal Navy accent bar
+        pokoGfx->fillRoundRect(48, 40, 32, 3, 1, 0x01F4);
+
+        char titleBuf[24];
+        snprintf(titleBuf, sizeof(titleBuf), "Loading %s...", appName);
+        pokoGfx->setFont(u8g2_font_helvB08_tf);
+        pokoGfx->setTextColor(0x0000, 0xF7BE);
+        pokoGfx->getTextBounds(titleBuf, 0, 0, &x1, &y1, &w, &h);
+        if (w > 92) {
+            const char* fallback = "Loading App...";
+            pokoGfx->getTextBounds(fallback, 0, 0, &x1, &y1, &w, &h);
+            pokoGfx->setCursor(64 - w / 2, 62);
+            pokoGfx->print(fallback);
+        } else {
+            pokoGfx->setCursor(64 - w / 2, 62);
+            pokoGfx->print(titleBuf);
+        }
+
+        pokoGfx->setFont(u8g2_font_5x7_tf);
+        pokoGfx->setTextColor(0x632C, 0xF7BE);
+        const char* sub = "PLEASE WAIT";
+        pokoGfx->getTextBounds(sub, 0, 0, &x1, &y1, &w, &h);
+        pokoGfx->setCursor(64 - w / 2, 79);
+        pokoGfx->print(sub);
+    }
+}
+
 // ── Central App Switcher (Exclusive Resource Model) ───────────
 void onAppChange(AppState newState) {
     if (newState == activeApp) return;
@@ -112,8 +206,12 @@ void onAppChange(AppState newState) {
 
     activeApp = newState;
 
-    // Blank screen cleanly between apps
-    pokoGfx->fillScreen(RGB565_BLACK);
+    // Show themed loading screen between apps to eliminate black freeze flash
+    if (newState == STATE_LAUNCHER) {
+        pokoGfx->fillScreen(currentTheme().bg);
+    } else {
+        showThemedLoadingScreen(newState);
+    }
 
     // Load newly active app
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->redraw();

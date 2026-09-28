@@ -46,6 +46,8 @@ private:
     uint8_t       _scroll     = 0;
     uint32_t      _lastDrawMs = 0;
     uint32_t      _lastBlinkMs = 0;
+    uint32_t      _lastRowBuildMs = 0;
+    bool          _lastChargingState = false;
 
     static constexpr uint8_t ROW_H         = 14;
     static constexpr uint8_t TOP_Y         = 14;
@@ -76,14 +78,14 @@ private:
             float v = batteryManager.getVoltage();
             bool chg = batteryManager.isCharging();
             snprintf(buf, sizeof(buf), "%d%% %.2fV", pct, v);
-            uint16_t batCol = chg ? POKO_CLR_GREEN : (pct <= 15 ? POKO_CLR_ERR : (pct <= 30 ? POKO_CLR_WARN : POKO_CLR_GREEN));
+            uint16_t batCol = chg ? pokoClrGreen() : (pct <= 15 ? pokoClrErr() : (pct <= 30 ? pokoClrWarn() : pokoClrGreen()));
             add("Bat", buf, batCol);
 
             const char* stateStr = chg ? "Charging" : (batteryManager.isFull() ? "Full" : (batteryManager.isCritical() ? "Critical" : "Dischg"));
-            add("State", stateStr, chg ? POKO_CLR_GREEN : (batteryManager.isCritical() ? POKO_CLR_ERR : POKO_CLR_TEXT));
+            add("State", stateStr, chg ? pokoClrGreen() : (batteryManager.isCritical() ? pokoClrErr() : POKO_CLR_TEXT));
         } else {
-            add("Bat", "None (USB)", POKO_CLR_ACCENT);
-            add("Pwr", "5V VBUS", POKO_CLR_GREEN);
+            add("Bat", "None (USB)", pokoClrCyan());
+            add("Pwr", "5V VBUS", pokoClrGreen());
         }
 
         if (powerManager) {
@@ -91,7 +93,7 @@ private:
         }
 
         // 2. Firmware Version & Build
-        add("Ver", "v1.2.0", POKO_CLR_ACCENT);
+        add("Ver", "v1.2.0", pokoClrCyan());
         add("Build", __DATE__, POKO_CLR_DIM);
 
         // 3. Reset Reason
@@ -103,17 +105,17 @@ private:
         else if (rst == ESP_RST_PANIC) rstStr = "Crash";
         else if (rst == ESP_RST_INT_WDT || rst == ESP_RST_TASK_WDT || rst == ESP_RST_WDT) rstStr = "Watchdog";
         else if (rst == ESP_RST_BROWNOUT) rstStr = "Brownout";
-        add("Reset", rstStr, (rst == ESP_RST_PANIC || rst == ESP_RST_WDT) ? POKO_CLR_ERR : POKO_CLR_DIM);
+        add("Reset", rstStr, (rst == ESP_RST_PANIC || rst == ESP_RST_WDT) ? pokoClrErr() : POKO_CLR_DIM);
 
         // 4. Memory (Heap & PSRAM)
         uint32_t freeH   = ESP.getFreeHeap();
         uint32_t minH    = ESP.getMinFreeHeap();
         uint32_t freePSR = ESP.getFreePsram();
         snprintf(buf, sizeof(buf), "%u KB", (unsigned)(freeH / 1024));
-        add("Heap", buf, freeH < 50000 ? POKO_CLR_WARN : POKO_CLR_GREEN);
+        add("Heap", buf, freeH < 50000 ? pokoClrWarn() : pokoClrGreen());
 
         snprintf(buf, sizeof(buf), "%u KB", (unsigned)(minH / 1024));
-        add("MinHp", buf, minH < 35000 ? POKO_CLR_WARN : POKO_CLR_TEXT);
+        add("MinHp", buf, minH < 35000 ? pokoClrWarn() : POKO_CLR_TEXT);
 
         snprintf(buf, sizeof(buf), "%.2f/8MB", freePSR / (1024.0f * 1024.0f));
         add("PSRAM", buf, POKO_CLR_TEXT);
@@ -147,7 +149,7 @@ private:
             else if (dps == DISPLAY_POWER_SLEEP) dispPwr = "Sleep";
             else if (dps == DISPLAY_POWER_OFF) dispPwr = "Off";
         }
-        add("P-St", dispPwr, POKO_CLR_ACCENT);
+        add("P-St", dispPwr, pokoClrCyan());
 
         uint32_t locks = powerManager ? powerManager->getLocks() : 0;
         if (locks == 0) {
@@ -160,7 +162,7 @@ private:
             if (locks & POWER_LOCK_OTA) lStr += "OTA ";
             snprintf(buf, sizeof(buf), "%s", lStr.c_str());
         }
-        add("Locks", buf, locks ? POKO_CLR_WARN : POKO_CLR_DIM);
+        add("Locks", buf, locks ? pokoClrWarn() : POKO_CLR_DIM);
 
         // 7. Audio Subsystem
         add("Codec", "ES8311", POKO_CLR_DIM);
@@ -171,16 +173,16 @@ private:
             else if (as == AUDIO_MUSIC) aSrc = "Music";
             else if (as == AUDIO_VIDEO) aSrc = "Video";
         }
-        add("Audio", aSrc, (audioManager && audioManager->activeSource() != AUDIO_NONE) ? POKO_CLR_GREEN : POKO_CLR_DIM);
+        add("Audio", aSrc, (audioManager && audioManager->activeSource() != AUDIO_NONE) ? pokoClrGreen() : POKO_CLR_DIM);
 
-        add("Amp", isSpeakerAmpEnabled() ? "Active" : "Standby", isSpeakerAmpEnabled() ? POKO_CLR_GREEN : POKO_CLR_DIM);
+        add("Amp", isSpeakerAmpEnabled() ? "Active" : "Standby", isSpeakerAmpEnabled() ? pokoClrGreen() : POKO_CLR_DIM);
 
         snprintf(buf, sizeof(buf), "%d%% +%ddB", getCurrentAppVolume(), getAmpBoostDb());
         add("Vol", buf, POKO_CLR_TEXT);
 
         // 8. Network (Wi-Fi & Storage)
         String ip = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "No STA";
-        add("IP", ip, POKO_CLR_ACCENT);
+        add("IP", ip, pokoClrCyan());
 
         String ssid = WiFi.SSID();
         if (ssid.length() > 12) ssid = ssid.substring(0, 11) + "..";
@@ -213,7 +215,7 @@ private:
         if (timeinfo.tm_year > (2020 - 1900)) {
             char timeBuf[12];
             strftime(timeBuf, sizeof(timeBuf), "%H:%M:%S", &timeinfo);
-            add("Time", timeBuf, POKO_CLR_ACCENT);
+            add("Time", timeBuf, pokoClrCyan());
         }
     }
 
@@ -311,6 +313,8 @@ public:
         _active = true;
         _scroll = 0;
         _dirty  = true;
+        _lastRowBuildMs = millis();
+        _lastChargingState = batteryManager.isCharging();
         begin();
         buildRows();
         renderToCanvas();
@@ -367,18 +371,31 @@ public:
     void update() {
         if (!_active) return;
         uint32_t now = millis();
+
+        // 1. Instant charging state change detection (immediate refresh on plug/unplug)
+        bool curCharging = batteryManager.isCharging();
+        if (curCharging != _lastChargingState) {
+            _lastChargingState = curCharging;
+            buildRows();
+            _dirty = true;
+        }
+
+        // 2. Audio status dot blink
         bool audioBlinking = (audioManager && (audioManager->isSoundPlaying() || audioManager->hasError()));
         if (audioBlinking && (now - _lastBlinkMs >= 100)) {
             _lastBlinkMs = now;
             _dirty = true;
         }
-        if (now - _lastDrawMs >= 1000) {
+
+        // 3. Fast real-time data cadence (250ms = 4 FPS) for live uptime, time, voltage, battery %
+        if (now - _lastRowBuildMs >= 250) {
+            _lastRowBuildMs = now;
             buildRows();
             _dirty = true;
         }
+
         if (!_dirty) return;
         _dirty = false;
-        _lastDrawMs = now;
         renderToCanvas();
     }
 

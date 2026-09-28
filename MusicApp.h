@@ -338,7 +338,7 @@ private:
 
         if (_mode == MODE_PLAYING) {
             const char* statusStr = _paused ? "PAUSED" : "PLAYING";
-            uint16_t statusClr = _paused ? 0xFFE0 : POKO_CLR_GREEN;
+            uint16_t statusClr = _paused ? pokoClrWarn() : pokoClrGreen();
             _canvas->setTextColor(statusClr, theme.headerBg);
             _canvas->getTextBounds(statusStr, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(125 - w, 11);

@@ -178,9 +178,9 @@ public:
                     }
                     break;
                 }
-                case 1: snprintf(valBuf, sizeof(valBuf), "%d", curR); valCol = 0xF800; break;
-                case 2: snprintf(valBuf, sizeof(valBuf), "%d", curG); valCol = 0x07E0; break;
-                case 3: snprintf(valBuf, sizeof(valBuf), "%d", curB); valCol = 0x001F; break;
+                case 1: snprintf(valBuf, sizeof(valBuf), "%d", curR); valCol = pokoClrErr(); break;
+                case 2: snprintf(valBuf, sizeof(valBuf), "%d", curG); valCol = pokoClrGreen(); break;
+                case 3: snprintf(valBuf, sizeof(valBuf), "%d", curB); valCol = isDarkTheme() ? 0x541F : 0x0115; break;
                 case 4: { // Target
                     snprintf(valBuf, sizeof(valBuf), "%s", pixelEngine.getTargetMaskLabel());
                     break;

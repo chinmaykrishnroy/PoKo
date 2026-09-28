@@ -24,6 +24,43 @@ extern BatteryManager batteryManager;
 #define POKO_CLR_GREEN     0x07E0  // green
 #define POKO_CLR_TILE_BG   0x1082  // dark tile background
 
+// ── Theme-aware color helpers ──────────────────────────────────
+// Use these instead of POKO_CLR_* directly so colors remain
+// readable on both dark (black) and light (white) backgrounds.
+inline uint16_t pokoClrGreen() { return isDarkTheme() ? 0x07E0 : 0x0400; } // bright green / dark forest green
+inline uint16_t pokoClrWarn()  { return isDarkTheme() ? 0xFD20 : 0xB360; } // orange / dark amber goldenrod
+inline uint16_t pokoClrCyan()  { return isDarkTheme() ? 0x07FF : 0x01F4; } // cyan / deep royal navy
+inline uint16_t pokoClrErr()   { return isDarkTheme() ? 0xF800 : 0xB000; } // red / dark crimson red
+
+inline uint16_t getTileAccentColor(AppState state) {
+    if (isDarkTheme()) {
+        switch (state) {
+            case STATE_INFO:        return 0x07E0; // Bright Green
+            case STATE_CLOCK:       return 0x07FF; // Bright Cyan
+            case STATE_SSYNC:       return 0x07E0; // Bright Green
+            case STATE_MUSIC_UI:    return 0xF81F; // Bright Pink
+            case STATE_VIDEO_UI:    return 0x001F; // Blue
+            case STATE_GALLERY_UI:  return 0xFD20; // Orange
+            case STATE_PIXELS_UI:   return 0xFBE0; // Yellow
+            case STATE_SETTINGS_UI: return 0x8410; // Mid Grey
+            default:                return 0x07FF;
+        }
+    } else {
+        // Light Theme: Deep high-contrast saturated tones that pop on light surface & white bg
+        switch (state) {
+            case STATE_INFO:        return 0x0400; // Dark Forest Green
+            case STATE_CLOCK:       return 0x01F4; // Deep Royal Navy
+            case STATE_SSYNC:       return 0x0400; // Dark Forest Green
+            case STATE_MUSIC_UI:    return 0x90B0; // Deep Plum
+            case STATE_VIDEO_UI:    return 0x0115; // Deep Navy
+            case STATE_GALLERY_UI:  return 0xCA20; // Burnt Orange
+            case STATE_PIXELS_UI:   return 0xB360; // Dark Amber / Goldenrod
+            case STATE_SETTINGS_UI: return 0x4228; // Dark Charcoal
+            default:                return 0x01F4;
+        }
+    }
+}
+
 struct PokoTile {
     const char* name;
     const char* subtitle;
@@ -71,14 +108,14 @@ private:
         bool showDot = true;
 
         if (wifiState == STATE_WIFI_CONNECTED) {
-            dotColor = POKO_CLR_GREEN;
+            dotColor = pokoClrGreen();
             showDot = true;
         } else if (wifiState == STATE_WIFI_CONNECTING) {
-            dotColor = RGB565_YELLOW;
+            dotColor = pokoClrWarn();
             showDot = blinkPhase;
         } else if (wifiState == STATE_WIFI_AP) {
             int clients = WiFi.softAPgetStationNum();
-            dotColor = POKO_CLR_ERR;
+            dotColor = pokoClrErr();
             showDot = (clients > 0) ? true : blinkPhase;
         }
 
@@ -143,14 +180,14 @@ private:
         uint16_t fillColor;
 
         if (charging) {
-            // Charging: Blink entire battery icon in bright green
+            // Charging: Blink entire battery icon in green (bright in dark, dark in light)
             bool chgBlink = ((millis() / 450) % 2 == 0);
             if (chgBlink) {
-                bodyColor = POKO_CLR_GREEN;
-                fillColor = POKO_CLR_GREEN;
+                bodyColor = pokoClrGreen();
+                fillColor = pokoClrGreen();
             } else {
-                bodyColor = pokoGfx->color565(20, 80, 30);
-                fillColor = pokoGfx->color565(10, 50, 20);
+                bodyColor = isDarkTheme() ? pokoGfx->color565(20, 80, 30) : pokoGfx->color565(160, 210, 160);
+                fillColor = isDarkTheme() ? pokoGfx->color565(10, 50, 20) : pokoGfx->color565(190, 235, 190);
             }
         } else {
             // Discharging: Smooth color transition from Green -> Yellow -> Red as percentage drops
@@ -168,12 +205,18 @@ private:
                 g = (uint8_t)(210 * t + 30 * (1.0f - t));
                 b = (uint8_t)(30 * (1.0f - t));
             }
+            if (!isDarkTheme()) {
+                // In light theme, darken slightly so fill is bold and distinct on white/light-grey
+                r = (uint8_t)(r * 0.65f);
+                g = (uint8_t)(g * 0.65f);
+                b = (uint8_t)(b * 0.65f);
+            }
             fillColor = pokoGfx->color565(r, g, b);
 
             if (pct <= 15) {
                 // Low battery: critical red shell, blink if very low
                 bool lowBlink = ((millis() / 400) % 2 == 0);
-                bodyColor = lowBlink ? POKO_CLR_ERR : theme.muted;
+                bodyColor = lowBlink ? pokoClrErr() : theme.muted;
             } else {
                 bodyColor = theme.muted;
             }
@@ -192,7 +235,7 @@ private:
 
         // Extra charging bolt indicator in center when charging
         if (charging) {
-            _statusCanvas->drawPixel(x + 5, y + 2, RGB565_WHITE);
+            _statusCanvas->drawPixel(x + 5, y + 2, isDarkTheme() ? RGB565_WHITE : RGB565_BLACK);
         }
     }
 
@@ -265,6 +308,7 @@ private:
     void drawTile(uint8_t idx) {
         const PokoTile& t = _tiles[idx];
         const auto& theme = currentTheme();
+        uint16_t accentCol = getTileAccentColor(t.state);
 
         // Clear main carousel area with theme background
         _gfx->fillRect(0, 13, 128, 101, theme.bg);
@@ -278,11 +322,11 @@ private:
         _gfx->print(">");
 
         // Rounded box border + fill
-        _gfx->drawRoundRect(36, 26, 56, 42, 8, t.accentColor);
+        _gfx->drawRoundRect(36, 26, 56, 42, 8, accentCol);
         _gfx->fillRoundRect(38, 28, 52, 38, 6, theme.surface);
 
         // Draw the per-app icon centred in the box (box centre: 64, 47)
-        drawAppIcon(64, 47, t.state, t.accentColor, theme.surface);
+        drawAppIcon(64, 47, t.state, accentCol, theme.surface);
 
         int16_t x1, y1; uint16_t w, h;
 
@@ -359,10 +403,12 @@ public:
     }
 
     void flashHighlight() {
-        _gfx->drawRoundRect(34, 24, 60, 46, 10, RGB565_WHITE);
+        uint16_t flashColor = isDarkTheme() ? RGB565_WHITE : RGB565_BLACK;
+        _gfx->drawRoundRect(34, 24, 60, 46, 10, flashColor);
         delay(40);
         _gfx->drawRoundRect(34, 24, 60, 46, 10, currentTheme().bg);
-        _gfx->drawRoundRect(36, 26, 56, 42, 8, _tiles[_selected].accentColor);
+        uint16_t accentCol = getTileAccentColor(_tiles[_selected].state);
+        _gfx->drawRoundRect(36, 26, 56, 42, 8, accentCol);
     }
 
     void navigateLeft() {

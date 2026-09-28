@@ -49,12 +49,12 @@ public:
         // Header (y=0..13)
         _canvas->fillRect(0, 0, 128, 14, theme.headerBg);
         _canvas->setFont(u8g2_font_helvB08_tf);
-        _canvas->setTextColor(POKO_CLR_GREEN, theme.headerBg);
+        _canvas->setTextColor(pokoClrGreen(), theme.headerBg);
         _canvas->setCursor(3, 11);
         _canvas->print("SSync");
 
         // Status badge right side
-        uint16_t badgeCol = connected ? (suspended ? theme.accent : (playing ? POKO_CLR_GREEN : theme.accent)) : POKO_CLR_ERR;
+        uint16_t badgeCol = connected ? (suspended ? theme.accent : (playing ? pokoClrGreen() : theme.accent)) : POKO_CLR_ERR;
         const char* badgeText = connected ? (suspended ? "SUSP" : (playing ? "PLAY" : "IDLE")) : "OFFLINE";
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(badgeCol, theme.headerBg);
@@ -115,7 +115,7 @@ public:
         _canvas->drawRect(8, 90, 112, 10, theme.line);
         int filled = (108 * volume) / 100;
         if (filled > 0) {
-            _canvas->fillRect(10, 92, filled, 6, muted ? theme.muted : POKO_CLR_GREEN);
+            _canvas->fillRect(10, 92, filled, 6, muted ? theme.muted : pokoClrGreen());
         }
 
         // Footer (y=114..127)
