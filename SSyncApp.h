@@ -212,16 +212,6 @@ public:
     }
 
     void onBack() {
-        if (_player && _player->isMuted()) {
-            if (audioManager) {
-                audioManager->stopActiveSession();
-            } else if (_player) {
-                _player->stop();
-                _player->unload();
-            }
-            if (_exit) _exit(STATE_LAUNCHER);
-            return;
-        }
         if (_exit) _exit(STATE_LAUNCHER);
     }
 

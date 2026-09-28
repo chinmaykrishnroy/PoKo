@@ -299,7 +299,7 @@ private:
         HTTPClient http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false&async=true";
         http.begin(url);
-        http.setTimeout(800);
+        http.setTimeout(400);
         http.GET();
         http.end();
 
@@ -488,7 +488,7 @@ private:
             _canvas->drawFastHLine(0, 114, 128, theme.line);
             _canvas->setFont(u8g2_font_5x7_tf);
             _canvas->setTextColor(theme.footerText, theme.headerBg);
-            const char* hint = _paused ? "2R:Resume  2L:Stop" : "L:Prv  R:Nxt  2R:Pause";
+            const char* hint = _paused ? "2R:Resume  2L:Back" : "L:Prv  R:Nxt  2R:Pause";
             _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(64 - w / 2, 124);
             _canvas->print(hint);
@@ -658,14 +658,6 @@ public:
     }
 
     void onBack() {
-        if (_mode == MODE_PLAYING) {
-            if (_paused) {
-                stopPlayback();
-                return;
-            }
-            if (_exit) _exit(STATE_LAUNCHER);
-            return;
-        }
         if (_exit) _exit(STATE_LAUNCHER);
     }
 

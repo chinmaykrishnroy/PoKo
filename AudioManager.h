@@ -68,6 +68,7 @@ public:
             if (_musicStopFn) {
                 _musicStopFn();
             }
+            vTaskDelay(pdMS_TO_TICKS(50));
             _activeSource = AUDIO_SSYNC;
             _suspendedSource = AUDIO_NONE;
             if (_snapPlayer) {
@@ -85,6 +86,7 @@ public:
             if (_snapPlayer && _snapPlayer->isLoaded()) {
                 _snapPlayer->unload();
             }
+            vTaskDelay(pdMS_TO_TICKS(50));
             _suspendedSource = AUDIO_NONE;
             _activeSource = AUDIO_MUSIC;
             return true;
@@ -114,14 +116,19 @@ public:
         _suspendedSource = AUDIO_NONE;
     }
 
+    bool hasActiveSession() const {
+        return (_activeSource != AUDIO_NONE) || (_snapPlayer && _snapPlayer->isLoaded());
+    }
+
     void stopActiveSession() {
         Serial.printf("[audioMgr] stopActiveSession (active=%d)\n", (int)_activeSource);
         AudioSource cur = _activeSource;
         _activeSource = AUDIO_NONE;
         _suspendedSource = AUDIO_NONE;
-        if (cur == AUDIO_MUSIC && _musicStopFn) {
+        if ((cur == AUDIO_MUSIC || cur == AUDIO_NONE) && _musicStopFn) {
             _musicStopFn();
-        } else if (cur == AUDIO_SSYNC && _snapPlayer) {
+        }
+        if ((cur == AUDIO_SSYNC || cur == AUDIO_NONE) && _snapPlayer && _snapPlayer->isLoaded()) {
             _snapPlayer->stop();
             _snapPlayer->unload();
         }

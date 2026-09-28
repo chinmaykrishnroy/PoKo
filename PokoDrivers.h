@@ -269,9 +269,11 @@ inline esp_err_t initI2S(uint32_t sampleRate,
 
 inline void deinitI2S() {
     if (poko_tx_handle) {
-        i2s_channel_disable(poko_tx_handle);
-        i2s_del_channel(poko_tx_handle);
+        i2s_chan_handle_t temp = poko_tx_handle;
         poko_tx_handle = nullptr;
+        vTaskDelay(pdMS_TO_TICKS(25));
+        i2s_channel_disable(temp);
+        i2s_del_channel(temp);
     }
     poko_i2s_rate = 0;
     poko_i2s_channels = 0;

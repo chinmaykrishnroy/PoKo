@@ -241,7 +241,15 @@ void onBtnLeftDouble() {
         else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance) settingsAppInstance->load();
         return;
     }
-    if (activeApp == STATE_GALLERY_UI && galleryAppInstance) {
+    if (activeApp == STATE_LAUNCHER) {
+        // Double-click Left on Home screen: Stop current active audio service and remove dot
+        if (audioManager && audioManager->hasActiveSession()) {
+            Serial.println("[action] Home Double-L -> Stop Active Audio Session");
+            audioManager->stopActiveSession();
+            if (pokoUI) pokoUI->updateStatusBar();
+            return;
+        }
+    } else if (activeApp == STATE_GALLERY_UI && galleryAppInstance) {
         galleryAppInstance->onBack();
     } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {
         musicAppInstance->onBack();
@@ -249,7 +257,7 @@ void onBtnLeftDouble() {
         ssyncAppInstance->onBack();
     } else if (activeApp == STATE_VIDEO_UI && videoAppInstance) {
         videoAppInstance->onBack();
-    } else if (activeApp != STATE_LAUNCHER) {
+    } else {
         onAppChange(STATE_LAUNCHER);
     }
 }

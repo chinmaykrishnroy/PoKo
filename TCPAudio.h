@@ -21,6 +21,7 @@ private:
     bool            _isLoaded;
     volatile bool   _isRunning;
     volatile TaskHandle_t _netTaskHandle;
+    SemaphoreHandle_t     _netTaskDone = nullptr;
 
     volatile bool   _clientConnected;
     volatile bool   _abortStream;
@@ -172,9 +173,6 @@ private:
 
             if (_bufIndex >= 512) {
                 size_t written = 0;
-                if (!poko_tx_handle) {
-                    ensureAudioOutput(44100);
-                }
                 if (poko_tx_handle) {
                     i2s_channel_write(poko_tx_handle, _buffer, sizeof(_buffer), &written, pdMS_TO_TICKS(100));
                 }
@@ -256,13 +254,14 @@ private:
 
         _server.end();
         _netTaskHandle = NULL;
+        if (_netTaskDone) xSemaphoreGive(_netTaskDone);
         vTaskDelete(NULL);
     }
 
 public:
     TCPAudio(uint16_t port = 1235, float initialVolume = 1.0f)
         : _port(port), _server(port), _isLoaded(false), _isRunning(false),
-          _netTaskHandle(NULL), _clientConnected(false), _abortStream(false),
+          _netTaskHandle(NULL), _netTaskDone(nullptr), _clientConnected(false), _abortStream(false),
           _playStarted(false), _disconnectStartMs(0), _volume(initialVolume) {}
 
     void setVolume(float vol) {
@@ -307,6 +306,13 @@ public:
         if (!_isLoaded) {
             ensureAudioOutput(44100);
 
+            if (!_netTaskDone) {
+                _netTaskDone = xSemaphoreCreateBinary();
+            }
+            if (_netTaskDone) {
+                xSemaphoreTake(_netTaskDone, 0);
+            }
+
             while (_netTaskHandle != NULL) {
                 vTaskDelay(pdMS_TO_TICKS(2));
             }
@@ -331,15 +337,11 @@ public:
         if (_isLoaded) {
             _isRunning = false;
             stopStream();
-            _server.end();
             _isLoaded = false;
-            uint32_t deadline = millis() + 2000;
-            while (_netTaskHandle != NULL && millis() < deadline) {
-                vTaskDelay(pdMS_TO_TICKS(10));
+            if (_netTaskDone && _netTaskHandle != NULL) {
+                xSemaphoreTake(_netTaskDone, pdMS_TO_TICKS(1500));
             }
-            if (_netTaskHandle != NULL) {
-                Serial.println("[tcpaudio] Warning: task shutdown timeout");
-            }
+            _netTaskHandle = NULL;
             _clientConnected = false;
         }
     }
