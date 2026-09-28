@@ -46,18 +46,14 @@ private:
             _canvas->setCursor(3, 10);
             _canvas->print("Clock");
 
-            if (audioManager && audioManager->isPlaying()) {
-                _canvas->setFont(u8g2_font_5x7_tf);
-                _canvas->setTextColor(POKO_CLR_GREEN, theme.headerBg);
-                String audBadge = "> " + String(audioManager->getSourceName());
-                int16_t x1, y1; uint16_t w, h;
-                _canvas->getTextBounds(audBadge.c_str(), 0, 0, &x1, &y1, &w, &h);
-                _canvas->setCursor(125 - w, 10);
-                _canvas->print(audBadge);
-            } else {
-                _canvas->setCursor(85, 10);
-                _canvas->print("GMT+5:30");
+            if (audioManager) {
+                audioManager->drawStatusDot(_canvas, 36, 6, 2);
             }
+
+            _canvas->setFont(u8g2_font_profont10_mf);
+            _canvas->setTextColor(theme.muted, theme.headerBg);
+            _canvas->setCursor(85, 10);
+            _canvas->print("GMT+5:30");
 
             // Date / Day (y=16..32)
             char dateBuf[20];

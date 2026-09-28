@@ -75,8 +75,6 @@ private:
     static bool tftOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
         if (_activeCanvas) {
             _activeCanvas->draw16bitRGBBitmap(x, y, bitmap, w, h);
-        } else if (pokoGfx) {
-            pokoGfx->draw16bitRGBBitmap(x, y, bitmap, w, h);
         }
         if (_needsColorExtract) {
             pixelEngine.samplePixels(bitmap, (size_t)w * (size_t)h);
@@ -190,6 +188,16 @@ private:
                 _artSize = total;
                 strncpy(_loadedId, _songs[idx].id, sizeof(_loadedId) - 1);
                 _needsColorExtract = true;
+                if (!_active || _canvas == nullptr) {
+                    pixelEngine.startColorExtraction();
+                    _activeCanvas = nullptr;
+                    TJpgDec.setJpgScale(1);
+                    TJpgDec.setSwapBytes(false);
+                    TJpgDec.setCallback(tftOutput);
+                    TJpgDec.drawJpg(0, 0, _artBuf, _artSize);
+                    pixelEngine.finishColorExtraction();
+                    _needsColorExtract = false;
+                }
             }
         }
         http.end();
@@ -257,10 +265,6 @@ private:
         http.setTimeout(800);
         http.GET();
         http.end();
-
-        if (audioManager) {
-            audioManager->release(AUDIO_MUSIC);
-        }
 
         pixelEngine.setSongProgress(0.0f);
         _dirty = true;
@@ -467,7 +471,7 @@ private:
             _canvas->drawFastHLine(0, 114, 128, theme.line);
             _canvas->setFont(u8g2_font_5x7_tf);
             _canvas->setTextColor(theme.footerText, theme.headerBg);
-            const char* hint = _paused ? "L:Prv  R:Nxt  2R:Resume" : "L:Prv  R:Nxt  2R:Pause";
+            const char* hint = _paused ? "2R:Resume  2L:Browse" : "L:Prv  R:Nxt  2R:Pause";
             _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(64 - w / 2, 124);
             _canvas->print(hint);
@@ -487,11 +491,71 @@ public:
         }
     }
 
+    void pausePlayback() {
+        if (_mode == MODE_PLAYING && !_paused) {
+            if (audioPlugin) {
+                audioPlugin->stopStream();
+            }
+            HTTPClient http;
+            String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false&async=true";
+            http.begin(url);
+            http.setTimeout(800);
+            http.GET();
+            http.end();
+            _paused = true;
+            _dirty = true;
+        }
+    }
+
+    void resumePlayback() {
+        if (_mode == MODE_PLAYING && _paused) {
+            requestPlay(_selectedIdx, _trackPos);
+        }
+    }
+
+    void stopPlayback() {
+        requestStop();
+        if (audioPlugin) {
+            audioPlugin->unload();
+        }
+        if (audioManager) {
+            audioManager->release(AUDIO_MUSIC);
+        }
+        _mode = MODE_BROWSE;
+        _paused = false;
+        _trackPos = 0;
+        _dirty = true;
+    }
+
+    void togglePlayPause() {
+        if (_mode == MODE_PLAYING) {
+            if (_paused) {
+                resumePlayback();
+            } else {
+                pausePlayback();
+            }
+        }
+    }
+
     void load() {
         _active = true;
         _dirty  = true;
-        _mode   = MODE_BROWSE;
         begin();
+
+        if (_mode == MODE_PLAYING) {
+            // Already playing in background! Keep playing, just refresh UI!
+            if (_artSize <= 100) {
+                fetchArtwork(_selectedIdx);
+            }
+            renderToCanvas();
+            return;
+        }
+
+        _mode = MODE_BROWSE;
+
+        if (audioManager) {
+            audioManager->request(AUDIO_MUSIC);
+        }
 
         ensureAudioOutput(44100);
 
@@ -509,25 +573,18 @@ public:
 
     void unload() {
         _active = false;
-        if (_mode == MODE_PLAYING) {
-            requestStop();
-        }
-        if (audioManager) {
-            audioManager->release(AUDIO_MUSIC);
-        }
-        if (audioPlugin) {
-            audioPlugin->unload();
+        if (_mode != MODE_PLAYING) {
+            if (audioManager) {
+                audioManager->release(AUDIO_MUSIC);
+            }
+            if (audioPlugin) {
+                audioPlugin->unload();
+            }
         }
         if (_canvas) {
             delete _canvas;
             _canvas = nullptr;
         }
-        if (_artBuf) {
-            heap_caps_free(_artBuf);
-            _artBuf = nullptr;
-        }
-        _artSize = 0;
-        _loadedId[0] = 0;
     }
 
     bool isLoaded() const { return _active; }
@@ -577,23 +634,20 @@ public:
     }
 
     void onBack() {
-        _paused = false;
         if (_mode == MODE_PLAYING) {
-            requestStop();
-            _mode = MODE_BROWSE;
+            if (_paused) {
+                stopPlayback();
+                return;
+            }
+            if (_exit) _exit(STATE_LAUNCHER);
+            return;
         }
         if (_exit) _exit(STATE_LAUNCHER);
     }
 
     void onEnter() {
         if (_mode == MODE_PLAYING) {
-            if (!_paused) {
-                requestStop();
-                _paused = true;
-                _dirty = true;
-            } else {
-                requestPlay(_selectedIdx, _trackPos);
-            }
+            togglePlayPause();
             return;
         }
         if (_songCount > 0) {
@@ -611,45 +665,37 @@ public:
     }
 
     void update() {
-        if (!_active) return;
+        if (_mode == MODE_PLAYING && !_paused) {
+            if (audioPlugin && audioPlugin->hasFinished()) {
+                onPlaybackEnded();
+                return;
+            }
 
-        if (_mode == MODE_PLAYING) {
-            if (!_paused) {
-                if (audioPlugin && audioPlugin->hasFinished()) {
+            uint32_t now = millis();
+            if (now - _lastSecondMs >= 1000) {
+                _lastSecondMs = now;
+                _trackPos++;
+                _dirty = true;
+
+                if (_songs[_selectedIdx].duration_s > 0) {
+                    float prog = (float)_trackPos / (float)_songs[_selectedIdx].duration_s;
+                    pixelEngine.setSongProgress(prog);
+                }
+
+                if (_songs[_selectedIdx].duration_s > 0 && _trackPos >= _songs[_selectedIdx].duration_s + 1) {
                     onPlaybackEnded();
                     return;
                 }
-
-                uint32_t now = millis();
-                if (now - _lastSecondMs >= 1000) {
-                    _lastSecondMs = now;
-                    _trackPos++;
-                    _dirty = true;
-
-                    if (_songs[_selectedIdx].duration_s > 0) {
-                        float prog = (float)_trackPos / (float)_songs[_selectedIdx].duration_s;
-                        pixelEngine.setSongProgress(prog);
-                    }
-
-                    if (_songs[_selectedIdx].duration_s > 0 && _trackPos >= _songs[_selectedIdx].duration_s + 1) {
-                        onPlaybackEnded();
-                        return;
-                    }
-                }
             }
-            uint32_t now = millis();
-            if (now - _lastScrollMs >= 40) {
-                _lastScrollMs = now;
-                _scrollOffset++;
-                _dirty = true;
-            }
-        } else {
-            uint32_t now = millis();
-            if (now - _lastScrollMs >= 40) {
-                _lastScrollMs = now;
-                _scrollOffset++;
-                _dirty = true;
-            }
+        }
+
+        if (!_active || !_canvas) return;
+
+        uint32_t now = millis();
+        if (now - _lastScrollMs >= 40) {
+            _lastScrollMs = now;
+            _scrollOffset++;
+            _dirty = true;
         }
 
         if (_dirty) {
@@ -659,7 +705,18 @@ public:
     }
 
     bool isPlaying() const {
-        return _active && (_mode == MODE_PLAYING) && !_paused;
+        return (_mode == MODE_PLAYING) && !_paused;
+    }
+
+    const char* getCurrentTitle() const {
+        if (_songCount > 0 && _selectedIdx >= 0 && _selectedIdx < _songCount) {
+            return _songs[_selectedIdx].title;
+        }
+        return "Music";
+    }
+
+    bool hasServerError() const {
+        return _serverError;
     }
 };
 

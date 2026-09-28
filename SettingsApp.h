@@ -28,7 +28,7 @@ private:
     uint8_t  _selected  = 0;
     uint8_t  _scroll    = 0;
 
-    static constexpr uint8_t ITEM_COUNT   = 7;
+    static constexpr uint8_t ITEM_COUNT   = 8;
     static constexpr uint8_t ROW_H        = 16;
     static constexpr uint8_t TOP_Y        = 14;
     static constexpr uint8_t ROWS_VISIBLE = 6;
@@ -40,6 +40,7 @@ private:
         "Brightness",
         "Amp Boost",
         "Slide Timer",
+        "SSync Auto",
         "Reset Drivers",
         "Reboot"
     };
@@ -79,6 +80,7 @@ private:
         int curMaster  = getMasterVolumeLimit();
         int curBoost   = getAmpBoostDb();
         int curSlide   = prefs.getInt("gallery_timer", 0);
+        bool ssyncAuto = prefs.getBool("snap_auto", true);
         bool isDark    = isDarkTheme();
 
         for (uint8_t i = 0; i < ROWS_VISIBLE; i++) {
@@ -111,8 +113,9 @@ private:
                     if (curSlide == 0) snprintf(valBuf, sizeof(valBuf), "Off");
                     else snprintf(valBuf, sizeof(valBuf), "%ds", curSlide);
                     break;
-                case 5: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
-                case 6: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
+                case 5: snprintf(valBuf, sizeof(valBuf), ssyncAuto ? "On" : "Off"); break;
+                case 6: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
+                case 7: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
             }
 
             _canvas->setTextColor(valCol, isSel ? theme.surface : theme.bg);
@@ -187,11 +190,16 @@ private:
                 prefs.putInt("gallery_timer", next);
                 break;
             }
-            case 5: { // Reset Drivers
+            case 5: { // SSync Auto (On <-> Off)
+                bool nextAuto = !prefs.getBool("snap_auto", true);
+                prefs.putBool("snap_auto", nextAuto);
+                break;
+            }
+            case 6: { // Reset Drivers
                 handleDriverReset();
                 break;
             }
-            case 6: { // Reboot
+            case 7: { // Reboot
                 prefs.putBool("clean_shutdown", true);
                 _canvas->fillScreen(POKO_CLR_ERR);
                 _canvas->setFont(u8g2_font_helvB10_tf);

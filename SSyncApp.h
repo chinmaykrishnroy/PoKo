@@ -154,8 +154,12 @@ public:
         if (audioManager) {
             audioManager->request(AUDIO_SSYNC);
         }
-        if (_player && !_player->isLoaded()) {
-            _player->load();
+        if (_player) {
+            if (!_player->isLoaded()) {
+                _player->load();
+            } else {
+                _player->resumeAudio();
+            }
         }
         renderToCanvas();
     }
@@ -213,7 +217,14 @@ public:
 
     void onEnter() {
         if (_player) {
-            _player->toggleMute();
+            if (_player->isSuspended()) {
+                if (audioManager) {
+                    audioManager->request(AUDIO_SSYNC);
+                }
+                _player->resumeAudio();
+            } else {
+                _player->toggleMute();
+            }
             _dirty = true;
         }
     }

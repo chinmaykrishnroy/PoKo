@@ -22,11 +22,20 @@ enum AudioSource {
     AUDIO_BLUETOOTH
 };
 
+typedef void (*AudioActionFn)();
+typedef bool (*AudioQueryFn)();
+typedef const char* (*AudioStrFn)();
+
 class AudioManager {
 private:
     AudioSource _activeSource    = AUDIO_NONE;
     AudioSource _suspendedSource = AUDIO_NONE;
     SnapPlayer* _snapPlayer      = nullptr;
+    AudioActionFn _musicStopFn    = nullptr;
+    AudioActionFn _musicToggleFn  = nullptr;
+    AudioQueryFn  _musicIsPlayingFn = nullptr;
+    AudioStrFn    _musicGetTitleFn = nullptr;
+    AudioQueryFn  _musicErrorFn = nullptr;
 
     bool _overlayOpen = false;
 
@@ -34,6 +43,13 @@ public:
     AudioManager() {}
 
     void setSnapPlayer(SnapPlayer* p) { _snapPlayer = p; }
+    void setMusicHandlers(AudioActionFn stopFn, AudioActionFn toggleFn, AudioQueryFn isPlayingFn, AudioStrFn getTitleFn = nullptr, AudioQueryFn errorFn = nullptr) {
+        _musicStopFn = stopFn;
+        _musicToggleFn = toggleFn;
+        _musicIsPlayingFn = isPlayingFn;
+        _musicGetTitleFn = getTitleFn;
+        _musicErrorFn = errorFn;
+    }
 
     AudioSource activeSource() const { return _activeSource; }
     AudioSource suspendedSource() const { return _suspendedSource; }
@@ -43,18 +59,47 @@ public:
             stopAll();
             return true;
         }
-        if (_activeSource == source) return true;
 
         Serial.printf("[audioMgr] request source %d (active=%d, suspended=%d)\n",
                       (int)source, (int)_activeSource, (int)_suspendedSource);
 
-        // Suspend SSync background audio if Music or Video takes over
-        if (_activeSource == AUDIO_SSYNC && (source == AUDIO_MUSIC || source == AUDIO_VIDEO)) {
-            _suspendedSource = AUDIO_SSYNC;
-            if (_snapPlayer) {
-                _snapPlayer->suspendAudio();
+        if (source == AUDIO_SSYNC) {
+            // Stop older music playback if active
+            if (_musicStopFn) {
+                _musicStopFn();
             }
-            delay(20);
+            _activeSource = AUDIO_SSYNC;
+            _suspendedSource = AUDIO_NONE;
+            if (_snapPlayer) {
+                _snapPlayer->resumeAudio();
+            }
+            return true;
+        }
+
+        if (source == AUDIO_MUSIC) {
+            // Suspend SSync if loaded
+            if (_snapPlayer && _snapPlayer->isLoaded()) {
+                _suspendedSource = AUDIO_SSYNC;
+                _snapPlayer->suspendAudio();
+                delay(20);
+            }
+            _activeSource = AUDIO_MUSIC;
+            return true;
+        }
+
+        if (source == AUDIO_VIDEO) {
+            // Suspend SSync if loaded
+            if (_snapPlayer && _snapPlayer->isLoaded()) {
+                _suspendedSource = AUDIO_SSYNC;
+                _snapPlayer->suspendAudio();
+                delay(20);
+            }
+            // Stop Music if active
+            if (_musicStopFn) {
+                _musicStopFn();
+            }
+            _activeSource = AUDIO_VIDEO;
+            return true;
         }
 
         _activeSource = source;
@@ -85,13 +130,20 @@ public:
         if (_snapPlayer) {
             _snapPlayer->stop();
         }
+        if (_musicStopFn) {
+            _musicStopFn();
+        }
     }
 
     bool isPlaying() const {
         if (_activeSource == AUDIO_SSYNC && _snapPlayer) {
             return _snapPlayer->isPlaying() && !_snapPlayer->isSuspended();
         }
-        if (_activeSource == AUDIO_MUSIC || _activeSource == AUDIO_VIDEO) {
+        if (_activeSource == AUDIO_MUSIC) {
+            if (_musicIsPlayingFn) return _musicIsPlayingFn();
+            return true;
+        }
+        if (_activeSource == AUDIO_VIDEO) {
             return true;
         }
         return false;
@@ -99,7 +151,13 @@ public:
 
     void togglePlayPause() {
         if (_activeSource == AUDIO_SSYNC && _snapPlayer) {
-            _snapPlayer->toggleMute();
+            if (_snapPlayer->isSuspended()) {
+                _snapPlayer->resumeAudio();
+            } else {
+                _snapPlayer->toggleMute();
+            }
+        } else if (_activeSource == AUDIO_MUSIC && _musicToggleFn) {
+            _musicToggleFn();
         }
     }
 
@@ -113,12 +171,69 @@ public:
         }
     }
 
-    const char* getSourceEmblem() const {
+    bool hasError() const {
+        if (_activeSource == AUDIO_SSYNC && _snapPlayer) {
+            return _snapPlayer->isLoaded() && !_snapPlayer->isConnected();
+        }
+        if (_activeSource == AUDIO_MUSIC && _musicErrorFn) {
+            return _musicErrorFn();
+        }
+        return false;
+    }
+
+    bool isSoundPlaying() const {
+        if (_activeSource == AUDIO_SSYNC && _snapPlayer) {
+            return _snapPlayer->isPlaying() && !_snapPlayer->isSuspended() && !_snapPlayer->isMuted();
+        }
+        if (_activeSource == AUDIO_MUSIC && _musicIsPlayingFn) {
+            return _musicIsPlayingFn();
+        }
+        if (_activeSource == AUDIO_VIDEO) {
+            return true;
+        }
+        return false;
+    }
+
+    bool isSessionActive() const {
+        if (_activeSource == AUDIO_SSYNC && _snapPlayer) {
+            return _snapPlayer->isLoaded();
+        }
+        if (_activeSource == AUDIO_MUSIC) {
+            return true;
+        }
+        if (_activeSource == AUDIO_VIDEO) {
+            return true;
+        }
+        return false;
+    }
+
+    uint16_t getSourceColor() const {
         switch (_activeSource) {
-            case AUDIO_SSYNC: return "S";
-            case AUDIO_MUSIC: return "~";
-            case AUDIO_VIDEO: return ">";
-            default: return "";
+            case AUDIO_SSYNC: return 0x07FF; // Cyan
+            case AUDIO_MUSIC: return 0xF81F; // Pink
+            case AUDIO_VIDEO: return 0x001F; // Blue
+            default: return 0;
+        }
+    }
+
+    void drawStatusDot(Arduino_Canvas* canvas, int16_t x, int16_t y, int16_t r = 2) {
+        if (!canvas || _activeSource == AUDIO_NONE) return;
+
+        bool blinkPhase = ((millis() / 350) % 2 == 0);
+        uint16_t color = getSourceColor();
+        bool show = false;
+
+        if (hasError()) {
+            color = 0xF800; // Red
+            show = blinkPhase;
+        } else if (isSoundPlaying()) {
+            show = blinkPhase; // Blinking when actively playing sound
+        } else if (isSessionActive()) {
+            show = true; // Solid when active but silent / paused / idle
+        }
+
+        if (show && color != 0) {
+            canvas->fillCircle(x, y, r, color);
         }
     }
 
@@ -164,7 +279,7 @@ public:
         if (_activeSource == AUDIO_SSYNC && _snapPlayer) {
             info = _snapPlayer->getServerHost();
         } else if (_activeSource == AUDIO_MUSIC) {
-            info = "Local Audio";
+            info = _musicGetTitleFn ? _musicGetTitleFn() : "Local Audio";
         } else if (_activeSource == AUDIO_VIDEO) {
             info = "Video Stream";
         } else {
@@ -200,7 +315,11 @@ public:
         gfx->setFont(u8g2_font_5x7_tf);
         gfx->setTextColor(theme.footerText, theme.headerBg);
         gfx->setCursor(8, 117);
-        gfx->print(muted ? "L:Unmute" : "L:Mute");
+        if (_activeSource == AUDIO_SSYNC) {
+            gfx->print(muted ? "L:Unmute" : "L:Mute");
+        } else {
+            gfx->print(playing ? "L:Pause" : "L:Play");
+        }
         gfx->setCursor(82, 117);
         gfx->print("R:Open");
     }

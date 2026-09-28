@@ -147,6 +147,9 @@ public:
                 }
                 delay(50);
                 if (switchCb) switchCb(STATE_LAUNCHER);
+                if (Update.isRunning()) {
+                    Update.abort();
+                }
                 _otaTotal = server->clientContentLength();
                 _otaWritten = 0;
                 _otaLastPct = -1;
@@ -164,8 +167,10 @@ public:
                 _otaWritten += upload.currentSize;
                 if (_otaTotal > 0) {
                     int pct = (_otaWritten * 100) / _otaTotal;
-                    drawProgress(gfx, pct);
-                    pixelEngine.showOtaProgress((float)pct);
+                    if (pct != _otaLastPct) {
+                        drawProgress(gfx, pct);
+                        pixelEngine.showOtaProgress((float)pct);
+                    }
                 }
             } else if (upload.status == UPLOAD_FILE_END) {
                 if (Update.end(true)) {

@@ -83,12 +83,9 @@ private:
             _statusCanvas->fillCircle(7, 6, 2, dotColor);
         }
 
-        // Left audio playing indicator
-        if (audioManager && audioManager->isPlaying()) {
-            _statusCanvas->setFont(u8g2_font_5x7_tf);
-            _statusCanvas->setTextColor(POKO_CLR_GREEN, theme.headerBg);
-            _statusCanvas->setCursor(14, 10);
-            _statusCanvas->print(audioManager->getSourceEmblem());
+        // Audio status indicator dot (Cyan=SSync, Pink=Music, Blue=Video, Red=Error, Blinking=Playing, Solid=Paused/Idle)
+        if (audioManager) {
+            audioManager->drawStatusDot(_statusCanvas, 15, 6, 2);
         }
 
         // Center: "PoKo" branding

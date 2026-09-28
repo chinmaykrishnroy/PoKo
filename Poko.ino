@@ -363,22 +363,22 @@ void setup() {
     Serial.printf("[poko] boot: clean_shutdown=%s\n", cleanShutdown ? "true" : "false");
 
     AppState initialApp = STATE_LAUNCHER;
-    if (cleanShutdown) {
-        int savedApp = prefs.getInt("last_app", (int)STATE_LAUNCHER);
-        // Only allow safe apps to be restored
-        if (savedApp == STATE_CLOCK ||
-            savedApp == STATE_GALLERY_UI ||
-            savedApp == STATE_SETTINGS_UI ||
-            savedApp == STATE_INFO ||
-            savedApp == STATE_PIXELS_UI ||
-            savedApp == STATE_SSYNC) {
+    int savedApp = prefs.getInt("last_app", (int)STATE_LAUNCHER);
+    bool snapWasPlaying = prefs.getBool("snap_was_playing", false);
+    bool snapAuto = prefs.getBool("snap_auto", true);
+
+    // State keeping: Always restore safe apps, especially SSync if active or playing before shutdown
+    if (savedApp == STATE_SSYNC || (snapWasPlaying && snapAuto)) {
+        initialApp = STATE_SSYNC;
+        Serial.println("[poko] state keeping: restoring SSync after shutdown");
+    } else if (cleanShutdown || savedApp == STATE_CLOCK || savedApp == STATE_INFO ||
+               savedApp == STATE_SETTINGS_UI || savedApp == STATE_PIXELS_UI || savedApp == STATE_GALLERY_UI) {
+        if (savedApp >= 0 && savedApp < STATE_COUNT && savedApp != STATE_VIDEO_UI && savedApp != STATE_MUSIC_UI) {
             initialApp = (AppState)savedApp;
             Serial.printf("[poko] restoring previous safe app: %d\n", (int)initialApp);
-        } else {
-            Serial.println("[poko] unsafe or launcher app on clean reboot -> booting to Launcher");
         }
     } else {
-        Serial.println("[poko] abnormal reset or first boot -> booting to Launcher");
+        Serial.println("[poko] booting to Launcher");
     }
 
     // LittleFS Storage for offline photos & assets
@@ -456,6 +456,15 @@ void setup() {
 
     musicAppInstance = new MusicApp(pokoGfx, onAppChange);
     musicAppInstance->begin();
+    if (audioManager) {
+        audioManager->setMusicHandlers(
+            []() { if (musicAppInstance) musicAppInstance->stopPlayback(); },
+            []() { if (musicAppInstance) musicAppInstance->togglePlayPause(); },
+            []() -> bool { return musicAppInstance ? musicAppInstance->isPlaying() : false; },
+            []() -> const char* { return musicAppInstance ? musicAppInstance->getCurrentTitle() : "Music"; },
+            []() -> bool { return musicAppInstance ? musicAppInstance->hasServerError() : false; }
+        );
+    }
 
     videoAppInstance = new VideoApp(pokoGfx, onAppChange);
     videoAppInstance->begin();
@@ -644,6 +653,11 @@ void loop() {
         else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->update();
         else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->update();
         else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->update();
+    }
+
+    // Background music update (track position, auto-advance, neopixel progress) when not in foreground
+    if (activeApp != STATE_MUSIC_UI && musicAppInstance && musicAppInstance->isPlaying()) {
+        musicAppInstance->update();
     }
 
     // NeoPixel lighting engine update (with Music & SSync audio states)

@@ -187,7 +187,7 @@ private:
     volatile bool _syncing;
     volatile bool _playStarted;
     volatile bool _playReleased;
-    volatile bool _isSuspended;
+    volatile bool _isSuspended = false;
 
     TaskHandle_t _netTaskHandle;
     TaskHandle_t _audioTaskHandle;
@@ -1306,7 +1306,8 @@ private:
                         int32_t effMs = getEffectiveBufferMs();
                         _targetPlayLocalTimeUs = _firstChunkServerTsUs + (int64_t)effMs * 1000LL - _diffToServerUs;
                         _samplesPlayed = 0;
-                                    _playStarted = true;
+                        _playStarted = true;
+                        if (_prefs) _prefs->putBool("snap_was_playing", true);
                     }
 
                     _decodedFramesThisChunk = 0;
@@ -1679,7 +1680,7 @@ public:
     SnapPlayer(void* display = nullptr, Preferences* prefs = nullptr, float initialVolume = 0.8f)
         : _tft(display), _prefs(prefs), _serverHost("192.168.0.20"), _serverPort(1704), _customLatencyMs(0),
           _volume(initialVolume), _isRunning(false), _isLoaded(false), _connected(false),
-          _syncing(false), _playStarted(false), _playReleased(false), _netTaskHandle(NULL),
+          _syncing(false), _playStarted(false), _playReleased(false), _isSuspended(false), _netTaskHandle(NULL),
           _audioTaskHandle(NULL), _netTaskDone(nullptr), _audioTaskDone(nullptr),
           _netTaskStarted(false), _audioTaskStarted(false), _i2sInstalled(false),
           _resyncRequested(false), _volumePublishPending(false),
@@ -1708,6 +1709,7 @@ public:
 
 
     void begin() {
+        _isSuspended = false;
         if (!_netTaskDone) _netTaskDone = xSemaphoreCreateBinary();
         if (!_audioTaskDone) _audioTaskDone = xSemaphoreCreateBinary();
 
@@ -1725,6 +1727,7 @@ public:
 
     void load() {
         if (_isLoaded) return;
+        _isSuspended = false;
 
         size_t bufSize = psramFound() ? RING_BUFFER_SIZE : 49152;
         if (!_pcmBuf.init(bufSize)) {
@@ -1998,18 +2001,19 @@ public:
     }
 
     void resumeAudio() {
-        if (!_isLoaded || !_isSuspended) return;
+        if (!_isLoaded) return;
         Serial.println("[snap] audio resuming");
+        _isSuspended = false;
         if (_sampleRate > 0) {
             ensureAudioOutput(_sampleRate);
         }
         _resyncRequested = true;
-        _isSuspended = false;
     }
 
     void stop() {
         suspendAudio();
         setMute(true);
+        if (_prefs) _prefs->putBool("snap_was_playing", false);
     }
     String getCodec() const { return _codec; }
     uint32_t getSampleRate() const { return _sampleRate; }

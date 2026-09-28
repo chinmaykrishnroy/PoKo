@@ -225,10 +225,6 @@ private:
         http.GET();
         http.end();
 
-        if (audioManager) {
-            audioManager->release(AUDIO_VIDEO);
-        }
-
         if (syncPlugin) {
             syncPlugin->reset();
         }
@@ -360,6 +356,10 @@ public:
         _dirty  = true;
         _mode   = MODE_BROWSE;
         begin();
+
+        if (audioManager) {
+            audioManager->request(AUDIO_VIDEO);
+        }
 
         ensureAudioOutput(44100);
 

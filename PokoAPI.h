@@ -25,6 +25,10 @@ extern MusicApp* musicAppInstance;
 extern VideoApp* videoAppInstance;
 extern GalleryApp* galleryAppInstance;
 extern void handleDriverReset();
+extern void onBtnLeft();
+extern void onBtnRight();
+extern void onBtnLeftDouble();
+extern void onBtnRightDouble();
 
 // Helper to safely escape characters for JSON string values
 inline String escapeJson(const String& s) {
@@ -433,6 +437,17 @@ public:
                 }
             }
             _server->send(200, "application/json", "{\"ok\":true,\"app\":" + String((int)activeApp) + "}");
+        });
+
+        // Remote input trigger (/api/input?action=enter / left / right / back)
+        _server->on("/api/input", HTTP_GET, [this]() {
+            String act = _server->hasArg("action") ? _server->arg("action") : _server->arg("btn");
+            act.toLowerCase();
+            if (act == "left" || act == "prev") onBtnLeft();
+            else if (act == "right" || act == "next") onBtnRight();
+            else if (act == "enter" || act == "play" || act == "double_right" || act == "2r") onBtnRightDouble();
+            else if (act == "back" || act == "double_left" || act == "2l") onBtnLeftDouble();
+            _server->send(200, "application/json", "{\"ok\":true,\"action\":\"" + act + "\"}");
         });
 
         // Playback stopped notification from streaming backend
