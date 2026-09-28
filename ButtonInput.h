@@ -220,11 +220,11 @@ public:
                 _btnUp.reset();
             } else {
                 uint32_t held = now - _comboStartMs;
-                if (!_comboLongFired && held >= 2000) {
+                if (!_comboLongFired && held >= 2500) {
                     _comboLongFired = true;
                     _dualCandidate  = false;
                     _dualClickCount = 0;
-                    Serial.println("[combo] Both held 2s");
+                    Serial.println("[combo] Both held 2.5s (Reboot)");
                     if (_onBothLong) _onBothLong();
                 }
                 if (!_comboVLongFired && held >= 5000) {

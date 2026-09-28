@@ -102,6 +102,16 @@ public:
             _voltage = (_voltage * 0.8f) + (rawV * 0.2f);
         }
 
+        if (!isPresent()) {
+            _percentage = -1;
+            _isCharging = false;
+            _isFull = false;
+            _isCritical = false;
+            _lowVoltageStartMs = 0;
+            _lastReadMs = millis();
+            return;
+        }
+
         _percentage = voltageToPercent(_voltage);
 
         // Charging status: pin is active LOW
@@ -130,10 +140,11 @@ public:
         }
     }
 
+    bool  isPresent() const         { return _voltage >= 2.50f; }
     float getVoltage() const        { return _voltage; }
     int   getPercentage() const     { return _percentage; }
-    bool  isCharging() const        { return _isCharging; }
-    bool  isFull() const            { return _isFull; }
-    bool  isLow() const             { return _percentage <= 15 && !_isCharging; }
-    bool  isCritical() const        { return _isCritical; }
+    bool  isCharging() const        { return isPresent() && _isCharging; }
+    bool  isFull() const            { return isPresent() && _isFull; }
+    bool  isLow() const             { return isPresent() && _percentage <= 15 && !_isCharging; }
+    bool  isCritical() const        { return isPresent() && _isCritical; }
 };

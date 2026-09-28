@@ -319,16 +319,20 @@ void onComboBothDouble() {
 }
 
 void onComboBothLong() {
-    if (!handleButtonWakeCheck(false)) return;
-    int cur = prefs.getInt("brightness", 80);
-    int next = 80;
-    if (cur <= 30)      next = 60;
-    else if (cur <= 65) next = 100;
-    else                next = 25;
-
-    prefs.putInt("brightness", next);
-    setBacklightPercent(next);
-    Serial.printf("[combo] both held 2s -> brightness %d%%\n", next);
+    Serial.println("[combo] Both L+R held 2.5s -> Clean Reboot");
+    prefs.putBool("clean_shutdown", true);
+    pokoGfx->fillScreen(POKO_CLR_ERR);
+    pokoGfx->setFont(u8g2_font_helvB10_tf);
+    pokoGfx->setTextColor(POKO_CLR_TEXT);
+    int16_t x1, y1; uint16_t w, h;
+    const char* msg = "REBOOTING...";
+    pokoGfx->getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
+    pokoGfx->setCursor(64 - w / 2, 68);
+    pokoGfx->print(msg);
+    pokoGfx->flush();
+    delay(500);
+    if (powerManager) powerManager->powerOff(true);
+    else              ESP.restart();
 }
 
 void onComboBothVLong() {

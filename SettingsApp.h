@@ -34,7 +34,7 @@ private:
     uint8_t  _scroll    = 0;
     uint32_t _lastBlinkMs = 0;
 
-    static constexpr uint8_t ITEM_COUNT   = 11;
+    static constexpr uint8_t ITEM_COUNT   = 16;
     static constexpr uint8_t ROW_H        = 16;
     static constexpr uint8_t TOP_Y        = 14;
     static constexpr uint8_t ROWS_VISIBLE = 6;
@@ -48,9 +48,14 @@ private:
         "Dim Timeout",
         "Sleep Timeout",
         "Auto-Off",
+        "Ambient Clock",
+        "WiFi Sleep",
+        "USB Mode",
         "Slide Timer",
         "SSync Auto",
+        "LED Bright",
         "Reset Drivers",
+        "Power Off",
         "Reboot"
     };
 
@@ -141,13 +146,38 @@ private:
                     else         snprintf(valBuf, sizeof(valBuf), "%um", ao / 60);
                     break;
                 }
-                case 7:
+                case 7: {
+                    bool ac = powerManager ? powerManager->isAmbientClockEnabled() : prefs.getBool("ambient_clock", false);
+                    snprintf(valBuf, sizeof(valBuf), ac ? "On" : "Off");
+                    break;
+                }
+                case 8: {
+                    bool ws = prefs.getBool("wifi_sleep", true);
+                    snprintf(valBuf, sizeof(valBuf), ws ? "Auto" : "Off");
+                    break;
+                }
+                case 9: {
+                    bool um = powerManager ? powerManager->isUsbPerfMax() : prefs.getBool("usb_perf", true);
+                    snprintf(valBuf, sizeof(valBuf), um ? "MaxPerf" : "Managed");
+                    break;
+                }
+                case 10: {
                     if (curSlide == 0) snprintf(valBuf, sizeof(valBuf), "Off");
                     else snprintf(valBuf, sizeof(valBuf), "%ds", curSlide);
                     break;
-                case 8: snprintf(valBuf, sizeof(valBuf), ssyncAuto ? "On" : "Off"); break;
-                case 9: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
-                case 10: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
+                }
+                case 11: snprintf(valBuf, sizeof(valBuf), ssyncAuto ? "On" : "Off"); break;
+                case 12: {
+                    uint8_t br = pixelEngine.getBrightness();
+                    if (br == 0)      snprintf(valBuf, sizeof(valBuf), "Off");
+                    else if (br <= 3) snprintf(valBuf, sizeof(valBuf), "20%%");
+                    else if (br <= 7) snprintf(valBuf, sizeof(valBuf), "50%%");
+                    else              snprintf(valBuf, sizeof(valBuf), "100%%");
+                    break;
+                }
+                case 13: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
+                case 14: snprintf(valBuf, sizeof(valBuf), "Shut"); valCol = POKO_CLR_ERR; break;
+                case 15: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
             }
 
             _canvas->setTextColor(valCol, isSel ? theme.surface : theme.bg);
@@ -169,7 +199,7 @@ private:
         _canvas->drawFastHLine(0, FOOTER_Y, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(theme.footerText, theme.headerBg);
-        const char* hint = "L:Up  R:Dn  2R:Set";
+        const char* hint = "L:Prev  R:Next  2R:Set";
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
         _canvas->print(hint);
@@ -239,7 +269,28 @@ private:
                 else              prefs.putUInt("auto_off", next);
                 break;
             }
-            case 7: { // Cycle Slide Timer: 0 -> 3 -> 5 -> 10 -> 15 -> 30 -> 60 -> 0
+            case 7: { // Ambient Clock (On <-> Off)
+                bool cur = powerManager ? powerManager->isAmbientClockEnabled() : prefs.getBool("ambient_clock", false);
+                bool next = !cur;
+                if (powerManager) powerManager->setAmbientClock(next);
+                else              prefs.putBool("ambient_clock", next);
+                break;
+            }
+            case 8: { // WiFi Sleep (Auto <-> Off)
+                bool cur = prefs.getBool("wifi_sleep", true);
+                bool next = !cur;
+                prefs.putBool("wifi_sleep", next);
+                WiFi.setSleep(next);
+                break;
+            }
+            case 9: { // USB Mode (MaxPerf <-> Managed)
+                bool cur = powerManager ? powerManager->isUsbPerfMax() : prefs.getBool("usb_perf", true);
+                bool next = !cur;
+                if (powerManager) powerManager->setUsbPerfMax(next);
+                else              prefs.putBool("usb_perf", next);
+                break;
+            }
+            case 10: { // Cycle Slide Timer: 0 -> 3 -> 5 -> 10 -> 15 -> 30 -> 60 -> 0
                 int cur = prefs.getInt("gallery_timer", 0);
                 int next = 0;
                 if (cur == 0)       next = 3;
@@ -252,7 +303,7 @@ private:
                 prefs.putInt("gallery_timer", next);
                 break;
             }
-            case 8: { // SSync Auto (On <-> Off)
+            case 11: { // SSync Auto (On <-> Off)
                 bool nextAuto = !prefs.getBool("snap_auto", true);
                 prefs.putBool("snap_auto", nextAuto);
                 if (nextAuto) {
@@ -279,11 +330,35 @@ private:
                 }
                 break;
             }
-            case 9: { // Reset Drivers
+            case 12: { // LED Bright (Off -> 20% -> 50% -> 100% -> Off)
+                uint8_t curB = pixelEngine.getBrightness();
+                uint8_t nextB = 7;
+                if (curB == 0)      nextB = 3;
+                else if (curB <= 3) nextB = 7;
+                else if (curB <= 7) nextB = 15;
+                else                nextB = 0;
+                pixelEngine.setBrightness(nextB);
+                pixelEngine.saveToPreferences(prefs);
+                break;
+            }
+            case 13: { // Reset Drivers
                 handleDriverReset();
                 break;
             }
-            case 10: { // Reboot
+            case 14: { // Power Off (Graceful Shutdown)
+                if (powerManager) {
+                    _canvas->fillScreen(POKO_CLR_ERR);
+                    _canvas->setFont(u8g2_font_helvB10_tf);
+                    _canvas->setTextColor(POKO_CLR_TEXT);
+                    _canvas->setCursor(18, 68);
+                    _canvas->print("POWER OFF...");
+                    _canvas->flush();
+                    delay(400);
+                    powerManager->powerOff(false);
+                }
+                break;
+            }
+            case 15: { // Reboot
                 prefs.putBool("clean_shutdown", true);
                 _canvas->fillScreen(POKO_CLR_ERR);
                 _canvas->setFont(u8g2_font_helvB10_tf);

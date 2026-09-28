@@ -72,9 +72,10 @@ private:
     uint8_t           _currentDuty         = 204;
     bool              _wifiSleepEnabled    = false;
     bool              _paStandbyDone       = false;
-
+    bool              _usbPerfMax          = true;
     SemaphoreHandle_t _lockMutex           = nullptr;
 
+public:
     uint8_t percentToDuty(int pct) const {
         pct = constrain(pct, 0, 100);
         return (uint8_t)((pct * 255) / 100);
@@ -87,7 +88,35 @@ private:
         return 80;
     }
 
-public:
+    bool isBatteryPresent() const {
+        return _battery && _battery->isPresent();
+    }
+
+    bool isUsbPowered() const {
+        return !isBatteryPresent() || (_battery && (_battery->isCharging() || _battery->isFull()));
+    }
+
+    bool isUsbPerfMax() const {
+        return _usbPerfMax;
+    }
+
+    void setUsbPerfMax(bool en) {
+        _usbPerfMax = en;
+        if (_prefs) _prefs->putBool("usb_perf", en);
+        if (_usbPerfMax && isUsbPowered()) {
+            WiFi.setSleep(false);
+            _wifiSleepEnabled = false;
+        }
+    }
+
+    bool isMaxPerfActive() const {
+        return !isBatteryPresent() || (isUsbPowered() && _usbPerfMax);
+    }
+
+    bool isAmbientClockEnabled() const {
+        return _ambientClockEnabled;
+    }
+
     PowerManager(BatteryManager* bat, AudioManager* audio, Preferences* prf)
         : _battery(bat), _audio(audio), _prefs(prf) {
         _lockMutex = xSemaphoreCreateMutex();
@@ -102,6 +131,7 @@ public:
             _sleepTimeoutSec = _prefs->getUInt("sleep_timeout", 30);
             _autoOffSec = _prefs->getUInt("auto_off", 900);
             _ambientClockEnabled = _prefs->getBool("ambient_clock", false);
+            _usbPerfMax = _prefs->getBool("usb_perf", true);
         }
 
         int userBr = getUserBrightnessPercent();
@@ -109,8 +139,8 @@ public:
         _currentDuty = _targetDuty;
         setBacklight(_currentDuty);
 
-        Serial.printf("[power] PowerManager initialized (dim=%us, sleep=%us, auto_off=%us)\n",
-                      _dimTimeoutSec, _sleepTimeoutSec, _autoOffSec);
+        Serial.printf("[power] PowerManager initialized (dim=%us, sleep=%us, auto_off=%us, usb_perf=%s)\n",
+                      _dimTimeoutSec, _sleepTimeoutSec, _autoOffSec, _usbPerfMax ? "MaxPerf" : "Managed");
     }
 
     // ── Lock Management ──────────────────────────────────────────
@@ -262,8 +292,8 @@ public:
         if (_battery) {
             _battery->update();
 
-            // Hardware Battery Protection: Cut off power if cell voltage < 3.25V sustained
-            if (_battery->isCritical()) {
+            // Hardware Battery Protection: Cut off power if cell voltage < 3.25V sustained (only if battery actually present!)
+            if (_battery->isPresent() && _battery->isCritical()) {
                 Serial.println("[power] CRITICAL BATTERY VOLTAGE (<3.25V)! Shutting down immediately to protect cell.");
                 powerOff(false);
                 return;
@@ -306,19 +336,21 @@ public:
 
         // 3. Dynamic Wi-Fi Power Management (Modem Sleep)
         if (WiFi.status() == WL_CONNECTED) {
-            if (hasLock(POWER_LOCK_REALTIME_NET) || hasLock(POWER_LOCK_OTA)) {
+            bool perfOverride = isMaxPerfActive() || hasLock(POWER_LOCK_REALTIME_NET) || hasLock(POWER_LOCK_OTA);
+            if (perfOverride) {
                 // Keep radio fully awake with zero sleep jitter
                 if (_wifiSleepEnabled) {
                     WiFi.setSleep(false);
                     _wifiSleepEnabled = false;
-                    Serial.println("[power] WiFi modem sleep DISABLED (real-time stream active)");
+                    Serial.println("[power] WiFi modem sleep DISABLED (MaxPerf/Realtime active)");
                 }
             } else {
                 // Enable 802.11 modem sleep (saves 50-70mA while keeping socket connection)
-                if (!_wifiSleepEnabled) {
+                bool allowSleep = _prefs ? _prefs->getBool("wifi_sleep", true) : true;
+                if (allowSleep && !_wifiSleepEnabled) {
                     WiFi.setSleep(true);
                     _wifiSleepEnabled = true;
-                    Serial.println("[power] WiFi modem sleep ENABLED (idle/ambient)");
+                    Serial.println("[power] WiFi modem sleep ENABLED (idle/battery)");
                 }
             }
         }
@@ -356,7 +388,8 @@ public:
 
         // 6. Auto Power-Off (when idle on battery with no audio playing)
         if (_autoOffSec > 0 && !hasLock(POWER_LOCK_AUDIO) && !hasLock(POWER_LOCK_PREVENT_DEEP_SLEEP) && !hasLock(POWER_LOCK_OTA)) {
-            if (_battery && !_battery->isCharging()) {
+            // Only auto power-off if battery is present and not charging
+            if (isBatteryPresent() && !_battery->isCharging()) {
                 uint32_t idleMs = now - _lastActivityMs;
                 if (idleMs >= (_autoOffSec * 1000)) {
                     Serial.printf("[power] Inactivity timeout reached (%u sec on battery) -> Auto Power-Off\n", _autoOffSec);
@@ -412,6 +445,12 @@ public:
         json += (_battery && _battery->isLow()) ? "true" : "false";
         json += ",\"critical\":";
         json += (_battery && _battery->isCritical()) ? "true" : "false";
+        json += ",\"battery_present\":";
+        json += isBatteryPresent() ? "true" : "false";
+        json += ",\"usb_powered\":";
+        json += isUsbPowered() ? "true" : "false";
+        json += ",\"usb_perf_max\":";
+        json += _usbPerfMax ? "true" : "false";
 
         json += ",\"display_state\":";
         switch (_displayState) {

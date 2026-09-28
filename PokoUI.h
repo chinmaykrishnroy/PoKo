@@ -91,18 +91,13 @@ private:
             audioManager->drawStatusDot(_statusCanvas, 15, 6, 2);
         }
 
-        // Center: "PoKo" branding
+        // Center: "PoKo" branding (exact horizontal center: x=64)
         _statusCanvas->setFont(u8g2_font_helvB08_tf);
         _statusCanvas->setTextColor(theme.headerText, theme.headerBg);
         int16_t x1, y1; uint16_t w, h;
         _statusCanvas->getTextBounds("PoKo", 0, 0, &x1, &y1, &w, &h);
-        _statusCanvas->setCursor(56 - w / 2, 10);
+        _statusCanvas->setCursor(64 - w / 2, 10);
         _statusCanvas->print("PoKo");
-
-        // Battery indicator icon
-        int batPct = batteryManager.getPercentage();
-        bool batChg = batteryManager.isCharging();
-        drawBatteryIcon(78, 4, batPct, batChg);
 
         // Right: Live time (or uptime until NTP time is synced)
         char buf[12];
@@ -126,25 +121,62 @@ private:
         _statusCanvas->setFont(u8g2_font_profont10_mf);
         _statusCanvas->setTextColor(theme.muted, theme.headerBg);
         _statusCanvas->getTextBounds(buf, 0, 0, &x1, &y1, &w, &h);
-        _statusCanvas->setCursor(126 - w, 9);
+        int16_t timeX = 126 - w;
+        _statusCanvas->setCursor(timeX, 9);
         _statusCanvas->print(buf);
+
+        // Battery indicator icon - positioned right next to the time (only if battery is connected)
+        if (batteryManager.isPresent()) {
+            int batPct = batteryManager.getPercentage();
+            bool batChg = batteryManager.isCharging();
+            drawBatteryIcon(timeX - 15, 4, batPct, batChg);
+        }
 
         _statusCanvas->flush();
     }
 
     void drawBatteryIcon(int x, int y, int pct, bool charging) {
         const auto& theme = currentTheme();
-        uint16_t bodyColor = theme.muted;
-        uint16_t fillColor = theme.accent;
+        pct = constrain(pct, 0, 100);
+
+        uint16_t bodyColor;
+        uint16_t fillColor;
 
         if (charging) {
-            fillColor = POKO_CLR_GREEN;
-            bodyColor = theme.text;
-        } else if (pct <= 15) {
-            fillColor = POKO_CLR_ERR;
-            bodyColor = POKO_CLR_ERR;
-        } else if (pct <= 30) {
-            fillColor = POKO_CLR_WARN;
+            // Charging: Blink entire battery icon in bright green
+            bool chgBlink = ((millis() / 450) % 2 == 0);
+            if (chgBlink) {
+                bodyColor = POKO_CLR_GREEN;
+                fillColor = POKO_CLR_GREEN;
+            } else {
+                bodyColor = pokoGfx->color565(20, 80, 30);
+                fillColor = pokoGfx->color565(10, 50, 20);
+            }
+        } else {
+            // Discharging: Smooth color transition from Green -> Yellow -> Red as percentage drops
+            uint8_t r = 0, g = 0, b = 0;
+            if (pct >= 50) {
+                // 50%..100%: Yellow (255, 210, 0) -> Green (0, 255, 50)
+                float t = (pct - 50) / 50.0f;
+                r = (uint8_t)(255 * (1.0f - t));
+                g = 255;
+                b = (uint8_t)(50 * t);
+            } else {
+                // 0%..50%: Red (255, 30, 30) -> Yellow (255, 210, 0)
+                float t = pct / 50.0f;
+                r = 255;
+                g = (uint8_t)(210 * t + 30 * (1.0f - t));
+                b = (uint8_t)(30 * (1.0f - t));
+            }
+            fillColor = pokoGfx->color565(r, g, b);
+
+            if (pct <= 15) {
+                // Low battery: critical red shell, blink if very low
+                bool lowBlink = ((millis() / 400) % 2 == 0);
+                bodyColor = lowBlink ? POKO_CLR_ERR : theme.muted;
+            } else {
+                bodyColor = theme.muted;
+            }
         }
 
         // Battery outer shell (11x6 px) + nipple (1x2 px)
@@ -152,13 +184,14 @@ private:
         _statusCanvas->drawFastVLine(x + 11, y + 2, 2, bodyColor);
 
         // Fill bar (0 to 7 px width inside, height 2 px)
-        int fillW = map(constrain(pct, 0, 100), 0, 100, 0, 7);
+        int fillW = map(pct, 0, 100, 0, 7);
+        if (pct > 0 && fillW == 0) fillW = 1;
         if (fillW > 0) {
             _statusCanvas->fillRect(x + 2, y + 2, fillW, 2, fillColor);
         }
 
-        // If charging, draw small 1-pixel blink indicator
-        if (charging && ((millis() / 400) % 2 == 0)) {
+        // Extra charging bolt indicator in center when charging
+        if (charging) {
             _statusCanvas->drawPixel(x + 5, y + 2, RGB565_WHITE);
         }
     }
@@ -355,7 +388,8 @@ public:
         uint32_t now = millis();
         bool audioBlinking = (audioManager && (audioManager->isSoundPlaying() || audioManager->hasError()));
         bool wifiBlinking = (wifiState != STATE_WIFI_CONNECTED);
-        uint32_t updateInterval = (audioBlinking || wifiBlinking) ? 100 : 1000;
+        bool batteryBlinking = batteryManager.isPresent() && (batteryManager.isCharging() || (batteryManager.getPercentage() <= 15));
+        uint32_t updateInterval = (audioBlinking || wifiBlinking || batteryBlinking) ? 200 : 1000;
         if (now - _lastStatusMs >= updateInterval) {
             _lastStatusMs = now;
             drawStatusBar();
