@@ -554,18 +554,22 @@ public:
         }
     }
 
-    void stopPlayback() {
+    void stopPlaybackInternal() {
         requestStop();
         if (audioPlugin) {
             audioPlugin->unload();
-        }
-        if (audioManager) {
-            audioManager->release(AUDIO_MUSIC);
         }
         _mode = MODE_BROWSE;
         _paused = false;
         _trackPos = 0;
         _dirty = true;
+    }
+
+    void stopPlayback() {
+        stopPlaybackInternal();
+        if (audioManager) {
+            audioManager->release(AUDIO_MUSIC);
+        }
     }
 
     void togglePlayPause() {

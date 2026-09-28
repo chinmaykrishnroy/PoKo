@@ -188,6 +188,11 @@ private:
     volatile bool _playStarted;
     volatile bool _playReleased;
     volatile bool _isSuspended = false;
+    volatile bool _suspendDrainRequested = false;
+    typedef bool (*AudioActiveFn)();
+    typedef void (*AudioReleaseFn)();
+    AudioActiveFn _isAudioActiveFn = nullptr;
+    AudioReleaseFn _releaseAudioFn = nullptr;
 
     TaskHandle_t _netTaskHandle;
     TaskHandle_t _audioTaskHandle;
@@ -544,13 +549,19 @@ private:
     }
 
     bool initI2S(uint32_t sampleRate) {
+        if (!isAudioActive()) {
+            Serial.println("[snap] initI2S rejected: SSync is not active source");
+            return false;
+        }
         if (!ensureAudioOutput(sampleRate)) {
             Serial.printf("[snap] ensureAudioOutput failed: %lu Hz\n", (unsigned long)sampleRate);
             _i2sInstalled = false;
             return false;
         }
 
-        setScaledVolume(_serverMuted ? 0 : _serverVolume);
+        if (isAudioActive()) {
+            setScaledVolume(_serverMuted ? 0 : _serverVolume);
+        }
         _i2sInstalled = true;
         primeI2SPath(sampleRate);
         return true;
@@ -558,8 +569,12 @@ private:
 
     void deinitI2S() {
         if (!_i2sInstalled) return;
-        ::deinitI2S();
         _i2sInstalled = false;
+        if (_releaseAudioFn) {
+            _releaseAudioFn();
+        } else {
+            ::deinitI2S();
+        }
     }
 
     bool readExact(WiFiClient& client, uint8_t* dest, size_t len, uint32_t timeoutMs = 3000) {
@@ -819,7 +834,9 @@ private:
         } else if (doc.containsKey("volume")) {
             _volume = constrain(reportedVolume / 100.0f, 0.0f, 1.0f);
         }
-        setScaledVolume(_serverMuted ? 0 : _serverVolume);
+        if (isAudioActive()) {
+            setScaledVolume(_serverMuted ? 0 : _serverVolume);
+        }
     }
 
     void parseCodecHeader(const String& codec, const uint8_t* payload, size_t size) {
@@ -1416,15 +1433,17 @@ private:
         uint32_t activeRate = _sampleRate ? _sampleRate : 48000;
         _audioFault = false;
 
-        if (!initI2S(activeRate)) {
-            Serial.println("[snap] Audio task could not initialize I2S");
-            _audioFault = true;
-            _isRunning = false;
-            _client.stop();
-            _audioTaskHandle = nullptr;
-            if (_audioTaskDone) xSemaphoreGive(_audioTaskDone);
-            vTaskDelete(NULL);
-            return;
+        if (!_isSuspended) {
+            if (!initI2S(activeRate)) {
+                Serial.println("[snap] Audio task could not initialize I2S");
+                _audioFault = true;
+                _isRunning = false;
+                _client.stop();
+                _audioTaskHandle = nullptr;
+                if (_audioTaskDone) xSemaphoreGive(_audioTaskDone);
+                vTaskDelete(NULL);
+                return;
+            }
         }
 
         static constexpr uint32_t PCM_OUT_CAP = 257;
@@ -1438,14 +1457,23 @@ private:
             }
 
             if (_isSuspended) {
-                if (_pcmBuf.available() > 0) {
+                if (_suspendDrainRequested) {
                     _pcmBuf.drain();
+                    _suspendDrainRequested = false;
                 }
                 _playReleased = false;
                 _playStarted = false;
                 _samplesPlayed = 0;
                 vTaskDelay(pdMS_TO_TICKS(50));
                 continue;
+            }
+
+            if (!_i2sInstalled) {
+                activeRate = _sampleRate ? _sampleRate : 48000;
+                if (!initI2S(activeRate)) {
+                    vTaskDelay(pdMS_TO_TICKS(50));
+                    continue;
+                }
             }
 
             if (_resyncRequested) {
@@ -1724,9 +1752,10 @@ public:
         }
     }
 
-    void load() {
+    void load(bool startSuspended = false) {
         if (_isLoaded) return;
-        _isSuspended = false;
+        _isSuspended = startSuspended;
+        _suspendDrainRequested = startSuspended;
 
         size_t bufSize = psramFound() ? RING_BUFFER_SIZE : 49152;
         if (!_pcmBuf.init(bufSize)) {
@@ -1983,6 +2012,15 @@ public:
 
 
     // ── Public Accessors for SSyncApp & WebUI ──────────────────
+    void setAudioCallbacks(AudioActiveFn activeFn, AudioReleaseFn releaseFn) {
+        _isAudioActiveFn = activeFn;
+        _releaseAudioFn = releaseFn;
+    }
+
+    bool isAudioActive() const {
+        return _isAudioActiveFn ? _isAudioActiveFn() : true;
+    }
+
     bool isPlaying() const { return _playStarted && _connected && !_isSuspended && !_serverMuted; }
     bool isSuspended() const { return _isSuspended; }
     bool isSyncing() const { return _syncing; }
@@ -1993,24 +2031,21 @@ public:
         if (!_isLoaded || _isSuspended) return;
         Serial.println("[snap] audio suspended");
         _isSuspended = true;
-        _pcmBuf.drain();
+        _suspendDrainRequested = true;
         _playReleased = false;
         _playStarted = false;
         _samplesPlayed = 0;
         _expectedNextChunkTsUs = 0;
         _producerAwaitingResync = true;
         resetPllState();
+        deinitI2S();
     }
 
     void resumeAudio() {
         if (!_isLoaded || !_isSuspended) return;
         Serial.println("[snap] audio resuming");
-        // Reconfigure and stabilize I2S hardware FIRST, while still suspended,
-        // so audioTask cannot race or touch poko_tx_handle while it is being re-initialized.
-        if (_sampleRate > 0) {
-            ensureAudioOutput(_sampleRate);
-        }
-        _pcmBuf.drain();
+        _isSuspended = false;
+        _suspendDrainRequested = true;
         _playReleased = false;
         _playStarted = false;
         _samplesPlayed = 0;
@@ -2018,7 +2053,6 @@ public:
         _producerAwaitingResync = false;
         resetPllState();
         _resyncRequested = true;
-        _isSuspended = false;
     }
 
     void stop() {
@@ -2037,11 +2071,20 @@ public:
     String getServerHost() const { return _serverHost; }
     uint16_t getServerPort() const { return _serverPort; }
 
+    void setRemoteVolumePercent(int pct) {
+        pct = constrain(pct, 0, 100);
+        _volume = pct / 100.0f;
+        _serverVolume = pct;
+        _volumePublishPending = true;
+    }
+
     void setVolumePercent(int pct) {
         pct = constrain(pct, 0, 100);
         _volume = pct / 100.0f;
         _serverVolume = pct;
-        setScaledVolume(_serverMuted ? 0 : _serverVolume);
+        if (isAudioActive()) {
+            setScaledVolume(_serverMuted ? 0 : _serverVolume);
+        }
         _volumePublishPending = true;
     }
 
@@ -2051,7 +2094,9 @@ public:
 
     void setMute(bool mute) {
         _serverMuted = mute;
-        setScaledVolume(_serverMuted ? 0 : _serverVolume);
+        if (isAudioActive()) {
+            setScaledVolume(_serverMuted ? 0 : _serverVolume);
+        }
         _volumePublishPending = true;
     }
 

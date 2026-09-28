@@ -203,19 +203,25 @@ private:
                 prefs.putBool("snap_auto", nextAuto);
                 if (nextAuto) {
                     if (WiFi.status() == WL_CONNECTED && snapService && !snapService->isLoaded()) {
-                        snapService->load();
-                        if (audioManager) {
-                            if (audioManager->activeSource() == AUDIO_NONE) {
-                                audioManager->request(AUDIO_SSYNC);
-                            } else {
-                                snapService->suspendAudio();
-                                audioManager->setSuspendedSource(AUDIO_SSYNC);
-                            }
+                        if (audioManager && audioManager->activeSource() != AUDIO_NONE) {
+                            snapService->load(true);
+                            audioManager->setSuspendedSource(AUDIO_SSYNC);
+                        } else {
+                            snapService->load(false);
+                            if (audioManager) audioManager->request(AUDIO_SSYNC);
                         }
                     }
                 } else {
-                    if (audioManager && audioManager->activeSource() == AUDIO_SSYNC) {
-                        audioManager->stopActiveSession();
+                    if (audioManager) {
+                        if (audioManager->activeSource() == AUDIO_SSYNC) {
+                            audioManager->stopActiveSession();
+                        } else if (audioManager->suspendedSource() == AUDIO_SSYNC) {
+                            audioManager->setSuspendedSource(AUDIO_NONE);
+                        }
+                    }
+                    if (snapService && snapService->isLoaded()) {
+                        snapService->stop();
+                        snapService->unload();
                     }
                 }
                 break;

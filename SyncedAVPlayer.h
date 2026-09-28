@@ -461,7 +461,26 @@ public:
     }
 
     void load() {
-        if (_isLoaded) return;
+        if (_isLoaded && _isRunning) return;
+
+        if (_isLoaded && !_isRunning) {
+            if (_audioTaskHandle == NULL && _netTaskHandle == NULL && _videoTaskHandle == NULL) {
+                releaseResources();
+                _isLoaded = false;
+            } else {
+                if (_audioTaskDone && _audioTaskHandle != NULL) xSemaphoreTake(_audioTaskDone, pdMS_TO_TICKS(100));
+                if (_netTaskDone && _netTaskHandle != NULL) xSemaphoreTake(_netTaskDone, pdMS_TO_TICKS(100));
+                if (_videoTaskDone && _videoTaskHandle != NULL) xSemaphoreTake(_videoTaskDone, pdMS_TO_TICKS(100));
+                if (_audioTaskHandle == NULL && _netTaskHandle == NULL && _videoTaskHandle == NULL) {
+                    releaseResources();
+                    _isLoaded = false;
+                } else {
+                    Serial.println("[synced] Warning: worker tasks still active, cannot load");
+                    return;
+                }
+            }
+        }
+
         if (_audioTaskHandle != NULL || _netTaskHandle != NULL || _videoTaskHandle != NULL) {
             Serial.println("[synced] Warning: worker tasks still active, cannot load");
             return;

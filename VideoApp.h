@@ -229,7 +229,7 @@ private:
         }
     }
 
-    void requestStop() {
+    void requestStopInternal() {
         HTTPClient http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false&async=true";
         http.begin(url);
@@ -242,12 +242,15 @@ private:
             syncPlugin->unload();
         }
 
+        _mode = MODE_BROWSE;
+        _dirty = true;
+    }
+
+    void requestStop() {
+        requestStopInternal();
         if (audioManager) {
             audioManager->release(AUDIO_VIDEO);
         }
-
-        _mode = MODE_BROWSE;
-        _dirty = true;
     }
 
     void renderToCanvas() {
@@ -364,7 +367,7 @@ public:
     }
 
     static void stopPlaybackStatic() {
-        if (_instance) _instance->requestStop();
+        if (_instance) _instance->requestStopInternal();
     }
 
     void begin() {

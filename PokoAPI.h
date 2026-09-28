@@ -364,16 +364,21 @@ public:
                     LittleFS.remove("/photos/upload.tmp");
                 } else if (_uploadSuccess) {
                     if (targetPath.length() > 0) {
-                        if (LittleFS.exists(targetPath)) {
-                            LittleFS.remove(targetPath);
+                        String backupPath = targetPath + ".bak";
+                        bool hadPrevious = LittleFS.exists(targetPath);
+                        if (hadPrevious) {
+                            if (LittleFS.exists(backupPath)) LittleFS.remove(backupPath);
+                            LittleFS.rename(targetPath, backupPath);
                         }
                         if (LittleFS.rename("/photos/upload.tmp", targetPath)) {
+                            if (hadPrevious) LittleFS.remove(backupPath);
                             Serial.printf("[gallery] uploaded %u bytes successfully as %s\n", (unsigned int)upload.totalSize, targetPath.c_str());
                         } else {
+                            if (hadPrevious) LittleFS.rename(backupPath, targetPath);
                             _uploadSuccess = false;
                             _uploadErrMsg = "Failed to finalize upload";
                             LittleFS.remove("/photos/upload.tmp");
-                            Serial.println("[gallery] atomic rename failed");
+                            Serial.println("[gallery] atomic rename failed, restored previous");
                         }
                     } else {
                         _uploadSuccess = false;

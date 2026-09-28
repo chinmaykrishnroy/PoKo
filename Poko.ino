@@ -425,7 +425,7 @@ void setup() {
     musicAppInstance->begin();
     if (audioManager) {
         audioManager->setMusicHandlers(
-            []() { if (musicAppInstance) musicAppInstance->stopPlayback(); },
+            []() { if (musicAppInstance) musicAppInstance->stopPlaybackInternal(); },
             []() { if (musicAppInstance) musicAppInstance->togglePlayPause(); },
             []() -> bool { return musicAppInstance ? musicAppInstance->isPlaying() : false; },
             []() -> const char* { return musicAppInstance ? musicAppInstance->getCurrentTitle() : "Music"; },
@@ -512,6 +512,7 @@ void setup() {
 void loop() {
     // Process button input and combos
     btnInput.update();
+    if (audioManager) audioManager->update();
 
     // WiFi STA/AP Non-blocking State Machine
     if (wifiState == STATE_WIFI_CONNECTING) {
@@ -556,15 +557,13 @@ void loop() {
             if (prefs.getBool("snap_auto", true)) {
                 if (snapService && !snapService->isLoaded()) {
                     Serial.println("[snap] auto-starting background SSync service");
-                    snapService->load();
-                    if (audioManager) {
-                        if (audioManager->activeSource() == AUDIO_NONE) {
-                            audioManager->request(AUDIO_SSYNC);
-                        } else {
-                            // Queue SSync as suspended background session so current foreground audio continues uninterrupted
-                            snapService->suspendAudio();
-                            audioManager->setSuspendedSource(AUDIO_SSYNC);
-                        }
+                    if (audioManager && audioManager->activeSource() != AUDIO_NONE) {
+                        Serial.println("[snap] other audio active on wifi connect, loading SSync as suspended");
+                        snapService->load(true);
+                        audioManager->setSuspendedSource(AUDIO_SSYNC);
+                    } else {
+                        snapService->load(false);
+                        if (audioManager) audioManager->request(AUDIO_SSYNC);
                     }
                 }
             }

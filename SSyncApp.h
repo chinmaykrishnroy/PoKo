@@ -122,7 +122,8 @@ private:
         _canvas->drawFastHLine(0, 114, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(theme.footerText, theme.headerBg);
-        const char* hint = "L:V-  R:V+  2R:Mute";
+        bool isSsyncActive = (audioManager && audioManager->activeSource() == AUDIO_SSYNC);
+        const char* hint = (!isSsyncActive || suspended) ? "2R:Resume SSync" : "L:V-  R:V+  2R:Mute";
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
         _canvas->print(hint);
@@ -151,16 +152,6 @@ public:
         _active = true;
         _dirty  = true;
         begin();
-        if (audioManager) {
-            audioManager->request(AUDIO_SSYNC);
-        }
-        if (_player) {
-            if (!_player->isLoaded()) {
-                _player->load();
-            } else if (_player->isSuspended()) {
-                _player->resumeAudio();
-            }
-        }
         renderToCanvas();
     }
 
@@ -180,35 +171,23 @@ public:
     SnapPlayer* getPlayer() { return _player; }
 
     void onLeft() {
-        if (_player) {
-            int curVol = _player->getVolume();
-            _player->setVolumePercent(max(0, curVol - 5));
-            _dirty = true;
-        }
+        if (audioManager) audioManager->rampVolume(-5);
+        _dirty = true;
     }
 
     void onRight() {
-        if (_player) {
-            int curVol = _player->getVolume();
-            _player->setVolumePercent(min(100, curVol + 5));
-            _dirty = true;
-        }
+        if (audioManager) audioManager->rampVolume(5);
+        _dirty = true;
     }
 
     void volumeRampDown() {
-        if (_player) {
-            int curVol = _player->getVolume();
-            _player->setVolumePercent(max(0, curVol - 2));
-            _dirty = true;
-        }
+        if (audioManager) audioManager->rampVolume(-2);
+        _dirty = true;
     }
 
     void volumeRampUp() {
-        if (_player) {
-            int curVol = _player->getVolume();
-            _player->setVolumePercent(min(100, curVol + 2));
-            _dirty = true;
-        }
+        if (audioManager) audioManager->rampVolume(2);
+        _dirty = true;
     }
 
     void onBack() {
@@ -217,11 +196,14 @@ public:
 
     void onEnter() {
         if (_player) {
-            if (_player->isSuspended()) {
+            bool isSsyncActive = (audioManager && audioManager->activeSource() == AUDIO_SSYNC);
+            if (!isSsyncActive || _player->isSuspended()) {
                 if (audioManager) {
                     audioManager->request(AUDIO_SSYNC);
                 }
-                _player->resumeAudio();
+                if (_player->isSuspended()) {
+                    _player->resumeAudio();
+                }
             } else {
                 _player->toggleMute();
             }
