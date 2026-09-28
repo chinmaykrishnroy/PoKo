@@ -22,6 +22,8 @@
 //  KEY Long     = refresh stats
 // ─────────────────────────────────────────────────────────────
 
+#include "BatteryManager.h"
+extern BatteryManager batteryManager;
 extern String getNetworkStatusMsg();
 
 class InfoApp {
@@ -42,13 +44,13 @@ private:
     static constexpr uint8_t FOOTER_Y      = 114;
 
     struct Row { char label[14]; char value[18]; uint16_t valColor; };
-    Row     _rows[14];
+    Row     _rows[16];
     uint8_t _rowCount = 0;
 
     void buildRows() {
         _rowCount = 0;
         auto add = [&](const char* lbl, String val, uint16_t col = POKO_CLR_TEXT) {
-            if (_rowCount >= 14) return;
+            if (_rowCount >= 16) return;
             strncpy(_rows[_rowCount].label, lbl, 13);
             _rows[_rowCount].label[13] = '\0';
             strncpy(_rows[_rowCount].value, val.c_str(), 17);
@@ -91,6 +93,16 @@ private:
                  (unsigned long)((sec % 3600) / 60),
                  (unsigned long)(sec % 60));
         add("Uptime",   buf,  POKO_CLR_TEXT);
+
+        // Battery
+        char batBuf[20];
+        snprintf(batBuf, sizeof(batBuf), "%d%% (%.2fV)%s",
+                 batteryManager.getPercentage(),
+                 batteryManager.getVoltage(),
+                 batteryManager.isCharging() ? " [CHG]" : "");
+        uint16_t batCol = batteryManager.isCharging() ? POKO_CLR_GREEN :
+                          (batteryManager.isLow() ? POKO_CLR_WARN : POKO_CLR_TEXT);
+        add("Battery",  batBuf, batCol);
 
         // Hardware
         snprintf(buf, sizeof(buf), "%u MHz", (unsigned)getCpuFrequencyMhz());

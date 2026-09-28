@@ -1441,20 +1441,6 @@ private:
         uint32_t activeRate = _sampleRate ? _sampleRate : 48000;
         _audioFault = false;
 
-        if (!_isSuspended) {
-            if (!initI2S(activeRate)) {
-                Serial.println("[snap] Audio task could not initialize I2S");
-                _audioFault = true;
-                _isRunning = false;
-                _client.stop();
-                _audioTaskHandle = nullptr;
-                if (_audioTaskDone) xSemaphoreGive(_audioTaskDone);
-                vTaskDelete(NULL);
-                return;
-            }
-            if (_audioReady) xSemaphoreGive(_audioReady);
-        }
-
         static constexpr uint32_t PCM_OUT_CAP = 257;
         int16_t pcmIn[256 * 2];
         int16_t pcmOut[PCM_OUT_CAP * 2];
@@ -1507,11 +1493,9 @@ private:
                 deinitI2S();
                 activeRate = _sampleRate;
                 if (!initI2S(activeRate)) {
-                    Serial.println("[snap] I2S re-init failed after sample-rate change");
-                    _audioFault = true;
-                    _isRunning = false;
-                    _client.stop();
-                    break;
+                    Serial.println("[snap] I2S re-init waiting after sample-rate change");
+                    vTaskDelay(pdMS_TO_TICKS(50));
+                    continue;
                 }
                 _resyncGeneration++;
                 _producerAwaitingResync = true;
@@ -2159,6 +2143,8 @@ public:
         }
         if (_client.connected()) {
             _client.stop();
+        } else if (!_isLoaded && WiFi.status() == WL_CONNECTED) {
+            load(true);
         }
     }
 };

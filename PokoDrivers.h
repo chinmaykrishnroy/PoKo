@@ -52,6 +52,54 @@ inline void setBacklight(uint8_t duty) {  // 0–255
     ledcWriteChannel(POKO_BL_PWM_CHANNEL, duty);
 }
 
+// ── Hardware Power Latch (BAT_EN) ────────────────────────────
+inline void powerLatchOn() {
+    pinMode(POKO_PIN_BAT_EN, OUTPUT);
+    digitalWrite(POKO_PIN_BAT_EN, HIGH);
+    Serial.println("[power] Hardware power latch engaged (BAT_EN=HIGH)");
+}
+
+inline void powerLatchOff() {
+    pinMode(POKO_PIN_BAT_EN, OUTPUT);
+    digitalWrite(POKO_PIN_BAT_EN, LOW);
+    Serial.println("[power] Hardware power latch released (BAT_EN=LOW)");
+}
+
+// ── GC9107 Hardware Display Sleep & Wake ─────────────────────
+inline bool _displayAsleep = false;
+
+inline void displaySleep() {
+    if (_displayAsleep) return;
+    _displayAsleep = true;
+    setBacklight(0);
+    if (pokoBus) {
+        pokoBus->beginWrite();
+        pokoBus->writeCommand(0x28); // GC9107_DISPOFF
+        pokoBus->writeCommand(0x10); // GC9107_SLPIN
+        pokoBus->endWrite();
+    }
+    Serial.println("[display] GC9107 sleep in / display off");
+}
+
+inline void displayWake() {
+    if (!_displayAsleep) return;
+    _displayAsleep = false;
+    if (pokoBus) {
+        pokoBus->beginWrite();
+        pokoBus->writeCommand(0x11); // GC9107_SLPOUT
+        pokoBus->endWrite();
+        delay(120); // Required GC9107 sleep-out delay
+        pokoBus->beginWrite();
+        pokoBus->writeCommand(0x29); // GC9107_DISPON
+        pokoBus->endWrite();
+    }
+    Serial.println("[display] GC9107 sleep out / display on");
+}
+
+inline bool isDisplayAsleep() {
+    return _displayAsleep;
+}
+
 // Convert 0–100 percent to 0–255 duty
 inline void setBacklightPercent(int pct) {
     pct = constrain(pct, 0, 100);
@@ -68,6 +116,34 @@ inline void deinitI2S();
 inline esp_err_t initI2S(uint32_t sampleRate = 44100,
                           uint8_t  channels   = 2,
                           uint8_t  bitsPerSample = 16);
+
+inline bool _speakerAmpEnabled = false;
+
+inline void setSpeakerAmp(bool enabled) {
+    _speakerAmpEnabled = enabled;
+    pinMode(POKO_PIN_PA_CTRL, OUTPUT);
+    digitalWrite(POKO_PIN_PA_CTRL, enabled ? HIGH : LOW);
+}
+
+inline bool isSpeakerAmpEnabled() {
+    return _speakerAmpEnabled;
+}
+
+inline void standbyAudioOutputHardware() {
+    if (_es8311Handle) {
+        es8311_voice_mute(_es8311Handle, true);
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+    setSpeakerAmp(false);
+}
+
+inline void restoreAudioOutputHardware() {
+    setSpeakerAmp(true);
+    vTaskDelay(pdMS_TO_TICKS(15));
+    if (_es8311Handle) {
+        es8311_voice_mute(_es8311Handle, false);
+    }
+}
 
 inline bool initES8311(uint32_t sampleRate = 44100) {
     // ES8311 internal PLL requires MCLK actively driven on pin 8.
@@ -116,8 +192,7 @@ inline bool initES8311(uint32_t sampleRate = 44100) {
     es8311_microphone_gain_set(_es8311Handle, ES8311_MIC_GAIN_30DB);
 
     // Power on speaker amplifier
-    pinMode(POKO_PIN_PA_CTRL, OUTPUT);
-    digitalWrite(POKO_PIN_PA_CTRL, HIGH);
+    setSpeakerAmp(true);
 
     Serial.printf("[ES8311] DAC ready at %lu Hz; speaker amp enabled\n", (unsigned long)sampleRate);
     return true;
@@ -310,8 +385,7 @@ inline bool ensureAudioOutput(uint32_t sampleRate = 44100) {
     }
 
     // Power on speaker amplifier
-    pinMode(POKO_PIN_PA_CTRL, OUTPUT);
-    digitalWrite(POKO_PIN_PA_CTRL, HIGH);
+    setSpeakerAmp(true);
 
     // Ensure codec is active and volume is applied
     es8311Mute(false);

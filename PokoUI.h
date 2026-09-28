@@ -7,6 +7,9 @@
 #include "PokoPins.h"
 #include "PokoTheme.h"
 #include "AudioManager.h"
+#include "BatteryManager.h"
+
+extern BatteryManager batteryManager;
 
 // ─────────────────────────────────────────────────────────────
 //  PokoUI — Launcher carousel (7 tiles) + status bar (128×128)
@@ -93,8 +96,13 @@ private:
         _statusCanvas->setTextColor(theme.headerText, theme.headerBg);
         int16_t x1, y1; uint16_t w, h;
         _statusCanvas->getTextBounds("PoKo", 0, 0, &x1, &y1, &w, &h);
-        _statusCanvas->setCursor(64 - w / 2, 10);
+        _statusCanvas->setCursor(56 - w / 2, 10);
         _statusCanvas->print("PoKo");
+
+        // Battery indicator icon
+        int batPct = batteryManager.getPercentage();
+        bool batChg = batteryManager.isCharging();
+        drawBatteryIcon(78, 4, batPct, batChg);
 
         // Right: Live time (or uptime until NTP time is synced)
         char buf[12];
@@ -122,6 +130,37 @@ private:
         _statusCanvas->print(buf);
 
         _statusCanvas->flush();
+    }
+
+    void drawBatteryIcon(int x, int y, int pct, bool charging) {
+        const auto& theme = currentTheme();
+        uint16_t bodyColor = theme.muted;
+        uint16_t fillColor = theme.accent;
+
+        if (charging) {
+            fillColor = POKO_CLR_GREEN;
+            bodyColor = theme.text;
+        } else if (pct <= 15) {
+            fillColor = POKO_CLR_ERR;
+            bodyColor = POKO_CLR_ERR;
+        } else if (pct <= 30) {
+            fillColor = POKO_CLR_WARN;
+        }
+
+        // Battery outer shell (11x6 px) + nipple (1x2 px)
+        _statusCanvas->drawRect(x, y, 11, 6, bodyColor);
+        _statusCanvas->drawFastVLine(x + 11, y + 2, 2, bodyColor);
+
+        // Fill bar (0 to 7 px width inside, height 2 px)
+        int fillW = map(constrain(pct, 0, 100), 0, 100, 0, 7);
+        if (fillW > 0) {
+            _statusCanvas->fillRect(x + 2, y + 2, fillW, 2, fillColor);
+        }
+
+        // If charging, draw small 1-pixel blink indicator
+        if (charging && ((millis() / 400) % 2 == 0)) {
+            _statusCanvas->drawPixel(x + 5, y + 2, RGB565_WHITE);
+        }
     }
 
     // Draw a per-app icon centred at (cx,cy) using GFX primitives

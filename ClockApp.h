@@ -9,6 +9,9 @@
 
 #include "PokoTheme.h"
 #include "AudioManager.h"
+#include "PowerManager.h"
+
+extern PowerManager* powerManager;
 
 // ─────────────────────────────────────────────────────────────
 //  ClockApp — Digital Clock (128×128) with NTP sync (IST)
@@ -205,9 +208,13 @@ public:
 
     void update() {
         if (!_active) return;
+        if (powerManager && (powerManager->getDisplayState() == DISPLAY_POWER_OFF || powerManager->getDisplayState() == DISPLAY_POWER_SLEEP)) {
+            return; // Don't redraw while screen is asleep
+        }
         uint32_t now = millis();
         bool audioBlinking = (audioManager && (audioManager->isSoundPlaying() || audioManager->hasError()));
-        uint32_t interval = audioBlinking ? 100 : 1000;
+        bool isDimmed = (powerManager && powerManager->getDisplayState() == DISPLAY_POWER_DIMMED);
+        uint32_t interval = audioBlinking ? 100 : (isDimmed ? 60000 : 1000);
         if (now - _lastDrawMs >= interval) {
             _lastDrawMs = now;
             _dirty = true;

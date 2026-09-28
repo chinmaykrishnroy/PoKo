@@ -10,6 +10,7 @@
 #include "PokoTheme.h"
 #include "AudioManager.h"
 #include "SnapPlayer.h"
+#include "PowerManager.h"
 
 // ─────────────────────────────────────────────────────────────
 //  SettingsApp — On-device settings menu (128×128)
@@ -19,6 +20,7 @@
 extern Preferences prefs;
 extern void handleDriverReset();
 extern SnapPlayer* snapService;
+extern PowerManager* powerManager;
 
 class SettingsApp {
 private:
@@ -32,7 +34,7 @@ private:
     uint8_t  _scroll    = 0;
     uint32_t _lastBlinkMs = 0;
 
-    static constexpr uint8_t ITEM_COUNT   = 8;
+    static constexpr uint8_t ITEM_COUNT   = 11;
     static constexpr uint8_t ROW_H        = 16;
     static constexpr uint8_t TOP_Y        = 14;
     static constexpr uint8_t ROWS_VISIBLE = 6;
@@ -43,6 +45,9 @@ private:
         "Master Vol",
         "Brightness",
         "Amp Boost",
+        "Dim Timeout",
+        "Sleep Timeout",
+        "Auto-Off",
         "Slide Timer",
         "SSync Auto",
         "Reset Drivers",
@@ -117,13 +122,32 @@ private:
                 case 1: snprintf(valBuf, sizeof(valBuf), "%d%%", curMaster); break;
                 case 2: snprintf(valBuf, sizeof(valBuf), "%d%%", curBr); break;
                 case 3: snprintf(valBuf, sizeof(valBuf), "+%ddB", curBoost); break;
-                case 4:
+                case 4: {
+                    uint32_t dt = powerManager ? powerManager->getDimTimeout() : prefs.getUInt("dim_timeout", 15);
+                    if (dt == 0) snprintf(valBuf, sizeof(valBuf), "Off");
+                    else         snprintf(valBuf, sizeof(valBuf), "%us", dt);
+                    break;
+                }
+                case 5: {
+                    uint32_t st = powerManager ? powerManager->getSleepTimeout() : prefs.getUInt("sleep_timeout", 30);
+                    if (st == 0)      snprintf(valBuf, sizeof(valBuf), "Off");
+                    else if (st < 60) snprintf(valBuf, sizeof(valBuf), "%us", st);
+                    else              snprintf(valBuf, sizeof(valBuf), "%um", st / 60);
+                    break;
+                }
+                case 6: {
+                    uint32_t ao = powerManager ? powerManager->getAutoOffTimeout() : prefs.getUInt("auto_off", 900);
+                    if (ao == 0) snprintf(valBuf, sizeof(valBuf), "Never");
+                    else         snprintf(valBuf, sizeof(valBuf), "%um", ao / 60);
+                    break;
+                }
+                case 7:
                     if (curSlide == 0) snprintf(valBuf, sizeof(valBuf), "Off");
                     else snprintf(valBuf, sizeof(valBuf), "%ds", curSlide);
                     break;
-                case 5: snprintf(valBuf, sizeof(valBuf), ssyncAuto ? "On" : "Off"); break;
-                case 6: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
-                case 7: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
+                case 8: snprintf(valBuf, sizeof(valBuf), ssyncAuto ? "On" : "Off"); break;
+                case 9: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
+                case 10: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
             }
 
             _canvas->setTextColor(valCol, isSel ? theme.surface : theme.bg);
@@ -185,7 +209,37 @@ private:
                 prefs.putInt("amp_boost", boost);
                 break;
             }
-            case 4: { // Cycle Slide Timer: 0 -> 3 -> 5 -> 10 -> 15 -> 30 -> 60 -> 0
+            case 4: { // Dim Timeout: 15s -> 30s -> 60s -> Off(0) -> 15s
+                uint32_t cur = powerManager ? powerManager->getDimTimeout() : prefs.getUInt("dim_timeout", 15);
+                uint32_t next = (cur == 15) ? 30 : ((cur == 30) ? 60 : ((cur == 60) ? 0 : 15));
+                if (powerManager) powerManager->setDimTimeout(next);
+                else              prefs.putUInt("dim_timeout", next);
+                break;
+            }
+            case 5: { // Sleep Timeout: 30s -> 1m(60s) -> 2m(120s) -> 5m(300s) -> Off(0) -> 30s
+                uint32_t cur = powerManager ? powerManager->getSleepTimeout() : prefs.getUInt("sleep_timeout", 30);
+                uint32_t next = 30;
+                if (cur == 30)       next = 60;
+                else if (cur == 60)  next = 120;
+                else if (cur == 120) next = 300;
+                else if (cur == 300) next = 0;
+                else                 next = 30;
+                if (powerManager) powerManager->setSleepTimeout(next);
+                else              prefs.putUInt("sleep_timeout", next);
+                break;
+            }
+            case 6: { // Auto-Off: 10m(600s) -> 15m(900s) -> 30m(1800s) -> Never(0) -> 10m(600s)
+                uint32_t cur = powerManager ? powerManager->getAutoOffTimeout() : prefs.getUInt("auto_off", 900);
+                uint32_t next = 600;
+                if (cur == 600)       next = 900;
+                else if (cur == 900)  next = 1800;
+                else if (cur == 1800) next = 0;
+                else                  next = 600;
+                if (powerManager) powerManager->setAutoOffTimeout(next);
+                else              prefs.putUInt("auto_off", next);
+                break;
+            }
+            case 7: { // Cycle Slide Timer: 0 -> 3 -> 5 -> 10 -> 15 -> 30 -> 60 -> 0
                 int cur = prefs.getInt("gallery_timer", 0);
                 int next = 0;
                 if (cur == 0)       next = 3;
@@ -198,7 +252,7 @@ private:
                 prefs.putInt("gallery_timer", next);
                 break;
             }
-            case 5: { // SSync Auto (On <-> Off)
+            case 8: { // SSync Auto (On <-> Off)
                 bool nextAuto = !prefs.getBool("snap_auto", true);
                 prefs.putBool("snap_auto", nextAuto);
                 if (nextAuto) {
@@ -225,11 +279,11 @@ private:
                 }
                 break;
             }
-            case 6: { // Reset Drivers
+            case 9: { // Reset Drivers
                 handleDriverReset();
                 break;
             }
-            case 7: { // Reboot
+            case 10: { // Reboot
                 prefs.putBool("clean_shutdown", true);
                 _canvas->fillScreen(POKO_CLR_ERR);
                 _canvas->setFont(u8g2_font_helvB10_tf);

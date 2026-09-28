@@ -11,6 +11,7 @@
 #include "PokoAppState.h"
 #include "PokoPins.h"
 #include "PokoTheme.h"
+#include "PowerManager.h"
 
 // ─────────────────────────────────────────────────────────────
 //  GalleryApp — Photo viewer (128×128)
@@ -26,6 +27,7 @@
 // ─────────────────────────────────────────────────────────────
 
 extern Preferences prefs;
+extern PowerManager* powerManager;
 
 class GalleryApp {
 public:
@@ -433,6 +435,9 @@ public:
 
     void unload() {
         _active = false;
+        if (powerManager) {
+            powerManager->releaseLock(POWER_LOCK_DISPLAY);
+        }
         if (_canvas) {
             delete _canvas;
             _canvas = nullptr;
@@ -512,11 +517,16 @@ public:
 
         // Slideshow Auto-advance Timer
         int slideInterval = prefs.getInt("gallery_timer", 0);
-        if (slideInterval > 0 && _photoCount > 1 && (now - _lastSlideMs >= (uint32_t)slideInterval * 1000)) {
-            _lastSlideMs = now;
-            _photoIdx = (_photoIdx + 1) % _photoCount;
-            loadCurrentPhoto();
-            _dirty = true;
+        if (slideInterval > 0 && _photoCount > 1) {
+            if (powerManager) powerManager->acquireLock(POWER_LOCK_DISPLAY);
+            if (now - _lastSlideMs >= (uint32_t)slideInterval * 1000) {
+                _lastSlideMs = now;
+                _photoIdx = (_photoIdx + 1) % _photoCount;
+                loadCurrentPhoto();
+                _dirty = true;
+            }
+        } else {
+            if (powerManager) powerManager->releaseLock(POWER_LOCK_DISPLAY);
         }
 
         if (!_dirty) return;

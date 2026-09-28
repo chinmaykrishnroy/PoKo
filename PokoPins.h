@@ -29,13 +29,24 @@
 #define POKO_PIN_LED_DATA   48
 #define POKO_LED_COUNT      8
 
-// ── Buttons ──────────────────────────────────────────────────
-//   BOOT button (GPIO 0) = Left navigation
-//   KEY  button (GPIO 5 & GPIO 4) = Right navigation (support both)
-#define POKO_PIN_BTN_LEFT    0    // BOOT button
-#define POKO_PIN_BTN_RIGHT1  5    // KEY button 1
-#define POKO_PIN_BTN_RIGHT2  4    // KEY button 2
-#define POKO_PIN_BTN_RIGHT   5
+// ── Battery & Power Circuit ──────────────────────────────────
+#define POKO_PIN_BAT_ADC     1    // Battery voltage divider (ADC1_CH0, 1:2 divider, multiplier = 3.0)
+#define POKO_PIN_BAT_EN      2    // Power hold latch: HIGH = keep battery power ON, LOW = release / power off
+#define POKO_PIN_CHARGING    3    // Charging status input: LOW = charging, HIGH = not charging / full (pullup enabled)
+
+// ── Physical Buttons ─────────────────────────────────────────
+//   BOOT / DOWN button (GPIO 0)
+//   PLUS / UP   button (GPIO 4)
+//   PWR         button (GPIO 5, dedicated system button)
+#define POKO_PIN_BTN_DOWN    0    // BOOT / DOWN button
+#define POKO_PIN_BTN_UP      4    // PLUS / UP button
+#define POKO_PIN_BTN_PWR     5    // PWR button (power / sleep / wake)
+
+// Legacy aliases for backward compatibility:
+#define POKO_PIN_BTN_LEFT    POKO_PIN_BTN_DOWN
+#define POKO_PIN_BTN_RIGHT   POKO_PIN_BTN_UP
+#define POKO_PIN_BTN_RIGHT1  POKO_PIN_BTN_PWR
+#define POKO_PIN_BTN_RIGHT2  POKO_PIN_BTN_UP
 
 // ── Backlight PWM ────────────────────────────────────────────
 #define POKO_BL_PWM_CHANNEL 0

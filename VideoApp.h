@@ -13,6 +13,9 @@
 #include "PokoDrivers.h"
 #include "SyncedAVPlayer.h"
 #include "AudioManager.h"
+#include "PowerManager.h"
+
+extern PowerManager* powerManager;
 
 // ─────────────────────────────────────────────────────────────
 //  VideoApp — Single-Thumbnail Video Browser & Synced AV Player
@@ -221,6 +224,9 @@ private:
             _playStartMs = millis();
             _dirty = true;
             fetchThumbnail(idx);
+            if (powerManager) {
+                powerManager->acquireLock(POWER_LOCK_DISPLAY | POWER_LOCK_REALTIME_NET);
+            }
         } else {
             Serial.printf("[video] requestPlay failed with code %d\n", httpCode);
             _dirty = true;
@@ -245,6 +251,10 @@ private:
         if (syncPlugin) {
             syncPlugin->reset();
             syncPlugin->unload();
+        }
+
+        if (powerManager) {
+            powerManager->releaseLock(POWER_LOCK_DISPLAY | POWER_LOCK_REALTIME_NET);
         }
 
         _mode = MODE_BROWSE;
@@ -401,6 +411,9 @@ public:
 
     void unload() {
         _active = false;
+        if (powerManager) {
+            powerManager->releaseLock(POWER_LOCK_DISPLAY | POWER_LOCK_REALTIME_NET);
+        }
         if (_mode == MODE_PLAYING) {
             requestStop();
         } else {

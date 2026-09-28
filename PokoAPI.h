@@ -12,6 +12,8 @@
 #include "MusicApp.h"
 #include "VideoApp.h"
 #include "GalleryApp.h"
+#include "BatteryManager.h"
+#include "PowerManager.h"
 
 // ─────────────────────────────────────────────────────────────
 //  PokoAPI — Master REST API & Web Dashboard backend
@@ -29,6 +31,8 @@ extern void onBtnLeft();
 extern void onBtnRight();
 extern void onBtnLeftDouble();
 extern void onBtnRightDouble();
+extern BatteryManager batteryManager;
+extern PowerManager* powerManager;
 
 class PokoAPI {
 private:
@@ -86,7 +90,10 @@ public:
             json += "\"music_effect\":" + String((int)pixelEngine.getMusicEffect()) + ",";
             json += "\"ssync_light\":" + String(pixelEngine.getSSyncLightOn() ? "true" : "false") + ",";
             json += "\"ssync_effect\":" + String((int)pixelEngine.getSSyncEffect()) + ",";
-            json += "\"freq_resp\":" + String((int)pixelEngine.getFreqResponse());
+            json += "\"freq_resp\":" + String((int)pixelEngine.getFreqResponse()) + ",";
+            json += "\"battery_v\":" + String(batteryManager.getVoltage(), 2) + ",";
+            json += "\"battery_pct\":" + String(batteryManager.getPercentage()) + ",";
+            json += "\"charging\":" + String(batteryManager.isCharging() ? "true" : "false");
             json += "}";
             _server->send(200, "application/json", json);
         });
@@ -122,6 +129,56 @@ public:
                           ",\"master_vol\":" + String(curM) +
                           ",\"amp_boost\":" + String(curAmp) + "}";
             _server->send(200, "application/json", resp);
+        });
+
+        // Power Management & Battery telemetry endpoint
+        _server->on("/api/power", HTTP_ANY, [this]() {
+            if (!powerManager) {
+                _server->send(503, "application/json", "{\"ok\":false,\"error\":\"PowerManager not initialized\"}");
+                return;
+            }
+
+            if (_server->hasArg("dim_timeout")) {
+                powerManager->setDimTimeout(_server->arg("dim_timeout").toInt());
+            }
+            if (_server->hasArg("sleep_timeout")) {
+                powerManager->setSleepTimeout(_server->arg("sleep_timeout").toInt());
+            }
+            if (_server->hasArg("auto_off")) {
+                powerManager->setAutoOffTimeout(_server->arg("auto_off").toInt());
+            }
+            if (_server->hasArg("ambient_clock")) {
+                powerManager->setAmbientClock(_server->arg("ambient_clock").toInt() != 0);
+            }
+
+            if (_server->hasArg("screen")) {
+                String cmd = _server->arg("screen");
+                if (cmd == "on" || cmd == "wake") {
+                    powerManager->wakeDisplay();
+                } else if (cmd == "off" || cmd == "sleep") {
+                    powerManager->sleepDisplay();
+                } else if (cmd == "dim") {
+                    powerManager->dimDisplay();
+                } else if (cmd == "toggle") {
+                    powerManager->toggleScreen();
+                }
+            }
+
+            if (_server->hasArg("power_off")) {
+                _server->send(200, "application/json", "{\"ok\":true,\"message\":\"Shutting down\"}");
+                delay(100);
+                powerManager->powerOff(false);
+                return;
+            }
+
+            if (_server->hasArg("reboot")) {
+                _server->send(200, "application/json", "{\"ok\":true,\"message\":\"Rebooting\"}");
+                delay(100);
+                powerManager->powerOff(true);
+                return;
+            }
+
+            _server->send(200, "application/json", powerManager->getTelemetryJson());
         });
 
         // Theme endpoint (Dark / Light)
@@ -174,6 +231,31 @@ public:
                 bool m = (mStr == "1" || mStr == "true" || mStr == "yes" || mStr == "on");
                 if (ssyncAppInstance && ssyncAppInstance->getPlayer()) {
                     ssyncAppInstance->getPlayer()->setMute(m);
+                }
+            }
+            if (_server->hasArg("auto")) {
+                String aStr = _server->arg("auto");
+                aStr.toLowerCase();
+                bool a = (aStr == "1" || aStr == "true" || aStr == "yes" || aStr == "on");
+                _prefs->putBool("snap_auto", a);
+            }
+            if (_server->hasArg("action")) {
+                String act = _server->arg("action");
+                act.toLowerCase();
+                if (act == "play" || act == "start" || act == "resume") {
+                    if (audioManager) audioManager->request(AUDIO_SSYNC);
+                    if (ssyncAppInstance && ssyncAppInstance->getPlayer() && ssyncAppInstance->getPlayer()->isSuspended()) {
+                        ssyncAppInstance->getPlayer()->resumeAudio();
+                    }
+                } else if (act == "pause" || act == "stop" || act == "suspend") {
+                    if (audioManager && audioManager->activeSource() == AUDIO_SSYNC) {
+                        audioManager->release(AUDIO_SSYNC);
+                    }
+                } else if (act == "reload" || act == "reconnect" || act == "restart") {
+                    if (ssyncAppInstance && ssyncAppInstance->getPlayer()) {
+                        ssyncAppInstance->getPlayer()->unload();
+                        ssyncAppInstance->getPlayer()->load(true);
+                    }
                 }
             }
             String j = (ssyncAppInstance) ? ssyncAppInstance->apiJson() : "{}";

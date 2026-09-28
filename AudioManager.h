@@ -83,7 +83,7 @@ private:
                 // Publish ownership BEFORE snapAudio attempts initI2S
                 _activeSource = AUDIO_SSYNC;
                 _snapPlayer->resumeAudio();
-                bool ok = _snapPlayer->waitForAudioReady(500);
+                bool ok = _snapPlayer->waitForAudioReady(1000);
                 if (!ok) {
                     Serial.println("[audioMgr] SSync audio failed to ready");
                     _snapPlayer->suspendAudio();

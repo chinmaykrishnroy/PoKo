@@ -23,6 +23,8 @@
 #include "PokoOTA.h"
 #include "PokoAPI.h"
 #include "AudioManager.h"
+#include "BatteryManager.h"
+#include "PowerManager.h"
 
 // ─────────────────────────────────────────────────────────────
 //  Poko Core Firmware — Complete 8-App Suite
@@ -36,6 +38,8 @@ WebServer   server(80);
 Preferences prefs;
 DNSServer   dnsServer;
 ButtonInput btnInput;
+BatteryManager batteryManager;
+PowerManager*  powerManager      = nullptr;
 
 // UI & Apps
 PokoUI*      pokoUI              = nullptr;
@@ -153,8 +157,26 @@ void handleDriverReset() {
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->load();
 }
 
+// ── Power-aware Button Wake & Action Filter ──────────────────
+bool handleButtonWakeCheck(bool isVolumeAction = false) {
+    if (!powerManager) return true;
+    if (powerManager->getDisplayState() == DISPLAY_POWER_OFF || powerManager->getDisplayState() == DISPLAY_POWER_SLEEP) {
+        if (isVolumeAction && audioManager && audioManager->hasActiveSession()) {
+            // Audio playing + screen off + volume action: allow action without waking display
+            return true;
+        }
+        // Screen off and no audio (or non-volume action): wake display and consume event
+        powerManager->wakeDisplay();
+        return false;
+    }
+    // Screen is on (active or dimmed): notify activity and allow action
+    powerManager->notifyUserActivity(ACTIVITY_BUTTON);
+    return true;
+}
+
 // ── Button & Combo Callbacks ──────────────────────────────────
 void onBtnLeft() {
+    if (!handleButtonWakeCheck(false)) return;
     Serial.println("[action] Left (BOOT) Clicked");
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->navigateLeft();
     else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onLeft();
@@ -168,6 +190,7 @@ void onBtnLeft() {
 }
 
 void onBtnRight() {
+    if (!handleButtonWakeCheck(false)) return;
     Serial.println("[action] Right (KEY) Clicked");
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->navigateRight();
     else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onRight();
@@ -181,6 +204,7 @@ void onBtnRight() {
 }
 
 void onBtnLeftHolding() {
+    if (!handleButtonWakeCheck(true)) return;
     if (activeApp == STATE_PIXELS_UI && pixelAppInstance) {
         pixelAppInstance->onHoldingLeft();
     } else if (activeApp == STATE_SSYNC && ssyncAppInstance) {
@@ -203,6 +227,7 @@ void onBtnLeftHolding() {
 }
 
 void onBtnRightHolding() {
+    if (!handleButtonWakeCheck(true)) return;
     if (activeApp == STATE_PIXELS_UI && pixelAppInstance) {
         pixelAppInstance->onHoldingRight();
     } else if (activeApp == STATE_SSYNC && ssyncAppInstance) {
@@ -225,6 +250,7 @@ void onBtnRightHolding() {
 }
 
 void onBtnLeftDouble() {
+    if (!handleButtonWakeCheck(false)) return;
     Serial.println("[action] Left Double-Click -> Exit / Back");
     if (activeApp == STATE_LAUNCHER) {
         // Double-click Left on Home screen: Stop current active audio service and remove dot
@@ -248,6 +274,7 @@ void onBtnLeftDouble() {
 }
 
 void onBtnRightDouble() {
+    if (!handleButtonWakeCheck(false)) return;
     Serial.println("[action] Right Double-Click -> Enter / Action");
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->enter();
     else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onEnter();
@@ -261,6 +288,7 @@ void onBtnRightDouble() {
 }
 
 void onBtnLongRight() {
+    if (!handleButtonWakeCheck(false)) return;
     Serial.println("[action] Right Long-Press");
     if (activeApp == STATE_INFO && infoAppInstance)                  infoAppInstance->onLongRight();
     else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->onLongRight();
@@ -268,6 +296,7 @@ void onBtnLongRight() {
 
 // ── Dual Button Combos ────────────────────────────────────────
 void onComboBothClick() {
+    if (!handleButtonWakeCheck(true)) return;
     Serial.println("[combo] both click -> Toggle Audio Play/Pause or LED");
     if (audioManager && audioManager->hasActiveSession()) {
         audioManager->togglePlayPause();
@@ -284,11 +313,13 @@ void onComboBothClick() {
 }
 
 void onComboBothDouble() {
+    if (!handleButtonWakeCheck(false)) return;
     Serial.println("[combo] both double-click -> Jump to InfoApp");
     onAppChange(STATE_INFO);
 }
 
 void onComboBothLong() {
+    if (!handleButtonWakeCheck(false)) return;
     int cur = prefs.getInt("brightness", 80);
     int next = 80;
     if (cur <= 30)      next = 60;
@@ -315,6 +346,7 @@ void onComboBothUltra() {
 
 // ── Arduino Setup ─────────────────────────────────────────────
 void setup() {
+    powerLatchOn();
     Serial.begin(115200);
     delay(100);
     Serial.println("\n\n========================================");
@@ -323,6 +355,7 @@ void setup() {
 
     // Preferences & Settings
     prefs.begin("poko", false);
+    batteryManager.begin();
 
     // Hardware reset reason & clean shutdown check
     esp_reset_reason_t rstReason = esp_reset_reason();
@@ -388,15 +421,23 @@ void setup() {
     initLEDs();
     pixelEngine.loadFromPreferences(prefs);
 
-    // 5. Button Input Setup
+    // 5. Button Input Setup (3 physical buttons: DOWN=0, UP=4, PWR=5)
     btnInput.begin();
-    btnInput.onLeft(onBtnLeft);
-    btnInput.onRight(onBtnRight);
-    btnInput.onLeftDouble(onBtnLeftDouble);
-    btnInput.onRightDouble(onBtnRightDouble);
-    btnInput.onLeftHolding(onBtnLeftHolding);
-    btnInput.onRightHolding(onBtnRightHolding);
-    btnInput.onLongRight(onBtnLongRight);
+    btnInput.onDown(onBtnLeft);
+    btnInput.onUp(onBtnRight);
+    btnInput.onDownDouble(onBtnLeftDouble);
+    btnInput.onUpDouble(onBtnRightDouble);
+    btnInput.onDownHolding(onBtnLeftHolding);
+    btnInput.onUpHolding(onBtnRightHolding);
+    btnInput.onLongUp(onBtnLongRight);
+    btnInput.onPwrClick([]() {
+        Serial.println("[btn] PWR Click -> Toggle Screen");
+        if (powerManager) powerManager->toggleScreen();
+    });
+    btnInput.onPwrLong([]() {
+        Serial.println("[btn] PWR Long -> Graceful Shutdown");
+        if (powerManager) powerManager->powerOff();
+    });
     btnInput.onBothClick(onComboBothClick);
     btnInput.onBothDouble(onComboBothDouble);
     btnInput.onBothLong(onComboBothLong);
@@ -408,6 +449,10 @@ void setup() {
     snapService = new SnapPlayer(nullptr, &prefs);
     snapService->begin();
     audioManager->setSnapPlayer(snapService);
+
+    // 7. Instantiate Central PowerManager
+    powerManager = new PowerManager(&batteryManager, audioManager, &prefs);
+    powerManager->begin();
 
     pokoUI = new PokoUI(pokoGfx, onAppChange);
     pokoUI->begin();
@@ -513,6 +558,7 @@ void loop() {
     // Process button input and combos
     btnInput.update();
     if (audioManager) audioManager->update();
+    if (powerManager) powerManager->update();
 
     // WiFi STA/AP Non-blocking State Machine
     if (wifiState == STATE_WIFI_CONNECTING) {
@@ -526,6 +572,7 @@ void loop() {
             if (!otaInit) {
                 ArduinoOTA.setHostname("Poko");
                 ArduinoOTA.onStart([]() {
+                    if (powerManager) powerManager->acquireLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
                     if (audioManager) audioManager->stopAll();
                     if (snapService && snapService->isLoaded()) {
                         snapService->unload();
@@ -539,10 +586,12 @@ void loop() {
                     }
                 });
                 ArduinoOTA.onError([](ota_error_t error) {
+                    if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
                     pixelEngine.showOtaError();
                 });
                 ArduinoOTA.onEnd([]() {
                     pixelEngine.showOtaProgress(100.0f);
+                    if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
                     Preferences p;
                     p.begin("poko", false);
                     p.putBool("clean_shutdown", true);
@@ -554,9 +603,10 @@ void loop() {
 
             if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
 
-            if (prefs.getBool("snap_auto", true)) {
+            bool shouldAutoStartSnap = prefs.getBool("snap_auto", true) || (activeApp == STATE_SSYNC);
+            if (shouldAutoStartSnap) {
                 if (snapService && !snapService->isLoaded()) {
-                    Serial.println("[snap] auto-starting background SSync service");
+                    Serial.println("[snap] starting SSync service on wifi connect");
                     if (audioManager && audioManager->activeSource() != AUDIO_NONE) {
                         Serial.println("[snap] other audio active on wifi connect, loading SSync as suspended");
                         snapService->load(true);

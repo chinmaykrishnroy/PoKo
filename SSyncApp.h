@@ -152,6 +152,19 @@ public:
         _active = true;
         _dirty  = true;
         begin();
+        if (_player) {
+            if (!_player->isLoaded()) {
+                if (audioManager && audioManager->activeSource() != AUDIO_NONE) {
+                    _player->load(true);
+                } else if (audioManager) {
+                    audioManager->request(AUDIO_SSYNC);
+                } else {
+                    _player->load(false);
+                }
+            } else if (_player->isSuspended() && audioManager && audioManager->activeSource() == AUDIO_NONE) {
+                audioManager->request(AUDIO_SSYNC);
+            }
+        }
         renderToCanvas();
     }
 
@@ -257,6 +270,9 @@ public:
         String j = "{";
         j += "\"connected\":" + String(_player->isConnected() ? "true" : "false") + ",";
         j += "\"playing\":" + String(_player->isPlaying() ? "true" : "false") + ",";
+        j += "\"loaded\":" + String(_player->isLoaded() ? "true" : "false") + ",";
+        j += "\"suspended\":" + String(_player->isSuspended() ? "true" : "false") + ",";
+        j += "\"audio_active\":" + String((audioManager && audioManager->activeSource() == AUDIO_SSYNC) ? "true" : "false") + ",";
         j += "\"volume\":" + String(_player->getVolume()) + ",";
         j += "\"muted\":" + String(_player->isMuted() ? "true" : "false") + ",";
         j += "\"server\":\"" + escapeJson(_player->getServerHost() + ":" + String(_player->getServerPort())) + "\",";
