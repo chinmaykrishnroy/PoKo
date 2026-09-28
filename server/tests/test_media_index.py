@@ -30,7 +30,10 @@ class MediaIndexTests(unittest.TestCase):
             (root / "movie.mkv").write_bytes(b"fake")
             (root / "cover.jpg").write_bytes(b"fake")
             (root / "book.md").write_text("# Heading\nbody", encoding="utf-8")
-            base = load_config(Path(__file__).resolve().parents[1] / "config.yml")
+            cfg_path = Path(__file__).resolve().parents[1] / "config.yml"
+            if not cfg_path.exists():
+                cfg_path = Path(__file__).resolve().parents[1] / "config.example.yml"
+            base = load_config(cfg_path)
             config = replace(base, library=LibraryConfig([root], root / "write", 5, probe_on_scan=True, db_path=root / "nexus.db"))
             index = MediaIndex(config, probe_fn=fake_probe)
             index.rescan()
@@ -50,13 +53,29 @@ class MediaIndexTests(unittest.TestCase):
 
     def test_empty_folder_returns_empty_page(self) -> None:
         with workspace_tempdir() as root:
-            base = load_config(Path(__file__).resolve().parents[1] / "config.yml")
+            cfg_path = Path(__file__).resolve().parents[1] / "config.yml"
+            if not cfg_path.exists():
+                cfg_path = Path(__file__).resolve().parents[1] / "config.example.yml"
+            base = load_config(cfg_path)
             config = replace(base, library=LibraryConfig([root], root / "write", 5, db_path=root / "nexus.db"))
             index = MediaIndex(config, probe_fn=fake_probe)
             index.rescan()
             page = index.page("audio")
             self.assertTrue(page["empty"])
             self.assertEqual(page["total"], 0)
+
+    def test_stop_and_join(self) -> None:
+        with workspace_tempdir() as root:
+            cfg_path = Path(__file__).resolve().parents[1] / "config.yml"
+            if not cfg_path.exists():
+                cfg_path = Path(__file__).resolve().parents[1] / "config.example.yml"
+            base = load_config(cfg_path)
+            config = replace(base, library=LibraryConfig([root], root / "write", 5, db_path=root / "nexus.db"))
+            index = MediaIndex(config, probe_fn=fake_probe)
+            self.assertTrue(index.start_background_scan())
+            index.stop()
+            index.join(timeout=2.0)
+            self.assertFalse(index.status()["running"])
 
 
 if __name__ == "__main__":

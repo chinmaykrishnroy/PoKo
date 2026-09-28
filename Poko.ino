@@ -561,9 +561,8 @@ void loop() {
                         Serial.println("[snap] other audio active on wifi connect, loading SSync as suspended");
                         snapService->load(true);
                         audioManager->setSuspendedSource(AUDIO_SSYNC);
-                    } else {
-                        snapService->load(false);
-                        if (audioManager) audioManager->request(AUDIO_SSYNC);
+                    } else if (audioManager) {
+                        audioManager->request(AUDIO_SSYNC);
                     }
                 }
             }

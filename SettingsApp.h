@@ -206,9 +206,8 @@ private:
                         if (audioManager && audioManager->activeSource() != AUDIO_NONE) {
                             snapService->load(true);
                             audioManager->setSuspendedSource(AUDIO_SSYNC);
-                        } else {
-                            snapService->load(false);
-                            if (audioManager) audioManager->request(AUDIO_SSYNC);
+                        } else if (audioManager) {
+                            audioManager->request(AUDIO_SSYNC);
                         }
                     }
                 } else {

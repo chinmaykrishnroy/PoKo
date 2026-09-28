@@ -31,10 +31,13 @@ private:
     static inline AudioManager* _instance = nullptr;
     AudioSource   _activeSource       = AUDIO_NONE;
     AudioSource   _suspendedSource    = AUDIO_NONE;
+    AudioSource   _physicalOwner      = AUDIO_NONE;
     bool          _transitioning      = false;
     int           _volume             = 80;
+    bool          _isMuted            = false;
     bool          _volumeDirty        = false;
     uint32_t      _lastVolumeChangeMs = 0;
+    SemaphoreHandle_t _mutex          = nullptr;
     SnapPlayer*   _snapPlayer         = nullptr;
     AudioActionFn _musicStopFn        = nullptr;
     AudioActionFn _musicToggleFn      = nullptr;
@@ -50,6 +53,9 @@ private:
             if (_snapPlayer && _snapPlayer->isLoaded()) {
                 if (suspend) {
                     _snapPlayer->suspendAudio();
+                    if (!_snapPlayer->waitForSuspend(200)) {
+                        Serial.println("[audioMgr] WARNING: suspend timed out waiting for snapAudio to release I2S");
+                    }
                 } else {
                     _snapPlayer->stop();
                     _snapPlayer->unload();
@@ -68,16 +74,33 @@ private:
         if (src == AUDIO_SSYNC) {
             if (_snapPlayer) {
                 if (!_snapPlayer->isLoaded()) {
-                    _snapPlayer->load(false);
-                } else if (_snapPlayer->isSuspended()) {
-                    _snapPlayer->resumeAudio();
+                    _snapPlayer->load(true); // Always load suspended first
+                    if (!_snapPlayer->isLoaded()) {
+                        Serial.println("[audioMgr] snapPlayer failed to load suspended");
+                        return false;
+                    }
                 }
-                return _snapPlayer->isLoaded();
+                // Publish ownership BEFORE snapAudio attempts initI2S
+                _activeSource = AUDIO_SSYNC;
+                _snapPlayer->resumeAudio();
+                bool ok = _snapPlayer->waitForAudioReady(500);
+                if (!ok) {
+                    Serial.println("[audioMgr] SSync audio failed to ready");
+                    _snapPlayer->suspendAudio();
+                    _activeSource = AUDIO_NONE;
+                    return false;
+                }
+                _physicalOwner = AUDIO_SSYNC;
+                return true;
             }
             return false;
         } else if (src == AUDIO_MUSIC) {
+            _activeSource = AUDIO_MUSIC;
+            _physicalOwner = AUDIO_MUSIC;
             return true;
         } else if (src == AUDIO_VIDEO) {
+            _activeSource = AUDIO_VIDEO;
+            _physicalOwner = AUDIO_VIDEO;
             return true;
         }
         return true;
@@ -86,6 +109,7 @@ private:
 public:
     AudioManager() {
         _instance = this;
+        _mutex = xSemaphoreCreateMutex();
         _volume = getCurrentAppVolume();
     }
 
@@ -97,17 +121,21 @@ public:
         if (_instance) _instance->releaseOutput(AUDIO_SSYNC);
     }
 
-    static void onVolumeChangeStatic(int vol) {
-        if (_instance) _instance->onSourceVolumeChanged(AUDIO_SSYNC, vol);
+    static void onVolumeChangeStatic(int vol, bool muted) {
+        if (_instance) _instance->onSourceVolumeChanged(AUDIO_SSYNC, vol, muted);
     }
 
-    void onSourceVolumeChanged(AudioSource src, int vol) {
+    void onSourceVolumeChanged(AudioSource src, int vol, bool muted = false) {
+        if (_mutex) xSemaphoreTake(_mutex, portMAX_DELAY);
         if (_activeSource == src) {
             _volume = constrain(vol, 0, 100);
+            _isMuted = muted;
+            es8311Mute(muted);
             setScaledVolume(_volume);
             _volumeDirty = true;
             _lastVolumeChangeMs = millis();
         }
+        if (_mutex) xSemaphoreGive(_mutex);
     }
 
     void setSnapPlayer(SnapPlayer* p) {
@@ -130,6 +158,9 @@ public:
     AudioSource activeSource() const { return _activeSource; }
     AudioSource suspendedSource() const { return _suspendedSource; }
     void setSuspendedSource(AudioSource src) { _suspendedSource = src; }
+
+    AudioSource getPhysicalOwner() const { return _physicalOwner; }
+    void setPhysicalOwner(AudioSource src) { _physicalOwner = src; }
 
     bool request(AudioSource requested) {
         if (_transitioning) {
@@ -168,27 +199,22 @@ public:
                     _suspendedSource = AUDIO_NONE;
                 }
             }
-            vTaskDelay(pdMS_TO_TICKS(40));
         }
 
         if (!activateSource(requested)) {
             Serial.printf("[audioMgr] failed to activate %d, rolling back\n", (int)requested);
+            _activeSource = AUDIO_NONE;
             if (_suspendedSource != AUDIO_NONE) {
                 AudioSource susp = _suspendedSource;
                 _suspendedSource = AUDIO_NONE;
-                if (activateSource(susp)) {
-                    _activeSource = susp;
-                } else {
+                if (!activateSource(susp)) {
                     _activeSource = AUDIO_NONE;
                 }
-            } else {
-                _activeSource = AUDIO_NONE;
             }
             _transitioning = false;
             return false;
         }
 
-        _activeSource = requested;
         _transitioning = false;
         return true;
     }
@@ -207,19 +233,21 @@ public:
             AudioSource toRestore = _suspendedSource;
             _suspendedSource = AUDIO_NONE;
             Serial.printf("[audioMgr] restoring suspended source %d\n", (int)toRestore);
-            if (activateSource(toRestore)) {
-                _activeSource = toRestore;
-            } else {
+            if (!activateSource(toRestore)) {
                 _activeSource = AUDIO_NONE;
+                releaseOutput(source);
             }
+        } else {
+            releaseOutput(source);
         }
     }
 
     void releaseOutput(AudioSource src) {
-        if (_activeSource == src || _activeSource == AUDIO_NONE) {
-            if (_suspendedSource == AUDIO_NONE) {
-                ::deinitI2S();
-            }
+        Serial.printf("[audioMgr] releaseOutput called by %d (owner=%d, active=%d, susp=%d)\n",
+                      (int)src, (int)_physicalOwner, (int)_activeSource, (int)_suspendedSource);
+        if (_physicalOwner == src || (_physicalOwner == AUDIO_NONE && _activeSource == src)) {
+            ::deinitI2S();
+            _physicalOwner = AUDIO_NONE;
         }
     }
 
@@ -250,6 +278,7 @@ public:
     }
 
     void setVolume(int vol, bool persist = true) {
+        if (_mutex) xSemaphoreTake(_mutex, portMAX_DELAY);
         int v = constrain(vol, 0, 100);
         _volume = v;
         setScaledVolume(v);
@@ -262,6 +291,21 @@ public:
             _volumeDirty = true;
             _lastVolumeChangeMs = millis();
         }
+        if (_mutex) xSemaphoreGive(_mutex);
+    }
+
+    void setMute(bool muted) {
+        if (_mutex) xSemaphoreTake(_mutex, portMAX_DELAY);
+        _isMuted = muted;
+        es8311Mute(muted);
+        if (_activeSource == AUDIO_SSYNC && _snapPlayer) {
+            _snapPlayer->setMute(muted);
+        }
+        if (_mutex) xSemaphoreGive(_mutex);
+    }
+
+    bool isMuted() const {
+        return _isMuted;
     }
 
     int getVolume() const {
@@ -274,21 +318,31 @@ public:
 
     void update() {
         if (_volumeDirty && (millis() - _lastVolumeChangeMs > 1500)) {
-            _volumeDirty = false;
-            Preferences p;
-            p.begin("poko", false);
-            p.putInt("volume", _volume);
-            p.end();
-            Serial.printf("[audioMgr] debounced volume saved: %d\n", _volume);
+            if (_mutex) xSemaphoreTake(_mutex, portMAX_DELAY);
+            if (_volumeDirty && (millis() - _lastVolumeChangeMs > 1500)) {
+                _volumeDirty = false;
+                int v = _volume;
+                if (_mutex) xSemaphoreGive(_mutex);
+                Preferences p;
+                p.begin("poko", false);
+                p.putInt("volume", v);
+                p.end();
+                Serial.printf("[audioMgr] debounced volume saved: %d\n", v);
+                return;
+            }
+            if (_mutex) xSemaphoreGive(_mutex);
         }
     }
 
     void flushVolume() {
         if (_volumeDirty) {
+            if (_mutex) xSemaphoreTake(_mutex, portMAX_DELAY);
             _volumeDirty = false;
+            int v = _volume;
+            if (_mutex) xSemaphoreGive(_mutex);
             Preferences p;
             p.begin("poko", false);
-            p.putInt("volume", _volume);
+            p.putInt("volume", v);
             p.end();
         }
     }

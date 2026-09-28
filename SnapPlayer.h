@@ -192,7 +192,7 @@ private:
     volatile bool _suspendDeinitRequested = false;
     typedef bool (*AudioActiveFn)();
     typedef void (*AudioReleaseFn)();
-    typedef void (*AudioVolumeChangeFn)(int vol);
+    typedef void (*AudioVolumeChangeFn)(int vol, bool muted);
     AudioActiveFn _isAudioActiveFn = nullptr;
     AudioReleaseFn _releaseAudioFn = nullptr;
     AudioVolumeChangeFn _onVolumeChangeFn = nullptr;
@@ -201,6 +201,8 @@ private:
     TaskHandle_t _audioTaskHandle;
     SemaphoreHandle_t _netTaskDone;
     SemaphoreHandle_t _audioTaskDone;
+    SemaphoreHandle_t _suspendDone;
+    SemaphoreHandle_t _audioReady;
     bool _netTaskStarted;
     bool _audioTaskStarted;
     bool _i2sInstalled;
@@ -224,9 +226,9 @@ private:
     int32_t _serverVolume;
     bool _serverMuted;
 
-    static const int DMA_BUF_COUNT = 6;
-    static const int DMA_BUF_LEN = 128;
-    static const int DMA_TOTAL_FRAMES = DMA_BUF_COUNT * DMA_BUF_LEN; // 768 frames (~16ms @ 48kHz)
+    static const int DMA_BUF_COUNT = POKO_I2S_DMA_DESC_NUM;
+    static const int DMA_BUF_LEN = POKO_I2S_DMA_FRAME_NUM;
+    static const int DMA_TOTAL_FRAMES = POKO_I2S_DMA_BUFFER_FRAMES; // 1440 frames (~30ms @ 48kHz)
 
     // Clock/sync filtering. 31 clock samples rejects Wi-Fi jitter while the short
     // 9-sample playback-error median keeps the PLL from reacting to one noisy block.
@@ -563,7 +565,8 @@ private:
         }
 
         if (isAudioActive()) {
-            setScaledVolume(_serverMuted ? 0 : _serverVolume);
+            es8311Mute(_serverMuted);
+            setScaledVolume(_serverVolume);
         }
         _i2sInstalled = true;
         primeI2SPath(sampleRate);
@@ -832,13 +835,15 @@ private:
             // are treated as real remote-control changes and are applied locally.
             _receivedInitialServerSettings = true;
             _volumePublishPending = true;
-            Serial.printf("[snap] Initial server volume=%d%%; keeping local=%d%% and advertising it\n",
-                          reportedVolume, constrain((int)lroundf(_volume * 100.0f), 0, 100));
-        } else if (doc.containsKey("volume")) {
-            _volume = constrain(reportedVolume / 100.0f, 0.0f, 1.0f);
-        }
-        if (_onVolumeChangeFn) {
-            _onVolumeChangeFn(_serverMuted ? 0 : _serverVolume);
+            Serial.printf("[snap] Initial server volume=%d%% (mute=%d); keeping local=%d%% and advertising it\n",
+                          reportedVolume, (int)_serverMuted, constrain((int)lroundf(_volume * 100.0f), 0, 100));
+        } else {
+            if (doc.containsKey("volume")) {
+                _volume = constrain(reportedVolume / 100.0f, 0.0f, 1.0f);
+            }
+            if (_onVolumeChangeFn) {
+                _onVolumeChangeFn(_serverVolume, _serverMuted);
+            }
         }
     }
 
@@ -1447,6 +1452,7 @@ private:
                 vTaskDelete(NULL);
                 return;
             }
+            if (_audioReady) xSemaphoreGive(_audioReady);
         }
 
         static constexpr uint32_t PCM_OUT_CAP = 257;
@@ -1467,11 +1473,12 @@ private:
                 if (_suspendDeinitRequested) {
                     deinitI2S();
                     _suspendDeinitRequested = false;
+                    if (_suspendDone) xSemaphoreGive(_suspendDone);
                 }
                 _playReleased = false;
                 _playStarted = false;
                 _samplesPlayed = 0;
-                vTaskDelay(pdMS_TO_TICKS(50));
+                vTaskDelay(pdMS_TO_TICKS(20));
                 continue;
             }
 
@@ -1481,6 +1488,7 @@ private:
                     vTaskDelay(pdMS_TO_TICKS(50));
                     continue;
                 }
+                if (_audioReady) xSemaphoreGive(_audioReady);
             }
 
             if (_resyncRequested) {
@@ -1705,6 +1713,7 @@ private:
             _samplesPlayed += (uint64_t)samples;
         }
 
+        if (_suspendDone) xSemaphoreGive(_suspendDone);
         _audioTaskHandle = nullptr;
         if (_audioTaskDone) xSemaphoreGive(_audioTaskDone);
         vTaskDelete(NULL);
@@ -1716,6 +1725,7 @@ public:
           _volume(initialVolume), _isRunning(false), _isLoaded(false), _connected(false),
           _syncing(false), _playStarted(false), _playReleased(false), _isSuspended(false), _netTaskHandle(NULL),
           _audioTaskHandle(NULL), _netTaskDone(nullptr), _audioTaskDone(nullptr),
+          _suspendDone(nullptr), _audioReady(nullptr),
           _netTaskStarted(false), _audioTaskStarted(false), _i2sInstalled(false),
           _resyncRequested(false), _volumePublishPending(false),
           _receivedInitialServerSettings(false), _audioFault(false),
@@ -1746,8 +1756,10 @@ public:
         _isSuspended = false;
         if (!_netTaskDone) _netTaskDone = xSemaphoreCreateBinary();
         if (!_audioTaskDone) _audioTaskDone = xSemaphoreCreateBinary();
+        if (!_suspendDone) _suspendDone = xSemaphoreCreateBinary();
+        if (!_audioReady) _audioReady = xSemaphoreCreateBinary();
 
-        if (!_netTaskDone || !_audioTaskDone) {
+        if (!_netTaskDone || !_audioTaskDone || !_suspendDone || !_audioReady) {
             Serial.println("[snap] WARNING: failed to allocate task completion semaphores");
         }
 
@@ -1775,20 +1787,24 @@ public:
 
         if (!_netTaskDone) _netTaskDone = xSemaphoreCreateBinary();
         if (!_audioTaskDone) _audioTaskDone = xSemaphoreCreateBinary();
+        if (!_suspendDone) _suspendDone = xSemaphoreCreateBinary();
+        if (!_audioReady) _audioReady = xSemaphoreCreateBinary();
 
-        if (!_netTaskDone || !_audioTaskDone) {
-            Serial.println("[snap] Failed to allocate task completion semaphores");
+        if (!_netTaskDone || !_audioTaskDone || !_suspendDone || !_audioReady) {
+            Serial.println("[snap] Failed to allocate task synchronization semaphores");
             _pcmBuf.freeBuffer();
             return;
         }
 
         xSemaphoreTake(_netTaskDone, 0);
         xSemaphoreTake(_audioTaskDone, 0);
+        xSemaphoreTake(_suspendDone, 0);
+        xSemaphoreTake(_audioReady, 0);
         _netTaskStarted = false;
         _audioTaskStarted = false;
 
         _isRunning = true;
-        _isLoaded = true;
+        _isLoaded = false;
         _playStarted = false;
         _playReleased = false;
         _samplesPlayed = 0;
@@ -1833,8 +1849,12 @@ public:
 
         if (!_netTaskStarted || !_audioTaskStarted) {
             Serial.println("[snap] Startup incomplete; shutting SnapPlayer down");
+            _isLoaded = false;
             unload();
+            return;
         }
+
+        _isLoaded = true;
     }
 
     void unload() {
@@ -2035,9 +2055,31 @@ public:
     int  getVolume() const { return (int)lroundf(_volume * 100.0f); }
     bool isMuted() const { return _serverMuted; }
 
+    bool isWorkersHealthy() const {
+        return _isLoaded && _netTaskStarted && _audioTaskStarted &&
+               (_netTaskHandle != nullptr) && (_audioTaskHandle != nullptr) && !_audioFault;
+    }
+
+    bool waitForAudioReady(uint32_t timeoutMs = 500) {
+        if (!_isLoaded || _audioFault) return false;
+        if (_i2sInstalled) return true;
+        if (!_audioReady) return false;
+        return (xSemaphoreTake(_audioReady, pdMS_TO_TICKS(timeoutMs)) == pdTRUE);
+    }
+
+    bool waitForSuspend(uint32_t timeoutMs = 200) {
+        if (!_isLoaded || !_audioTaskStarted || !_audioTaskHandle) return true;
+        if (!_isSuspended) return false;
+        if (!_suspendDeinitRequested && !_i2sInstalled) return true;
+        if (!_suspendDone) return true;
+        return (xSemaphoreTake(_suspendDone, pdMS_TO_TICKS(timeoutMs)) == pdTRUE);
+    }
+
     void suspendAudio() {
         if (!_isLoaded || _isSuspended) return;
         Serial.println("[snap] audio suspended");
+        if (_suspendDone) xSemaphoreTake(_suspendDone, 0);
+        if (_audioReady) xSemaphoreTake(_audioReady, 0);
         _isSuspended = true;
         _suspendDrainRequested = true;
         _suspendDeinitRequested = true;
@@ -2052,6 +2094,7 @@ public:
     void resumeAudio() {
         if (!_isLoaded || !_isSuspended) return;
         Serial.println("[snap] audio resuming");
+        if (_audioReady) xSemaphoreTake(_audioReady, 0);
         _isSuspended = false;
         _suspendDrainRequested = true;
         _playReleased = false;
@@ -2090,7 +2133,7 @@ public:
         _volume = pct / 100.0f;
         _serverVolume = pct;
         if (_onVolumeChangeFn) {
-            _onVolumeChangeFn(_serverMuted ? 0 : _serverVolume);
+            _onVolumeChangeFn(_serverVolume, _serverMuted);
         }
         _volumePublishPending = true;
     }
@@ -2102,7 +2145,7 @@ public:
     void setMute(bool mute) {
         _serverMuted = mute;
         if (_onVolumeChangeFn) {
-            _onVolumeChangeFn(_serverMuted ? 0 : _serverVolume);
+            _onVolumeChangeFn(_serverVolume, _serverMuted);
         }
         _volumePublishPending = true;
     }

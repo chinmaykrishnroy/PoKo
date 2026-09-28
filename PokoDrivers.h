@@ -198,11 +198,15 @@ inline esp_err_t initI2S(uint32_t sampleRate,
         deinitI2S();
     }
 
+#define POKO_I2S_DMA_DESC_NUM      6
+#define POKO_I2S_DMA_FRAME_NUM     240
+#define POKO_I2S_DMA_BUFFER_FRAMES (POKO_I2S_DMA_DESC_NUM * POKO_I2S_DMA_FRAME_NUM)
+
     i2s_chan_config_t chan_cfg = {
         .id = I2S_NUM_0,
         .role = I2S_ROLE_MASTER,
-        .dma_desc_num = 6,
-        .dma_frame_num = 240,
+        .dma_desc_num = POKO_I2S_DMA_DESC_NUM,
+        .dma_frame_num = POKO_I2S_DMA_FRAME_NUM,
         .auto_clear_after_cb = true,
         .auto_clear_before_cb = false,
         .intr_priority = 0,

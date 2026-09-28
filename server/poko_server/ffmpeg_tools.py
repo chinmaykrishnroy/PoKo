@@ -334,7 +334,7 @@ def generic_icon(kind: str, size: int = 28) -> Icon:
 def _thumbnail_with_python_ffmpeg(path: Path, ffmpeg_path: str, timeout: float, size: int, kind: str) -> bytes | None:
     try:
         from ffmpeg import FFmpeg  # type: ignore
-    except ModuleNotFoundError:
+    except (ModuleNotFoundError, ImportError):
         return None
 
     try:

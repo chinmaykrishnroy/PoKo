@@ -31,6 +31,7 @@ class MediaIndex:
         self._ffprobe: str | None = None
         self._scan_thread: threading.Thread | None = None
         self._scan_lock = threading.Lock()
+        self._stop_event = threading.Event()
         self._status: dict[str, Any] = {
             "running": False,
             "phase": "idle",
@@ -50,9 +51,17 @@ class MediaIndex:
         with self._scan_lock:
             if self._scan_thread and self._scan_thread.is_alive():
                 return False
+            self._stop_event.clear()
             self._scan_thread = threading.Thread(target=self.rescan, name="poko-indexer", daemon=True)
             self._scan_thread.start()
             return True
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def join(self, timeout: float | None = None) -> None:
+        if self._scan_thread and self._scan_thread.is_alive():
+            self._scan_thread.join(timeout=timeout)
 
     def status(self) -> dict[str, Any]:
         with self._scan_lock:
@@ -94,11 +103,15 @@ class MediaIndex:
 
         try:
             for folder in self.config.library.read_folders:
+                if self._stop_event.is_set():
+                    break
                 self._set_status(current_folder=str(folder))
                 if not folder.exists() or not folder.is_dir():
                     self._add_error(f"Missing folder: {folder}")
                     continue
                 for path in folder.rglob("*"):
+                    if self._stop_event.is_set():
+                        break
                     if not path.is_file():
                         continue
                     self._set_status(scanned_files=int(self._status["scanned_files"]) + 1)
@@ -116,8 +129,11 @@ class MediaIndex:
                         elif result == "updated":
                             self._status["updated"] = int(self._status["updated"]) + 1
                         self._status["current_path"] = str(path)
-            removed = self.db.remove_missing_for_scan(scan_id)
-            self._set_status(removed=removed, phase="idle")
+            if not self._stop_event.is_set():
+                removed = self.db.remove_missing_for_scan(scan_id)
+                self._set_status(removed=removed, phase="idle")
+            else:
+                self._set_status(phase="stopped")
         finally:
             self._set_status(running=False, current_folder=None, current_path=None, finished_at=time.time())
 

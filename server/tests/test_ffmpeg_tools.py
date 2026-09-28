@@ -20,7 +20,10 @@ from server.poko_server.ffmpeg_tools import (
 )
 
 
-CONFIG = load_config(Path(__file__).resolve().parents[1] / "config.yml")
+_config_path = Path(__file__).resolve().parents[1] / "config.yml"
+if not _config_path.exists():
+    _config_path = Path(__file__).resolve().parents[1] / "config.example.yml"
+CONFIG = load_config(_config_path)
 
 
 class FFmpegCommandTests(unittest.TestCase):
