@@ -33,8 +33,11 @@ private:
 
         _canvas->fillScreen(theme.bg);
 
+        time_t now;
+        time(&now);
         struct tm timeinfo;
-        bool timeValid = getLocalTime(&timeinfo, 0) && timeinfo.tm_year > (2020 - 1900);
+        localtime_r(&now, &timeinfo);
+        bool timeValid = (timeinfo.tm_year > (2020 - 1900));
 
         if (_style == 0) {
             // ── Modern Style ──────────────────────────────────────────

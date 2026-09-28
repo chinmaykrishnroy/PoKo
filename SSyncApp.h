@@ -157,7 +157,7 @@ public:
         if (_player) {
             if (!_player->isLoaded()) {
                 _player->load();
-            } else {
+            } else if (_player->isSuspended()) {
                 _player->resumeAudio();
             }
         }

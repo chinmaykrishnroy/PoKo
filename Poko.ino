@@ -156,11 +156,6 @@ void handleDriverReset() {
 // ── Button & Combo Callbacks ──────────────────────────────────
 void onBtnLeft() {
     Serial.println("[action] Left (BOOT) Clicked");
-    if (audioManager && audioManager->isOverlayOpen()) {
-        audioManager->onOverlayLeft();
-        audioManager->renderOverlay(pokoGfx);
-        return;
-    }
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->navigateLeft();
     else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onLeft();
     else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->onLeft();
@@ -174,10 +169,6 @@ void onBtnLeft() {
 
 void onBtnRight() {
     Serial.println("[action] Right (KEY) Clicked");
-    if (audioManager && audioManager->isOverlayOpen()) {
-        audioManager->onOverlayRight(onAppChange);
-        return;
-    }
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->navigateRight();
     else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onRight();
     else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->onRight();
@@ -227,20 +218,6 @@ void onBtnRightHolding() {
 
 void onBtnLeftDouble() {
     Serial.println("[action] Left Double-Click -> Exit / Back");
-    if (audioManager && audioManager->isOverlayOpen()) {
-        audioManager->closeOverlay();
-        pokoGfx->fillScreen(RGB565_BLACK);
-        if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
-        else if (activeApp == STATE_INFO && infoAppInstance) infoAppInstance->load();
-        else if (activeApp == STATE_CLOCK && clockAppInstance) clockAppInstance->load();
-        else if (activeApp == STATE_SSYNC && ssyncAppInstance) ssyncAppInstance->load();
-        else if (activeApp == STATE_MUSIC_UI && musicAppInstance) musicAppInstance->load();
-        else if (activeApp == STATE_VIDEO_UI && videoAppInstance) videoAppInstance->load();
-        else if (activeApp == STATE_GALLERY_UI && galleryAppInstance) galleryAppInstance->load();
-        else if (activeApp == STATE_PIXELS_UI && pixelAppInstance) pixelAppInstance->load();
-        else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance) settingsAppInstance->load();
-        return;
-    }
     if (activeApp == STATE_LAUNCHER) {
         // Double-click Left on Home screen: Stop current active audio service and remove dot
         if (audioManager && audioManager->hasActiveSession()) {
@@ -264,21 +241,6 @@ void onBtnLeftDouble() {
 
 void onBtnRightDouble() {
     Serial.println("[action] Right Double-Click -> Enter / Action");
-    if (audioManager && audioManager->isOverlayOpen()) {
-        audioManager->stopActiveSession();
-        audioManager->closeOverlay();
-        pokoGfx->fillScreen(RGB565_BLACK);
-        if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
-        else if (activeApp == STATE_INFO && infoAppInstance) infoAppInstance->load();
-        else if (activeApp == STATE_CLOCK && clockAppInstance) clockAppInstance->load();
-        else if (activeApp == STATE_SSYNC && ssyncAppInstance) ssyncAppInstance->load();
-        else if (activeApp == STATE_MUSIC_UI && musicAppInstance) musicAppInstance->load();
-        else if (activeApp == STATE_VIDEO_UI && videoAppInstance) videoAppInstance->load();
-        else if (activeApp == STATE_GALLERY_UI && galleryAppInstance) galleryAppInstance->load();
-        else if (activeApp == STATE_PIXELS_UI && pixelAppInstance) pixelAppInstance->load();
-        else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance) settingsAppInstance->load();
-        return;
-    }
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->enter();
     else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onEnter();
     else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->onEnter();
@@ -292,26 +254,6 @@ void onBtnRightDouble() {
 
 void onBtnLongRight() {
     Serial.println("[action] Right Long-Press");
-    if (audioManager) {
-        if (audioManager->isOverlayOpen()) {
-            audioManager->closeOverlay();
-            pokoGfx->fillScreen(RGB565_BLACK);
-            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
-            else if (activeApp == STATE_INFO && infoAppInstance) infoAppInstance->load();
-            else if (activeApp == STATE_CLOCK && clockAppInstance) clockAppInstance->load();
-            else if (activeApp == STATE_SSYNC && ssyncAppInstance) ssyncAppInstance->load();
-            else if (activeApp == STATE_MUSIC_UI && musicAppInstance) musicAppInstance->load();
-            else if (activeApp == STATE_VIDEO_UI && videoAppInstance) videoAppInstance->load();
-            else if (activeApp == STATE_GALLERY_UI && galleryAppInstance) galleryAppInstance->load();
-            else if (activeApp == STATE_PIXELS_UI && pixelAppInstance) pixelAppInstance->load();
-            else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance) settingsAppInstance->load();
-            return;
-        } else {
-            audioManager->openOverlay();
-            audioManager->renderOverlay(pokoGfx);
-            return;
-        }
-    }
     if (activeApp == STATE_INFO && infoAppInstance)                  infoAppInstance->onLongRight();
     else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->onLongRight();
 }
@@ -647,24 +589,16 @@ void loop() {
     // Web Server requests
     server.handleClient();
 
-    // Active App / Overlay execution
-    if (audioManager && audioManager->isOverlayOpen()) {
-        static uint32_t lastOverlayDraw = 0;
-        if (millis() - lastOverlayDraw >= 300) {
-            lastOverlayDraw = millis();
-            audioManager->renderOverlay(pokoGfx);
-        }
-    } else {
-        if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->update();
-        else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->update();
-        else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->update();
-        else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->update();
-        else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->update();
-        else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->update();
-        else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->update();
-        else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->update();
-        else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->update();
-    }
+    // Active App execution
+    if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->update();
+    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->update();
+    else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->update();
+    else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->update();
+    else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->update();
+    else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->update();
+    else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->update();
+    else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->update();
+    else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->update();
 
     // Background music update (track position, auto-advance, neopixel progress) when not in foreground
     if (activeApp != STATE_MUSIC_UI && musicAppInstance && musicAppInstance->isPlaying()) {

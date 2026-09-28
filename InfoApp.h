@@ -73,8 +73,11 @@ private:
         add("PSRAM",    buf,  POKO_CLR_TEXT);
 
         // Local Time (IST) if synced
+        time_t now;
+        time(&now);
         struct tm timeinfo;
-        if (getLocalTime(&timeinfo, 0) && timeinfo.tm_year > (2020 - 1900)) {
+        localtime_r(&now, &timeinfo);
+        if (timeinfo.tm_year > (2020 - 1900)) {
             char timeBuf[18];
             strftime(timeBuf, sizeof(timeBuf), "%H:%M:%S", &timeinfo);
             add("Time", timeBuf, POKO_CLR_ACCENT);

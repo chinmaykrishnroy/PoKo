@@ -96,10 +96,18 @@ private:
         _statusCanvas->setCursor(64 - w / 2, 10);
         _statusCanvas->print("PoKo");
 
-        // Right: Live time
+        // Right: Live time (or uptime until NTP time is synced)
         char buf[12];
+        time_t now;
+        time(&now);
         struct tm timeinfo;
-        if (getLocalTime(&timeinfo, 0) && timeinfo.tm_year > (2020 - 1900)) {
+        localtime_r(&now, &timeinfo);
+        static bool s_timeEverSynced = false;
+        if (timeinfo.tm_year > (2020 - 1900)) {
+            s_timeEverSynced = true;
+        }
+
+        if (s_timeEverSynced) {
             strftime(buf, sizeof(buf), "%H:%M", &timeinfo);
         } else {
             uint32_t up = millis() / 1000;

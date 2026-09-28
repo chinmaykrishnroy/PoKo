@@ -37,8 +37,6 @@ private:
     AudioStrFn    _musicGetTitleFn = nullptr;
     AudioQueryFn  _musicErrorFn = nullptr;
 
-    bool _overlayOpen = false;
-
 public:
     AudioManager() {}
 
@@ -57,6 +55,13 @@ public:
     bool request(AudioSource source) {
         if (source == AUDIO_NONE) {
             stopAll();
+            return true;
+        }
+
+        if (_activeSource == source) {
+            if (source == AUDIO_SSYNC && _snapPlayer && _snapPlayer->isSuspended()) {
+                _snapPlayer->resumeAudio();
+            }
             return true;
         }
 
@@ -132,7 +137,6 @@ public:
             _snapPlayer->stop();
             _snapPlayer->unload();
         }
-        closeOverlay();
     }
 
     void stopAll() {
@@ -247,112 +251,6 @@ public:
 
         if (show && color != 0) {
             canvas->fillCircle(x, y, r, color);
-        }
-    }
-
-    // ── Now Playing Overlay ──────────────────────────────────
-    bool isOverlayOpen() const { return _overlayOpen; }
-    void openOverlay() { _overlayOpen = true; }
-    void closeOverlay() { _overlayOpen = false; }
-    void toggleOverlay() { _overlayOpen = !_overlayOpen; }
-
-    void renderOverlay(Arduino_GFX* gfx) {
-        if (!gfx) return;
-        const auto& theme = currentTheme();
-
-        // Backdrop card
-        gfx->fillRoundRect(4, 4, 120, 120, 6, theme.surface);
-        gfx->drawRoundRect(4, 4, 120, 120, 6, theme.surface2);
-
-        // Header (y=4..19)
-        gfx->fillRoundRect(5, 5, 118, 15, 4, theme.headerBg);
-        gfx->setFont(u8g2_font_5x7_tf);
-        gfx->setTextColor(theme.accent, theme.headerBg);
-        gfx->setCursor(8, 15);
-        gfx->print("NOW PLAYING");
-
-        // Close hint
-        gfx->setTextColor(theme.muted, theme.headerBg);
-        gfx->setCursor(86, 15);
-        gfx->print("2L:Back");
-
-        // Source Title (y=38)
-        gfx->setFont(u8g2_font_helvB10_tf);
-        gfx->setTextColor(theme.text, theme.surface);
-        const char* sName = getSourceName();
-        int16_t x1, y1; uint16_t w, h;
-        gfx->getTextBounds(sName, 0, 0, &x1, &y1, &w, &h);
-        gfx->setCursor(max(6, (int)(64 - w / 2)), 38);
-        gfx->print(sName);
-
-        // Subtitle / Info (y=52)
-        gfx->setFont(u8g2_font_profont10_mf);
-        gfx->setTextColor(theme.muted, theme.surface);
-        String info = "";
-        if (_activeSource == AUDIO_SSYNC && _snapPlayer) {
-            info = _snapPlayer->getServerHost();
-        } else if (_activeSource == AUDIO_MUSIC) {
-            info = _musicGetTitleFn ? _musicGetTitleFn() : "Local Audio";
-        } else if (_activeSource == AUDIO_VIDEO) {
-            info = "Video Stream";
-        } else {
-            info = "No audio session";
-        }
-        gfx->getTextBounds(info.c_str(), 0, 0, &x1, &y1, &w, &h);
-        gfx->setCursor(max(8, (int)(64 - w / 2)), 52);
-        gfx->print(info.c_str());
-
-        // Status Badge (y=62..80)
-        bool playing = isPlaying();
-        bool muted = (_activeSource == AUDIO_SSYNC && _snapPlayer && _snapPlayer->isMuted());
-        uint16_t badgeBg = playing ? 0x03E0 : 0xFD20;
-        gfx->fillRoundRect(20, 63, 88, 18, 4, badgeBg);
-        gfx->setFont(u8g2_font_helvB08_tf);
-        gfx->setTextColor(0xFFFF, badgeBg);
-        const char* badgeText = playing ? "▶  PLAYING" : (muted ? "M  MUTED" : "❚❚  IDLE");
-        gfx->getTextBounds(badgeText, 0, 0, &x1, &y1, &w, &h);
-        gfx->setCursor(max(22, (int)(64 - w / 2)), 75);
-        gfx->print(badgeText);
-
-        // Volume bar (y=88..95)
-        int vol = getCurrentAppVolume();
-        gfx->drawRect(16, 88, 96, 7, theme.line);
-        int fillW = (92 * vol) / 100;
-        if (fillW > 0) {
-            gfx->fillRect(18, 90, fillW, 3, theme.accent);
-        }
-
-        // Footer (y=104..123)
-        gfx->fillRect(5, 104, 118, 19, theme.headerBg);
-        gfx->drawFastHLine(5, 104, 118, theme.line);
-        gfx->setFont(u8g2_font_5x7_tf);
-        gfx->setTextColor(theme.footerText, theme.headerBg);
-        gfx->setCursor(8, 117);
-        if (_activeSource == AUDIO_SSYNC) {
-            gfx->print(muted ? "L:Unmute" : "L:Mute");
-        } else {
-            gfx->print(playing ? "L:Pause" : "L:Play");
-        }
-        gfx->setCursor(52, 117);
-        gfx->print("2R:Stop");
-        gfx->setCursor(95, 117);
-        gfx->print("R:Open");
-    }
-
-    void onOverlayLeft() {
-        togglePlayPause();
-    }
-
-    void onOverlayRight(AppSwitchFn switchFn) {
-        closeOverlay();
-        if (_activeSource == AUDIO_SSYNC) {
-            if (switchFn) switchFn(STATE_SSYNC);
-        } else if (_activeSource == AUDIO_MUSIC) {
-            if (switchFn) switchFn(STATE_MUSIC_UI);
-        } else if (_activeSource == AUDIO_VIDEO) {
-            if (switchFn) switchFn(STATE_VIDEO_UI);
-        } else {
-            if (switchFn) switchFn(STATE_SSYNC);
         }
     }
 };

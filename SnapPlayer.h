@@ -2001,7 +2001,7 @@ public:
     }
 
     void resumeAudio() {
-        if (!_isLoaded) return;
+        if (!_isLoaded || !_isSuspended) return;
         Serial.println("[snap] audio resuming");
         _isSuspended = false;
         if (_sampleRate > 0) {
