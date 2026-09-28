@@ -189,10 +189,13 @@ private:
     volatile bool _playReleased;
     volatile bool _isSuspended = false;
     volatile bool _suspendDrainRequested = false;
+    volatile bool _suspendDeinitRequested = false;
     typedef bool (*AudioActiveFn)();
     typedef void (*AudioReleaseFn)();
+    typedef void (*AudioVolumeChangeFn)(int vol);
     AudioActiveFn _isAudioActiveFn = nullptr;
     AudioReleaseFn _releaseAudioFn = nullptr;
+    AudioVolumeChangeFn _onVolumeChangeFn = nullptr;
 
     TaskHandle_t _netTaskHandle;
     TaskHandle_t _audioTaskHandle;
@@ -834,8 +837,8 @@ private:
         } else if (doc.containsKey("volume")) {
             _volume = constrain(reportedVolume / 100.0f, 0.0f, 1.0f);
         }
-        if (isAudioActive()) {
-            setScaledVolume(_serverMuted ? 0 : _serverVolume);
+        if (_onVolumeChangeFn) {
+            _onVolumeChangeFn(_serverMuted ? 0 : _serverVolume);
         }
     }
 
@@ -1461,6 +1464,10 @@ private:
                     _pcmBuf.drain();
                     _suspendDrainRequested = false;
                 }
+                if (_suspendDeinitRequested) {
+                    deinitI2S();
+                    _suspendDeinitRequested = false;
+                }
                 _playReleased = false;
                 _playStarted = false;
                 _samplesPlayed = 0;
@@ -1628,7 +1635,7 @@ private:
                 _correctionAccumulator += 1.0;
             }
 
-            float v = _serverMuted ? 0.0f : _volume;
+            float muteGain = _serverMuted ? 0.0f : 1.0f;
             uint32_t outFrames = 0;
             uint32_t correctionPos = samples / 2U;
 
@@ -1647,7 +1654,7 @@ private:
                     float x = (float)_fadeFramesDone / (float)_fadeFramesTotal;
                     fadeGain = x * x * (3.0f - 2.0f * x);
                 }
-                float gain = v * fadeGain;
+                float gain = muteGain * fadeGain;
 
                 if (dropFrame && i == correctionPos) {
                     if (_fadeFramesDone < _fadeFramesTotal) _fadeFramesDone++;
@@ -2012,9 +2019,10 @@ public:
 
 
     // ── Public Accessors for SSyncApp & WebUI ──────────────────
-    void setAudioCallbacks(AudioActiveFn activeFn, AudioReleaseFn releaseFn) {
+    void setAudioCallbacks(AudioActiveFn activeFn, AudioReleaseFn releaseFn, AudioVolumeChangeFn volFn = nullptr) {
         _isAudioActiveFn = activeFn;
         _releaseAudioFn = releaseFn;
+        _onVolumeChangeFn = volFn;
     }
 
     bool isAudioActive() const {
@@ -2032,13 +2040,13 @@ public:
         Serial.println("[snap] audio suspended");
         _isSuspended = true;
         _suspendDrainRequested = true;
+        _suspendDeinitRequested = true;
         _playReleased = false;
         _playStarted = false;
         _samplesPlayed = 0;
         _expectedNextChunkTsUs = 0;
         _producerAwaitingResync = true;
         resetPllState();
-        deinitI2S();
     }
 
     void resumeAudio() {
@@ -2057,7 +2065,6 @@ public:
 
     void stop() {
         suspendAudio();
-        setMute(true);
         if (_prefs) _prefs->putBool("snap_was_playing", false);
     }
     String getCodec() const { return _codec; }
@@ -2082,8 +2089,8 @@ public:
         pct = constrain(pct, 0, 100);
         _volume = pct / 100.0f;
         _serverVolume = pct;
-        if (isAudioActive()) {
-            setScaledVolume(_serverMuted ? 0 : _serverVolume);
+        if (_onVolumeChangeFn) {
+            _onVolumeChangeFn(_serverMuted ? 0 : _serverVolume);
         }
         _volumePublishPending = true;
     }
@@ -2094,8 +2101,8 @@ public:
 
     void setMute(bool mute) {
         _serverMuted = mute;
-        if (isAudioActive()) {
-            setScaledVolume(_serverMuted ? 0 : _serverVolume);
+        if (_onVolumeChangeFn) {
+            _onVolumeChangeFn(_serverMuted ? 0 : _serverVolume);
         }
         _volumePublishPending = true;
     }

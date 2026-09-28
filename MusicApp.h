@@ -243,11 +243,16 @@ private:
     void requestPlay(int idx, uint32_t startSec = 0) {
         if (idx < 0 || idx >= _songCount) return;
 
-        if (audioManager) {
-            audioManager->request(AUDIO_MUSIC);
+        if (!audioManager || !audioManager->request(AUDIO_MUSIC)) {
+            _serverError = true;
+            return;
         }
 
-        ensureAudioOutput(44100);
+        if (!ensureAudioOutput(44100)) {
+            audioManager->release(AUDIO_MUSIC);
+            _serverError = true;
+            return;
+        }
 
         if (audioPlugin) {
             audioPlugin->stopStream();

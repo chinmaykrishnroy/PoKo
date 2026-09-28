@@ -97,10 +97,23 @@ public:
         if (_instance) _instance->releaseOutput(AUDIO_SSYNC);
     }
 
+    static void onVolumeChangeStatic(int vol) {
+        if (_instance) _instance->onSourceVolumeChanged(AUDIO_SSYNC, vol);
+    }
+
+    void onSourceVolumeChanged(AudioSource src, int vol) {
+        if (_activeSource == src) {
+            _volume = constrain(vol, 0, 100);
+            setScaledVolume(_volume);
+            _volumeDirty = true;
+            _lastVolumeChangeMs = millis();
+        }
+    }
+
     void setSnapPlayer(SnapPlayer* p) {
         _snapPlayer = p;
         if (_snapPlayer) {
-            _snapPlayer->setAudioCallbacks(isSsyncActiveStatic, releaseOutputSsyncStatic);
+            _snapPlayer->setAudioCallbacks(isSsyncActiveStatic, releaseOutputSsyncStatic, onVolumeChangeStatic);
         }
     }
     void setMusicHandlers(AudioActionFn stopFn, AudioActionFn toggleFn, AudioQueryFn isPlayingFn, AudioStrFn getTitleFn = nullptr, AudioQueryFn errorFn = nullptr) {
@@ -163,8 +176,11 @@ public:
             if (_suspendedSource != AUDIO_NONE) {
                 AudioSource susp = _suspendedSource;
                 _suspendedSource = AUDIO_NONE;
-                activateSource(susp);
-                _activeSource = susp;
+                if (activateSource(susp)) {
+                    _activeSource = susp;
+                } else {
+                    _activeSource = AUDIO_NONE;
+                }
             } else {
                 _activeSource = AUDIO_NONE;
             }
@@ -191,8 +207,11 @@ public:
             AudioSource toRestore = _suspendedSource;
             _suspendedSource = AUDIO_NONE;
             Serial.printf("[audioMgr] restoring suspended source %d\n", (int)toRestore);
-            activateSource(toRestore);
-            _activeSource = toRestore;
+            if (activateSource(toRestore)) {
+                _activeSource = toRestore;
+            } else {
+                _activeSource = AUDIO_NONE;
+            }
         }
     }
 

@@ -188,11 +188,16 @@ private:
     void requestPlay(int idx) {
         if (idx < 0 || idx >= _videoCount) return;
 
-        if (audioManager) {
-            audioManager->request(AUDIO_VIDEO);
+        if (!audioManager || !audioManager->request(AUDIO_VIDEO)) {
+            _serverError = true;
+            return;
         }
 
-        ensureAudioOutput(44100);
+        if (!ensureAudioOutput(44100)) {
+            audioManager->release(AUDIO_VIDEO);
+            _serverError = true;
+            return;
+        }
 
         if (syncPlugin) {
             syncPlugin->reset();

@@ -171,22 +171,46 @@ public:
     SnapPlayer* getPlayer() { return _player; }
 
     void onLeft() {
-        if (audioManager) audioManager->rampVolume(-5);
+        bool isSsyncActive = (audioManager && audioManager->activeSource() == AUDIO_SSYNC);
+        if (isSsyncActive) {
+            if (audioManager) audioManager->rampVolume(-5);
+        } else if (_player) {
+            int curVol = _player->getVolume();
+            _player->setRemoteVolumePercent(max(0, curVol - 5));
+        }
         _dirty = true;
     }
 
     void onRight() {
-        if (audioManager) audioManager->rampVolume(5);
+        bool isSsyncActive = (audioManager && audioManager->activeSource() == AUDIO_SSYNC);
+        if (isSsyncActive) {
+            if (audioManager) audioManager->rampVolume(5);
+        } else if (_player) {
+            int curVol = _player->getVolume();
+            _player->setRemoteVolumePercent(min(100, curVol + 5));
+        }
         _dirty = true;
     }
 
     void volumeRampDown() {
-        if (audioManager) audioManager->rampVolume(-2);
+        bool isSsyncActive = (audioManager && audioManager->activeSource() == AUDIO_SSYNC);
+        if (isSsyncActive) {
+            if (audioManager) audioManager->rampVolume(-2);
+        } else if (_player) {
+            int curVol = _player->getVolume();
+            _player->setRemoteVolumePercent(max(0, curVol - 2));
+        }
         _dirty = true;
     }
 
     void volumeRampUp() {
-        if (audioManager) audioManager->rampVolume(2);
+        bool isSsyncActive = (audioManager && audioManager->activeSource() == AUDIO_SSYNC);
+        if (isSsyncActive) {
+            if (audioManager) audioManager->rampVolume(2);
+        } else if (_player) {
+            int curVol = _player->getVolume();
+            _player->setRemoteVolumePercent(min(100, curVol + 2));
+        }
         _dirty = true;
     }
 
