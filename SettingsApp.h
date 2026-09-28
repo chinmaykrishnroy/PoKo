@@ -192,6 +192,7 @@ private:
                 break;
             }
             case 6: { // Reboot
+                prefs.putBool("clean_shutdown", true);
                 _canvas->fillScreen(POKO_CLR_ERR);
                 _canvas->setFont(u8g2_font_helvB10_tf);
                 _canvas->setTextColor(POKO_CLR_TEXT);

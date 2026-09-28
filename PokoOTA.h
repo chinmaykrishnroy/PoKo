@@ -6,6 +6,10 @@
 #include <esp_task_wdt.h>
 #include "PokoAppState.h"
 #include "PixelEngine.h"
+#include "SnapPlayer.h"
+#include "AudioManager.h"
+
+extern SnapPlayer* snapService;
 
 // ─────────────────────────────────────────────────────────────
 //  PokoOTA — Web-based OTA firmware updates and progress screen
@@ -126,11 +130,22 @@ public:
                 gfx->setCursor(20, 68);
                 gfx->print(ok ? "SUCCESS!" : "FAILED!");
             }
+            {
+                Preferences p;
+                p.begin("poko", false);
+                p.putBool("clean_shutdown", true);
+                p.end();
+            }
             delay(1000);
             ESP.restart();
         }, [server, switchCb, gfx]() {
             HTTPUpload& upload = server->upload();
             if (upload.status == UPLOAD_FILE_START) {
+                if (audioManager) audioManager->stopAll();
+                if (snapService && snapService->isLoaded()) {
+                    snapService->unload();
+                }
+                delay(50);
                 if (switchCb) switchCb(STATE_LAUNCHER);
                 _otaTotal = server->clientContentLength();
                 _otaWritten = 0;

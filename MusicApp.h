@@ -12,6 +12,7 @@
 #include "PokoDrivers.h"
 #include "PokoTheme.h"
 #include "TCPAudio.h"
+#include "AudioManager.h"
 
 // ─────────────────────────────────────────────────────────────
 //  MusicApp — Single-Song Audio Browser & MP3 TCP Stream Player
@@ -197,6 +198,10 @@ private:
     void requestPlay(int idx, uint32_t startSec = 0) {
         if (idx < 0 || idx >= _songCount) return;
 
+        if (audioManager) {
+            audioManager->request(AUDIO_MUSIC);
+        }
+
         ensureAudioOutput(44100);
 
         if (audioPlugin) {
@@ -252,6 +257,10 @@ private:
         http.setTimeout(800);
         http.GET();
         http.end();
+
+        if (audioManager) {
+            audioManager->release(AUDIO_MUSIC);
+        }
 
         pixelEngine.setSongProgress(0.0f);
         _dirty = true;
@@ -502,6 +511,9 @@ public:
         _active = false;
         if (_mode == MODE_PLAYING) {
             requestStop();
+        }
+        if (audioManager) {
+            audioManager->release(AUDIO_MUSIC);
         }
         if (audioPlugin) {
             audioPlugin->unload();

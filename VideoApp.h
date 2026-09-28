@@ -12,6 +12,7 @@
 #include "PokoTheme.h"
 #include "PokoDrivers.h"
 #include "SyncedAVPlayer.h"
+#include "AudioManager.h"
 
 // ─────────────────────────────────────────────────────────────
 //  VideoApp — Single-Thumbnail Video Browser & Synced AV Player
@@ -186,6 +187,10 @@ private:
     void requestPlay(int idx) {
         if (idx < 0 || idx >= _videoCount) return;
 
+        if (audioManager) {
+            audioManager->request(AUDIO_VIDEO);
+        }
+
         ensureAudioOutput(44100);
 
         if (syncPlugin) {
@@ -219,6 +224,10 @@ private:
         http.setTimeout(1500);
         http.GET();
         http.end();
+
+        if (audioManager) {
+            audioManager->release(AUDIO_VIDEO);
+        }
 
         if (syncPlugin) {
             syncPlugin->reset();
@@ -370,6 +379,9 @@ public:
         _active = false;
         if (_mode == MODE_PLAYING) {
             requestStop();
+        }
+        if (audioManager) {
+            audioManager->release(AUDIO_VIDEO);
         }
         if (syncPlugin) {
             syncPlugin->unload();

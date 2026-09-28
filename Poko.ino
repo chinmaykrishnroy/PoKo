@@ -22,6 +22,7 @@
 #include "SettingsApp.h"
 #include "PokoOTA.h"
 #include "PokoAPI.h"
+#include "AudioManager.h"
 
 // ─────────────────────────────────────────────────────────────
 //  Poko Core Firmware — Complete 8-App Suite
@@ -49,6 +50,8 @@ SettingsApp* settingsAppInstance = nullptr;
 SyncedAVPlayer* syncPlugin       = nullptr;
 TCPAudio*       audioPlugin      = nullptr;
 PokoAPI*     masterApi           = nullptr;
+AudioManager* audioManager       = nullptr;
+SnapPlayer*   snapService        = nullptr;
 
 AppState activeApp = STATE_LAUNCHER;
 
@@ -82,6 +85,17 @@ void onAppChange(AppState newState) {
 
     Serial.printf("[app] switch %d -> %d\n", (int)activeApp, (int)newState);
 
+    // Save last_app for safe apps across clean reboots
+    if (newState == STATE_CLOCK ||
+        newState == STATE_GALLERY_UI ||
+        newState == STATE_SETTINGS_UI ||
+        newState == STATE_INFO ||
+        newState == STATE_PIXELS_UI ||
+        newState == STATE_SSYNC ||
+        newState == STATE_LAUNCHER) {
+        prefs.putInt("last_app", (int)newState);
+    }
+
     // Unload previous app resources
     if (activeApp == STATE_INFO && infoAppInstance)                  infoAppInstance->unload();
     else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->unload();
@@ -113,6 +127,9 @@ void onAppChange(AppState newState) {
 void handleDriverReset() {
     Serial.println("[poko] performing driver reset");
     // Ensure all audio streaming tasks are safely stopped before resetting drivers
+    if (audioManager) {
+        audioManager->stopAll();
+    }
     if (activeApp == STATE_SSYNC && ssyncAppInstance) {
         ssyncAppInstance->unload();
     } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {
@@ -139,6 +156,11 @@ void handleDriverReset() {
 // ── Button & Combo Callbacks ──────────────────────────────────
 void onBtnLeft() {
     Serial.println("[action] Left (BOOT) Clicked");
+    if (audioManager && audioManager->isOverlayOpen()) {
+        audioManager->onOverlayLeft();
+        audioManager->renderOverlay(pokoGfx);
+        return;
+    }
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->navigateLeft();
     else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onLeft();
     else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->onLeft();
@@ -152,6 +174,10 @@ void onBtnLeft() {
 
 void onBtnRight() {
     Serial.println("[action] Right (KEY) Clicked");
+    if (audioManager && audioManager->isOverlayOpen()) {
+        audioManager->onOverlayRight(onAppChange);
+        return;
+    }
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->navigateRight();
     else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onRight();
     else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->onRight();
@@ -201,6 +227,20 @@ void onBtnRightHolding() {
 
 void onBtnLeftDouble() {
     Serial.println("[action] Left Double-Click -> Exit / Back");
+    if (audioManager && audioManager->isOverlayOpen()) {
+        audioManager->closeOverlay();
+        pokoGfx->fillScreen(RGB565_BLACK);
+        if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
+        else if (activeApp == STATE_INFO && infoAppInstance) infoAppInstance->load();
+        else if (activeApp == STATE_CLOCK && clockAppInstance) clockAppInstance->load();
+        else if (activeApp == STATE_SSYNC && ssyncAppInstance) ssyncAppInstance->load();
+        else if (activeApp == STATE_MUSIC_UI && musicAppInstance) musicAppInstance->load();
+        else if (activeApp == STATE_VIDEO_UI && videoAppInstance) videoAppInstance->load();
+        else if (activeApp == STATE_GALLERY_UI && galleryAppInstance) galleryAppInstance->load();
+        else if (activeApp == STATE_PIXELS_UI && pixelAppInstance) pixelAppInstance->load();
+        else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance) settingsAppInstance->load();
+        return;
+    }
     if (activeApp == STATE_GALLERY_UI && galleryAppInstance) {
         galleryAppInstance->onBack();
     } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {
@@ -214,6 +254,20 @@ void onBtnLeftDouble() {
 
 void onBtnRightDouble() {
     Serial.println("[action] Right Double-Click -> Enter / Action");
+    if (audioManager && audioManager->isOverlayOpen()) {
+        audioManager->closeOverlay();
+        pokoGfx->fillScreen(RGB565_BLACK);
+        if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
+        else if (activeApp == STATE_INFO && infoAppInstance) infoAppInstance->load();
+        else if (activeApp == STATE_CLOCK && clockAppInstance) clockAppInstance->load();
+        else if (activeApp == STATE_SSYNC && ssyncAppInstance) ssyncAppInstance->load();
+        else if (activeApp == STATE_MUSIC_UI && musicAppInstance) musicAppInstance->load();
+        else if (activeApp == STATE_VIDEO_UI && videoAppInstance) videoAppInstance->load();
+        else if (activeApp == STATE_GALLERY_UI && galleryAppInstance) galleryAppInstance->load();
+        else if (activeApp == STATE_PIXELS_UI && pixelAppInstance) pixelAppInstance->load();
+        else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance) settingsAppInstance->load();
+        return;
+    }
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->enter();
     else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onEnter();
     else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->onEnter();
@@ -226,6 +280,27 @@ void onBtnRightDouble() {
 }
 
 void onBtnLongRight() {
+    Serial.println("[action] Right Long-Press");
+    if (audioManager) {
+        if (audioManager->isOverlayOpen()) {
+            audioManager->closeOverlay();
+            pokoGfx->fillScreen(RGB565_BLACK);
+            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->redraw();
+            else if (activeApp == STATE_INFO && infoAppInstance) infoAppInstance->load();
+            else if (activeApp == STATE_CLOCK && clockAppInstance) clockAppInstance->load();
+            else if (activeApp == STATE_SSYNC && ssyncAppInstance) ssyncAppInstance->load();
+            else if (activeApp == STATE_MUSIC_UI && musicAppInstance) musicAppInstance->load();
+            else if (activeApp == STATE_VIDEO_UI && videoAppInstance) videoAppInstance->load();
+            else if (activeApp == STATE_GALLERY_UI && galleryAppInstance) galleryAppInstance->load();
+            else if (activeApp == STATE_PIXELS_UI && pixelAppInstance) pixelAppInstance->load();
+            else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance) settingsAppInstance->load();
+            return;
+        } else {
+            audioManager->openOverlay();
+            audioManager->renderOverlay(pokoGfx);
+            return;
+        }
+    }
     if (activeApp == STATE_INFO && infoAppInstance)                  infoAppInstance->onLongRight();
     else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->onLongRight();
 }
@@ -265,6 +340,7 @@ void onComboBothVLong() {
 
 void onComboBothUltra() {
     Serial.println("[combo] both held 10s -> Rebooting");
+    prefs.putBool("clean_shutdown", true);
     pokoGfx->fillScreen(RGB565_RED);
     delay(500);
     ESP.restart();
@@ -280,6 +356,30 @@ void setup() {
 
     // Preferences & Settings
     prefs.begin("poko", false);
+
+    // Check clean shutdown flag
+    bool cleanShutdown = prefs.getBool("clean_shutdown", false);
+    prefs.putBool("clean_shutdown", false);
+    Serial.printf("[poko] boot: clean_shutdown=%s\n", cleanShutdown ? "true" : "false");
+
+    AppState initialApp = STATE_LAUNCHER;
+    if (cleanShutdown) {
+        int savedApp = prefs.getInt("last_app", (int)STATE_LAUNCHER);
+        // Only allow safe apps to be restored
+        if (savedApp == STATE_CLOCK ||
+            savedApp == STATE_GALLERY_UI ||
+            savedApp == STATE_SETTINGS_UI ||
+            savedApp == STATE_INFO ||
+            savedApp == STATE_PIXELS_UI ||
+            savedApp == STATE_SSYNC) {
+            initialApp = (AppState)savedApp;
+            Serial.printf("[poko] restoring previous safe app: %d\n", (int)initialApp);
+        } else {
+            Serial.println("[poko] unsafe or launcher app on clean reboot -> booting to Launcher");
+        }
+    } else {
+        Serial.println("[poko] abnormal reset or first boot -> booting to Launcher");
+    }
 
     // LittleFS Storage for offline photos & assets
     if (!LittleFS.begin(true)) {
@@ -336,7 +436,12 @@ void setup() {
     btnInput.onBothVLong(onComboBothVLong);
     btnInput.onBothUltra(onComboBothUltra);
 
-    // 6. Instantiate UI & All 8 Apps
+    // 6. Instantiate Central AudioManager & Background SnapPlayer Service
+    audioManager = new AudioManager();
+    snapService = new SnapPlayer(nullptr, &prefs);
+    snapService->begin();
+    audioManager->setSnapPlayer(snapService);
+
     pokoUI = new PokoUI(pokoGfx, onAppChange);
     pokoUI->begin();
 
@@ -346,7 +451,7 @@ void setup() {
     clockAppInstance = new ClockApp(pokoGfx, onAppChange);
     clockAppInstance->begin();
 
-    ssyncAppInstance = new SSyncApp(pokoGfx, onAppChange);
+    ssyncAppInstance = new SSyncApp(pokoGfx, onAppChange, snapService);
     ssyncAppInstance->begin();
 
     musicAppInstance = new MusicApp(pokoGfx, onAppChange);
@@ -410,9 +515,15 @@ void setup() {
     // 9. OTA Updates (Web & ArduinoOTA)
     PokoOTA::begin(&server, onAppChange, pokoGfx);
 
-    // Initial state: Start on Launcher, render directly to display before backlight is enabled
-    activeApp = STATE_LAUNCHER;
-    if (pokoUI) pokoUI->renderDirect();
+    // Initial state: Start on restored safe app or Launcher
+    activeApp = initialApp;
+    if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->renderDirect();
+    else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->load();
+    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->load();
+    else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->load();
+    else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->load();
+    else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->load();
+    else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->load();
 
     // Turn ON Backlight now that the initial UI is fully rendered on screen
     int savedBr = prefs.getInt("brightness", 80);
@@ -437,6 +548,13 @@ void loop() {
             static bool otaInit = false;
             if (!otaInit) {
                 ArduinoOTA.setHostname("Poko");
+                ArduinoOTA.onStart([]() {
+                    if (audioManager) audioManager->stopAll();
+                    if (snapService && snapService->isLoaded()) {
+                        snapService->unload();
+                    }
+                    onAppChange(STATE_LAUNCHER);
+                });
                 ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
                     if (total > 0) {
                         float pct = ((float)progress / (float)total) * 100.0f;
@@ -448,12 +566,24 @@ void loop() {
                 });
                 ArduinoOTA.onEnd([]() {
                     pixelEngine.showOtaProgress(100.0f);
+                    Preferences p;
+                    p.begin("poko", false);
+                    p.putBool("clean_shutdown", true);
+                    p.end();
                 });
                 ArduinoOTA.begin();
                 otaInit = true;
             }
 
             if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
+
+            if (prefs.getBool("snap_auto", true)) {
+                if (snapService && !snapService->isLoaded()) {
+                    Serial.println("[snap] auto-starting background SSync service");
+                    snapService->load();
+                    if (audioManager) audioManager->request(AUDIO_SSYNC);
+                }
+            }
         } else if (millis() - wifiTimer > staTimeoutMs) {
             Serial.println("[wifi] connection timeout -> fallback to AP mode");
             WiFi.disconnect();
@@ -497,19 +627,27 @@ void loop() {
     // Web Server requests
     server.handleClient();
 
-    // Active App execution
-    if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->update();
-    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->update();
-    else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->update();
-    else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->update();
-    else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->update();
-    else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->update();
-    else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->update();
-    else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->update();
-    else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->update();
+    // Active App / Overlay execution
+    if (audioManager && audioManager->isOverlayOpen()) {
+        static uint32_t lastOverlayDraw = 0;
+        if (millis() - lastOverlayDraw >= 300) {
+            lastOverlayDraw = millis();
+            audioManager->renderOverlay(pokoGfx);
+        }
+    } else {
+        if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->update();
+        else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->update();
+        else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->update();
+        else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->update();
+        else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->update();
+        else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->update();
+        else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->update();
+        else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->update();
+        else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->update();
+    }
 
     // NeoPixel lighting engine update (with Music & SSync audio states)
     bool isMusicPlaying = (musicAppInstance && musicAppInstance->isPlaying());
-    bool isSSyncPlaying = (ssyncAppInstance && ssyncAppInstance->isPlaying());
+    bool isSSyncPlaying = (snapService && snapService->isPlaying());
     pixelEngine.update(isMusicPlaying, isSSyncPlaying);
 }

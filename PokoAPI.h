@@ -424,6 +424,7 @@ public:
                 else if (appName == "audio" || appName == "music" || appName == "audio_ui" || appName == "music_ui") onAppChange(STATE_MUSIC_UI);
                 else if (appName == "ssync" || appName == "snap" || appName == "snapclient") onAppChange(STATE_SSYNC);
                 else if (appName == "gallery" || appName == "gallery_ui") onAppChange(STATE_GALLERY_UI);
+                else if (appName == "pixels" || appName == "pixel") onAppChange(STATE_PIXELS_UI);
                 else if (appName == "settings" || appName == "settings_ui") onAppChange(STATE_SETTINGS_UI);
             } else if (_server->hasArg("state")) {
                 int s = _server->arg("state").toInt();
@@ -627,6 +628,7 @@ public:
                 Serial.printf("[api] saving WiFi SSID: %s\n", s.c_str());
                 _prefs->putString("wifi_ssid", s);
                 _prefs->putString("wifi_pass", p);
+                _prefs->putBool("clean_shutdown", true);
                 _server->send(200, "application/json", "{\"ok\":true,\"status\":\"rebooting\"}");
                 delay(600);
                 ESP.restart();
@@ -644,6 +646,7 @@ public:
         // Reboot
         _server->on("/api/reboot", HTTP_GET, [this]() {
             _server->send(200, "application/json", "{\"ok\":true,\"msg\":\"Rebooting\"}");
+            _prefs->putBool("clean_shutdown", true);
             delay(500);
             ESP.restart();
         });

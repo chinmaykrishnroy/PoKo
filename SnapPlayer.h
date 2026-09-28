@@ -187,6 +187,7 @@ private:
     volatile bool _syncing;
     volatile bool _playStarted;
     volatile bool _playReleased;
+    volatile bool _isSuspended;
 
     TaskHandle_t _netTaskHandle;
     TaskHandle_t _audioTaskHandle;
@@ -1436,6 +1437,17 @@ private:
                 continue;
             }
 
+            if (_isSuspended) {
+                if (_pcmBuf.available() > 0) {
+                    _pcmBuf.drain();
+                }
+                _playReleased = false;
+                _playStarted = false;
+                _samplesPlayed = 0;
+                vTaskDelay(pdMS_TO_TICKS(50));
+                continue;
+            }
+
             if (_resyncRequested) {
                 _resyncRequested = false;
                 _resyncGeneration++;
@@ -1969,10 +1981,36 @@ public:
 
 
     // ── Public Accessors for SSyncApp & WebUI ──────────────────
-    bool isPlaying() const { return _playStarted && _connected; }
+    bool isPlaying() const { return _playStarted && _connected && !_isSuspended && !_serverMuted; }
+    bool isSuspended() const { return _isSuspended; }
     bool isSyncing() const { return _syncing; }
     int  getVolume() const { return (int)lroundf(_volume * 100.0f); }
     bool isMuted() const { return _serverMuted; }
+
+    void suspendAudio() {
+        if (!_isLoaded || _isSuspended) return;
+        Serial.println("[snap] audio suspended");
+        _isSuspended = true;
+        _pcmBuf.drain();
+        _playReleased = false;
+        _playStarted = false;
+        _samplesPlayed = 0;
+    }
+
+    void resumeAudio() {
+        if (!_isLoaded || !_isSuspended) return;
+        Serial.println("[snap] audio resuming");
+        if (_sampleRate > 0) {
+            ensureAudioOutput(_sampleRate);
+        }
+        _resyncRequested = true;
+        _isSuspended = false;
+    }
+
+    void stop() {
+        suspendAudio();
+        setMute(true);
+    }
     String getCodec() const { return _codec; }
     uint32_t getSampleRate() const { return _sampleRate; }
     int32_t getBufferMs() const { return _serverBufferMs; }

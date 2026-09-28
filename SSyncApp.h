@@ -8,6 +8,7 @@
 #include "PokoDrivers.h"
 #include "PokoTheme.h"
 #include "SnapPlayer.h"
+#include "AudioManager.h"
 
 // ─────────────────────────────────────────────────────────────
 //  SSyncApp — Direct Snapcast Client UI (128×128)
@@ -34,6 +35,7 @@ private:
 
         bool connected = _player ? _player->isConnected() : false;
         bool playing   = _player ? _player->isPlaying() : false;
+        bool suspended = _player ? _player->isSuspended() : false;
         bool muted     = _player ? _player->isMuted() : false;
         int  volume    = _player ? _player->getVolume() : 75;
         String srvHost = _player ? _player->getServerHost() : "192.168.0.20";
@@ -51,8 +53,8 @@ private:
         _canvas->print("SSync");
 
         // Status badge right side
-        uint16_t badgeCol = connected ? (playing ? POKO_CLR_GREEN : theme.accent) : POKO_CLR_ERR;
-        const char* badgeText = connected ? (playing ? "PLAY" : "IDLE") : "OFFLINE";
+        uint16_t badgeCol = connected ? (suspended ? theme.accent : (playing ? POKO_CLR_GREEN : theme.accent)) : POKO_CLR_ERR;
+        const char* badgeText = connected ? (suspended ? "SUSP" : (playing ? "PLAY" : "IDLE")) : "OFFLINE";
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(badgeCol, theme.headerBg);
         int16_t x1, y1; uint16_t w, h;
@@ -129,8 +131,10 @@ private:
     }
 
 public:
-    SSyncApp(Arduino_GFX* gfx, AppSwitchFn exitFn)
-        : _gfx(gfx), _exit(exitFn) {}
+    SSyncApp(Arduino_GFX* gfx, AppSwitchFn exitFn, SnapPlayer* player = nullptr)
+        : _gfx(gfx), _exit(exitFn), _player(player) {}
+
+    void setPlayer(SnapPlayer* p) { _player = p; }
 
     void begin() {
         if (!_canvas) {
@@ -147,13 +151,18 @@ public:
         _active = true;
         _dirty  = true;
         begin();
-        if (_player) _player->load();
+        if (audioManager) {
+            audioManager->request(AUDIO_SSYNC);
+        }
+        if (_player && !_player->isLoaded()) {
+            _player->load();
+        }
         renderToCanvas();
     }
 
     void unload() {
         _active = false;
-        if (_player) _player->unload();
+        // NOTE: We do NOT unload _player here! Background playback persists across app switches.
         if (_canvas) {
             delete _canvas;
             _canvas = nullptr;

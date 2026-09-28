@@ -6,6 +6,7 @@
 #include "PokoAppState.h"
 #include "PokoPins.h"
 #include "PokoTheme.h"
+#include "AudioManager.h"
 
 // ─────────────────────────────────────────────────────────────
 //  PokoUI — Launcher carousel (7 tiles) + status bar (128×128)
@@ -80,6 +81,14 @@ private:
 
         if (showDot) {
             _statusCanvas->fillCircle(7, 6, 2, dotColor);
+        }
+
+        // Left audio playing indicator
+        if (audioManager && audioManager->isPlaying()) {
+            _statusCanvas->setFont(u8g2_font_5x7_tf);
+            _statusCanvas->setTextColor(POKO_CLR_GREEN, theme.headerBg);
+            _statusCanvas->setCursor(14, 10);
+            _statusCanvas->print(audioManager->getSourceEmblem());
         }
 
         // Center: "PoKo" branding
