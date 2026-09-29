@@ -153,8 +153,14 @@ def metadata_from_probe(path: Path, kind: str, probe: dict[str, Any]) -> dict[st
         or tags_l.get("composer")
     )
 
+    # Container/audio-stream titles are useful for songs, but video files often
+    # carry generic audio track labels such as "Stereo" or "English". Keep the
+    # user-visible video/image name tied to the file instead of leaking a stream
+    # label into the media catalog.
+    title = tags_l.get("title") or path.stem if kind == "audio" else path.stem
+
     return {
-        "title": tags_l.get("title") or path.stem,
+        "title": title,
         "artist": artist,
         "duration_s": duration,
         "has_audio": bool(audio_streams),

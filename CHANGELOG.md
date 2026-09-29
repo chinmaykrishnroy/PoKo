@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## Unreleased
+
+### Fixed
+- Video and image catalog titles now use their filenames, preventing generic
+  embedded audio-track labels such as `Stereo` from replacing media names.
+
+---
+
 ## [v1.3.3] — 2026-09-30
 
 ### Fixed

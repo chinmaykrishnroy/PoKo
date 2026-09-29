@@ -96,6 +96,20 @@ class FFmpegCommandTests(unittest.TestCase):
         self.assertEqual(meta["artist"], "Singer")
         self.assertEqual(meta["duration_s"], 42.5)
 
+    def test_video_title_uses_filename_instead_of_audio_track_label(self) -> None:
+        meta = metadata_from_probe(
+            Path("Ben 10 Omniverse - S04E09.mkv"),
+            "video",
+            {
+                "format": {},
+                "streams": [
+                    {"codec_type": "video", "width": 1280, "height": 720},
+                    {"codec_type": "audio", "tags": {"title": "Stereo"}},
+                ],
+            },
+        )
+        self.assertEqual(meta["title"], "Ben 10 Omniverse - S04E09")
+
     def test_thumbnail_icon_prefers_jpeg_payload(self) -> None:
         icon = thumbnail_icon(Path("missing.mp3"), "audio", CONFIG)
         self.assertIn(icon.mime, {"image/jpeg", "image/svg+xml"})
