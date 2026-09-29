@@ -240,3 +240,4 @@ void es8311_delete(es8311_handle_t dev);
 #ifdef __cplusplus
 }
 #endif
+

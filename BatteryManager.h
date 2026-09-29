@@ -185,3 +185,4 @@ public:
     bool  isLow() const             { return isPresent() && _percentage <= 15 && !_isCharging; }
     bool  isCritical() const        { return isPresent() && _isCritical; }
 };
+

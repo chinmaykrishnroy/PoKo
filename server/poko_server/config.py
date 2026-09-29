@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Any
 
@@ -8,12 +9,55 @@ from typing import Any
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yml"
 
 
+def _strip_yaml_comment(raw_line: str) -> str:
+    """Remove YAML comments without truncating # characters inside quotes."""
+    single = False
+    double = False
+    escaped = False
+    index = 0
+    while index < len(raw_line):
+        char = raw_line[index]
+        if escaped:
+            escaped = False
+            index += 1
+            continue
+        if char == "\\" and double:
+            escaped = True
+            index += 1
+            continue
+        if char == '"' and not single:
+            double = not double
+            index += 1
+            continue
+        if char == "'" and not double:
+            # YAML escapes a single quote inside a single-quoted scalar as ''.
+            if single and index + 1 < len(raw_line) and raw_line[index + 1] == "'":
+                index += 2
+                continue
+            single = not single
+            index += 1
+            continue
+        if char == "#" and not single and not double:
+            return raw_line[:index]
+        index += 1
+    return raw_line
+
+
 def _parse_scalar(raw: str) -> Any:
     value = raw.strip()
     if not value:
         return ""
-    if value[0:1] == value[-1:] and value[0:1] in {"'", '"'}:
-        return value[1:-1]
+    if value == "[]":
+        return []
+    if value == "{}":
+        return {}
+    if value.startswith('"') and value.endswith('"'):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value[1:-1]
+    if value.startswith("'") and value.endswith("'"):
+        return value[1:-1].replace("''", "'")
     lower = value.lower()
     if lower in {"true", "yes", "on"}:
         return True
@@ -32,7 +76,7 @@ def _parse_scalar(raw: str) -> Any:
 def _parse_simple_yaml(text: str) -> dict[str, Any]:
     lines: list[tuple[int, str]] = []
     for raw_line in text.splitlines():
-        without_comment = raw_line.split("#", 1)[0].rstrip()
+        without_comment = _strip_yaml_comment(raw_line).rstrip()
         if not without_comment.strip():
             continue
         indent = len(without_comment) - len(without_comment.lstrip(" "))
@@ -102,12 +146,35 @@ def _get(raw: dict[str, Any], path: str, default: Any) -> Any:
     return node
 
 
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled", ""}:
+        return False
+    return default
+
+
 def _as_path_list(value: Any) -> list[Path]:
     if value is None:
         return []
     if isinstance(value, (str, Path)):
-        return [Path(value)]
-    return [Path(str(item)) for item in value]
+        text = str(value).strip()
+        return [Path(text)] if text else []
+    paths: list[Path] = []
+    for item in value:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if text:
+            paths.append(Path(text))
+    return paths
 
 
 @dataclass(frozen=True)
@@ -199,7 +266,12 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
 
     poko_ip = str(poko_sec.get("ip") or nexus_sec.get("ip") or "192.168.0.4")
     poko_base_url = str(poko_sec.get("base_url") or nexus_sec.get("base_url") or f"http://{poko_ip}").rstrip("/")
-    poko_delay = int(poko_sec.get("switch_delay_ms") or nexus_sec.get("switch_delay_ms") or 500)
+    raw_delay = poko_sec.get("switch_delay_ms")
+    if raw_delay is None:
+        raw_delay = nexus_sec.get("switch_delay_ms")
+    if raw_delay is None:
+        raw_delay = 500
+    poko_delay = max(0, int(raw_delay))
 
     poko_ports = poko_sec.get("ports") if isinstance(poko_sec.get("ports"), dict) else {}
     nexus_ports = nexus_sec.get("ports") if isinstance(nexus_sec.get("ports"), dict) else {}
@@ -211,6 +283,11 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
 
     disp_w = int(_get(raw, "display.width", 128))
     disp_h = int(_get(raw, "display.height", 128))
+    if (disp_w, disp_h) != (128, 128):
+        raise ValueError("PoKo display must be 128 x 128")
+    sync_audio_rate = int(_get(raw, "ffmpeg.sync_audio_rate", 22050))
+    if sync_audio_rate != 22050:
+        raise ValueError("PoKo synchronized audio must be 22050 Hz")
 
     return AppConfig(
         host=str(_get(raw, "server.host", "0.0.0.0")),
@@ -229,13 +306,13 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
             read_folders=_as_path_list(_get(raw, "library.read_folders", [])),
             write_folder=Path(str(_get(raw, "library.write_folder", "uploads"))),
             page_size=max(1, int(_get(raw, "library.page_size", 5))),
-            probe_on_scan=bool(_get(raw, "library.probe_on_scan", False)),
+            probe_on_scan=_as_bool(_get(raw, "library.probe_on_scan", False)),
             db_path=db_path,
         ),
         defaults=DefaultsConfig(
             audio_seek_seconds=int(_get(raw, "defaults.audio_seek_seconds", 10)),
             video_seek_seconds=int(_get(raw, "defaults.video_seek_seconds", 10)),
-            video_with_audio=bool(_get(raw, "defaults.video_with_audio", True)),
+            video_with_audio=_as_bool(_get(raw, "defaults.video_with_audio", True), True),
             video_aspect=str(_get(raw, "defaults.video_aspect", "square")),
             image_aspect=str(_get(raw, "defaults.image_aspect", "square")),
             image_hold_seconds=int(_get(raw, "defaults.image_hold_seconds", 30)),
@@ -247,7 +324,7 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
             audio_bitrate=str(_get(raw, "ffmpeg.audio_bitrate", "96k")),
             audio_rate=int(_get(raw, "ffmpeg.audio_rate", 44100)),
             audio_channels=int(_get(raw, "ffmpeg.audio_channels", 2)),
-            sync_audio_rate=int(_get(raw, "ffmpeg.sync_audio_rate", 22050)),
+            sync_audio_rate=sync_audio_rate,
             sync_audio_chunk_ms=int(_get(raw, "ffmpeg.sync_audio_chunk_ms", 20)),
             video_fps=max(8.0, min(20.0, float(_get(raw, "ffmpeg.video_fps", 15)))),
             video_quality=max(4, min(15, int(_get(raw, "ffmpeg.video_quality", 7)))),
@@ -255,23 +332,36 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
             graphics_quality=max(4, min(15, int(_get(raw, "ffmpeg.graphics_quality", 7)))),
             start_delay_ms=max(150, min(1500, int(_get(raw, "ffmpeg.start_delay_ms", 400)))),
             video_drop_late_ms=max(80, min(500, int(_get(raw, "ffmpeg.video_drop_late_ms", 160)))),
-            highpass_enabled=bool(_get(raw, "ffmpeg.audio_filters.highpass.enabled", False)),
+            highpass_enabled=_as_bool(_get(raw, "ffmpeg.audio_filters.highpass.enabled", False)),
             highpass_hz=max(20, min(2000, int(_get(raw, "ffmpeg.audio_filters.highpass.cutoff_hz", 80)))),
-            lowpass_enabled=bool(_get(raw, "ffmpeg.audio_filters.lowpass.enabled", False)),
+            lowpass_enabled=_as_bool(_get(raw, "ffmpeg.audio_filters.lowpass.enabled", False)),
             lowpass_hz=max(1000, min(20000, int(_get(raw, "ffmpeg.audio_filters.lowpass.cutoff_hz", 16000)))),
         ),
     )
 
 
+def _yaml_string(value: Any) -> str:
+    # JSON string syntax is valid YAML and safely preserves #, :, quotes and backslashes.
+    return json.dumps(str(value), ensure_ascii=False)
+
+
 def config_to_yaml(config: AppConfig) -> str:
-    read_folders = "\n".join(f"    - {folder}" for folder in config.library.read_folders) or "    []"
+    if config.library.read_folders:
+        read_folders = "\n".join(f"    - {_yaml_string(folder)}" for folder in config.library.read_folders)
+        read_folders_block = f"read_folders:\n{read_folders}"
+    else:
+        read_folders_block = "read_folders: []"
     return f"""server:
-  host: {config.host}
+  host: {_yaml_string(config.host)}
   port: {config.port}
 
+display:
+  width: {config.display.width}
+  height: {config.display.height}
+
 poko:
-  ip: {config.poko.ip}
-  base_url: {config.poko.base_url}
+  ip: {_yaml_string(config.poko.ip)}
+  base_url: {_yaml_string(config.poko.base_url)}
   switch_delay_ms: {config.poko.switch_delay_ms}
   ports:
     graphics: {config.poko.graphics_port}
@@ -280,26 +370,25 @@ poko:
     video_frames: {config.poko.video_frames_port}
 
 library:
-  read_folders:
-{read_folders}
-  write_folder: {config.library.write_folder}
+  {read_folders_block}
+  write_folder: {_yaml_string(config.library.write_folder)}
   page_size: {config.library.page_size}
   probe_on_scan: {str(config.library.probe_on_scan).lower()}
-  db_path: {config.library.db_path}
+  db_path: {_yaml_string(config.library.db_path)}
 
 defaults:
   audio_seek_seconds: {config.defaults.audio_seek_seconds}
   video_seek_seconds: {config.defaults.video_seek_seconds}
   video_with_audio: {str(config.defaults.video_with_audio).lower()}
-  video_aspect: {config.defaults.video_aspect}
-  image_aspect: {config.defaults.image_aspect}
+  video_aspect: {_yaml_string(config.defaults.video_aspect)}
+  image_aspect: {_yaml_string(config.defaults.image_aspect)}
   image_hold_seconds: {config.defaults.image_hold_seconds}
   motion_image_seconds: {config.defaults.motion_image_seconds}
 
 ffmpeg:
-  executable: {config.ffmpeg.executable}
-  ffprobe: {config.ffmpeg.ffprobe}
-  audio_bitrate: {config.ffmpeg.audio_bitrate}
+  executable: {_yaml_string(config.ffmpeg.executable)}
+  ffprobe: {_yaml_string(config.ffmpeg.ffprobe)}
+  audio_bitrate: {_yaml_string(config.ffmpeg.audio_bitrate)}
   audio_rate: {config.ffmpeg.audio_rate}
   audio_channels: {config.ffmpeg.audio_channels}
   sync_audio_rate: {config.ffmpeg.sync_audio_rate}

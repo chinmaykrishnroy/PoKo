@@ -42,6 +42,19 @@ private:
         size_t          _count;
         bool            _prebuffered;
 
+        uint32_t readBuffered(void* data, uint32_t len) {
+            size_t toCopy = min((size_t)len, _count);
+            size_t copied = 0;
+            while (copied < toCopy) {
+                size_t chunk = min(toCopy - copied, _capacity - _tail);
+                memcpy(((uint8_t*)data) + copied, _ring + _tail, chunk);
+                _tail = (_tail + chunk) % _capacity;
+                copied += chunk;
+            }
+            _count -= copied;
+            return (uint32_t)copied;
+        }
+
         void pump() {
             if (!_client || !_client->connected() || (*_abort)) return;
             while (_client->available() > 0 && _count < _capacity) {
@@ -109,21 +122,16 @@ private:
             if (_count == 0 || (*_abort)) return 0;
 
             // Read from ring buffer into caller data
-            size_t toCopy = min((size_t)len, _count);
-            size_t copied = 0;
-            while (copied < toCopy) {
-                size_t chunk = min(toCopy - copied, _capacity - _tail);
-                memcpy(((uint8_t*)data) + copied, _ring + _tail, chunk);
-                _tail = (_tail + chunk) % _capacity;
-                copied += chunk;
-            }
-            _count -= copied;
-
+            uint32_t copied = readBuffered(data, len);
             pump();
-            return (uint32_t)copied;
+            return copied;
         }
 
-        virtual uint32_t readNonBlock(void *data, uint32_t len) override { return read(data, len); }
+        virtual uint32_t readNonBlock(void *data, uint32_t len) override {
+            if (!_ring || _capacity == 0 || (*_abort)) return 0;
+            pump();
+            return readBuffered(data, len);
+        }
         virtual bool seek(int32_t pos, int dir) override { return false; }
         virtual bool close() override {
             if (_ring) {
@@ -313,9 +321,13 @@ public:
             if (!_netTaskDone) {
                 _netTaskDone = xSemaphoreCreateBinary();
             }
-            if (_netTaskDone) {
-                xSemaphoreTake(_netTaskDone, 0);
+            if (!_netTaskDone) {
+                Serial.println("[tcpaudio] Error: could not allocate task completion semaphore");
+                _isRunning = false;
+                _isLoaded = false;
+                return;
             }
+            xSemaphoreTake(_netTaskDone, 0);
 
             _isRunning = true;
             _clientConnected = false;
@@ -337,15 +349,21 @@ public:
         if (_isLoaded) {
             _isRunning = false;
             stopStream();
-            _isLoaded = false;
-            if (_netTaskDone && _netTaskHandle != NULL) {
+            if (_netTaskHandle != NULL) {
+                if (!_netTaskDone) {
+                    Serial.println("[tcpaudio] Error: cannot verify task shutdown; keeping player loaded");
+                    return;
+                }
                 if (xSemaphoreTake(_netTaskDone, pdMS_TO_TICKS(1500)) != pdTRUE) {
-                    Serial.println("[tcpaudio] Error: task shutdown timeout, preserving handle");
+                    Serial.println("[tcpaudio] Error: task shutdown timeout; keeping player loaded");
                     return;
                 }
             }
             _netTaskHandle = NULL;
             _clientConnected = false;
+            _activeClient = nullptr;
+            _isLoaded = false;
         }
     }
 };
+

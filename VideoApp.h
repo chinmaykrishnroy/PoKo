@@ -10,6 +10,7 @@
 #include "PokoAppState.h"
 #include "PokoPins.h"
 #include "PokoTheme.h"
+#include "TitleMarquee.h"
 #include "PokoDrivers.h"
 #include "SyncedAVPlayer.h"
 #include "AudioManager.h"
@@ -39,11 +40,12 @@ private:
 
     struct VideoItem {
         char id[36];
-        char title[44];
+        char title[128];
         uint32_t duration_s;
     };
 
-    static constexpr int MAX_VIDEOS = 32;
+    static constexpr int MAX_CATALOG_ITEMS = 999;
+    static constexpr int PAGE_SIZE = 8;
 
     Arduino_GFX*    _gfx;
     AppSwitchFn     _exit;
@@ -53,9 +55,12 @@ private:
     bool      _dirty        = true;
     VideoMode _mode         = MODE_BROWSE;
 
-    VideoItem _videos[MAX_VIDEOS];
+    VideoItem _videos[PAGE_SIZE];
     int       _videoCount   = 0;
     int       _selectedIdx  = 0;
+    int       _pageStart    = -1;
+    int       _catalogIndex = 0;
+    int       _catalogTotal = 0;
     bool      _loadingList  = false;
     bool      _serverError  = false;
 
@@ -65,8 +70,9 @@ private:
 
     uint32_t  _lastDrawMs   = 0;
     uint32_t  _playStartMs  = 0;
-    int       _scrollOffset = 0;
-    uint32_t  _lastScrollMs = 0;
+    bool      _streamStarted = false;
+    TitleMarquee _marquee;
+    uint16_t _titleWidth = 0;
 
     static Arduino_Canvas* _activeCanvas;
     static VideoApp*       _instance;
@@ -88,58 +94,73 @@ private:
         return prefs.getInt("server_port", 8765);
     }
 
-    void fetchVideoList() {
-        if (WiFi.status() != WL_CONNECTED) {
+    bool fetchVideoList(int index = 0, bool loadThumb = true) {
+        if (WiFi.status() != WL_CONNECTED || index < 0 || index >= MAX_CATALOG_ITEMS) {
             _serverError = true;
             _dirty = true;
-            return;
+            return false;
+        }
+        if (_videoCount > 0 && index >= _pageStart && index < _pageStart + _videoCount) {
+            _catalogIndex = index;
+            _selectedIdx = index - _pageStart;
+            if (loadThumb) fetchThumbnail(_selectedIdx);
+            _serverError = false;
+            _dirty = true;
+            return true;
         }
 
         _loadingList = true;
-        _serverError = false;
-
+        int start = (index / PAGE_SIZE) * PAGE_SIZE;
         HTTPClient http;
-        String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/library/video?page=1&page_size=" + String(MAX_VIDEOS) + "&icons=false";
+        String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
+                     "/api/library/video?page=" + String(start / PAGE_SIZE + 1) +
+                     "&page_size=" + String(PAGE_SIZE) + "&icons=false";
         http.begin(url);
-        http.setTimeout(3500);
-
+        http.setTimeout(5000);
         int httpCode = http.GET();
+        bool parsed = false;
+        int total = 0, count = 0;
+        VideoItem pending[PAGE_SIZE] = {};
         if (httpCode == HTTP_CODE_OK) {
             JsonDocument doc;
-            DeserializationError err = deserializeJson(doc, http.getStream());
-            if (!err) {
+            if (!deserializeJson(doc, http.getStream())) {
+                parsed = true;
+                total = min((int)(doc["total"] | 0), MAX_CATALOG_ITEMS);
                 JsonArray items = doc["items"].as<JsonArray>();
-                _videoCount = 0;
                 for (JsonObject item : items) {
-                    if (_videoCount >= MAX_VIDEOS) break;
-                    const char* id = item["id"] | "";
-                    const char* title = item["title"] | "Untitled";
-                    float durF = item["duration_s"].as<float>();
-                    if (durF <= 0.0f && item.containsKey("duration")) {
-                        durF = item["duration"].as<float>();
-                    }
-                    uint32_t dur = (durF > 0.0f) ? (uint32_t)(durF + 0.5f) : 0;
-
-                    strncpy(_videos[_videoCount].id, id, sizeof(_videos[_videoCount].id) - 1);
-                    strncpy(_videos[_videoCount].title, title, sizeof(_videos[_videoCount].title) - 1);
-                    _videos[_videoCount].duration_s = dur;
-                    _videoCount++;
+                    if (count >= PAGE_SIZE || start + count >= total) break;
+                    VideoItem& video = pending[count];
+                    strlcpy(video.id, item["id"] | "", sizeof(video.id));
+                    strlcpy(video.title, item["title"] | "Untitled", sizeof(video.title));
+                    float duration = item["duration_s"].as<float>();
+                    if (duration <= 0 && item.containsKey("duration")) duration = item["duration"].as<float>();
+                    video.duration_s = duration > 0 ? (uint32_t)(duration + 0.5f) : 0;
+                    if (!video.id[0]) break;
+                    count++;
                 }
-                _serverError = (_videoCount == 0);
-            } else {
-                _serverError = true;
             }
-        } else {
-            _serverError = true;
         }
         http.end();
         _loadingList = false;
-
-        if (_videoCount > 0) {
-            if (_selectedIdx >= _videoCount) _selectedIdx = 0;
-            fetchThumbnail(_selectedIdx);
+        if (parsed && total == 0) {
+            _videoCount = 0;
+            _catalogTotal = 0;
+            _catalogIndex = 0;
+            _pageStart = -1;
         }
+        bool loaded = index >= start && index < start + count;
+        if (loaded) {
+            memcpy(_videos, pending, count * sizeof(VideoItem));
+            _videoCount = count;
+            _pageStart = start;
+            _selectedIdx = index - start;
+            _catalogIndex = index;
+            _catalogTotal = total;
+            if (loadThumb) fetchThumbnail(_selectedIdx);
+        }
+        _serverError = !loaded;
         _dirty = true;
+        return loaded;
     }
 
     void fetchThumbnail(int idx) {
@@ -182,34 +203,50 @@ private:
             }
             if (total > 100) {
                 _thumbSize = total;
-                strncpy(_loadedId, _videos[idx].id, sizeof(_loadedId) - 1);
+                strlcpy(_loadedId, _videos[idx].id, sizeof(_loadedId));
             }
         }
         http.end();
+        _marquee.reset(millis());
+    }
+
+    void failPlayback() {
+        if (syncPlugin) syncPlugin->unload();
+        // A timed-out worker retains its buffers and ownership until it exits.
+        if (audioManager && (!syncPlugin || !syncPlugin->isLoaded())) {
+            audioManager->release(AUDIO_VIDEO);
+        }
+        if (powerManager) {
+            powerManager->releaseLock(POWER_LOCK_DISPLAY | POWER_LOCK_REALTIME_NET, LOCK_OWNER_VIDEO);
+        }
+        _mode = MODE_BROWSE;
+        _serverError = true;
+        _streamStarted = false;
+        _dirty = true;
     }
 
     void requestPlay(int idx) {
         if (idx < 0 || idx >= _videoCount) return;
-
+        // Quiesce BOTH old transports and the audio consumer before clearing
+        // their queues/clock. A live reset mixes old timestamps into the new clip.
+        if (syncPlugin) syncPlugin->unload();
+        if (!syncPlugin || syncPlugin->isLoaded()) {
+            failPlayback();
+            return;
+        }
         if (!audioManager || !audioManager->request(AUDIO_VIDEO)) {
-            _serverError = true;
+            failPlayback();
             return;
         }
-
         if (!ensureAudioOutput(44100)) {
-            audioManager->release(AUDIO_VIDEO);
-            _serverError = true;
+            failPlayback();
             return;
         }
-
-        if (syncPlugin) {
-            syncPlugin->reset();
-            if (!syncPlugin->isLoaded()) {
-                syncPlugin->load();
-                delay(50);
-            }
+        syncPlugin->load();
+        if (!syncPlugin->isLoaded() || !syncPlugin->isRunning()) {
+            failPlayback();
+            return;
         }
-
         HTTPClient http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
                      "/api/video/" + String(_videos[idx].id) +
@@ -218,25 +255,19 @@ private:
         http.setTimeout(3000);
         int httpCode = http.GET();
         http.end();
-
         if (httpCode >= 200 && httpCode < 300) {
             _mode = MODE_PLAYING;
+            _serverError = false;
+            _streamStarted = false;
             _playStartMs = millis();
             _dirty = true;
-            fetchThumbnail(idx);
+            // Never fetch a thumbnail while incoming frames need draining.
             if (powerManager) {
-                powerManager->acquireLock(POWER_LOCK_DISPLAY | POWER_LOCK_REALTIME_NET);
+                powerManager->acquireLock(POWER_LOCK_DISPLAY | POWER_LOCK_REALTIME_NET, LOCK_OWNER_VIDEO);
             }
         } else {
             Serial.printf("[video] requestPlay failed with code %d\n", httpCode);
-            _dirty = true;
-            if (syncPlugin) {
-                syncPlugin->reset();
-                syncPlugin->unload();
-            }
-            if (audioManager) {
-                audioManager->release(AUDIO_VIDEO);
-            }
+            failPlayback();
         }
     }
 
@@ -249,12 +280,11 @@ private:
         http.end();
 
         if (syncPlugin) {
-            syncPlugin->reset();
             syncPlugin->unload();
         }
 
         if (powerManager) {
-            powerManager->releaseLock(POWER_LOCK_DISPLAY | POWER_LOCK_REALTIME_NET);
+            powerManager->releaseLock(POWER_LOCK_DISPLAY | POWER_LOCK_REALTIME_NET, LOCK_OWNER_VIDEO);
         }
 
         _mode = MODE_BROWSE;
@@ -263,9 +293,33 @@ private:
 
     void requestStop() {
         requestStopInternal();
-        if (audioManager) {
+        if (audioManager && (!syncPlugin || !syncPlugin->isLoaded())) {
             audioManager->release(AUDIO_VIDEO);
         }
+        if (_videoCount > 0) fetchThumbnail(_selectedIdx);
+    }
+
+    bool selectVideo(int index) {
+        VideoItem previous = _videos[_selectedIdx];
+        int previousIndex = _catalogIndex;
+        int previousTotal = _catalogTotal;
+        if (!fetchVideoList(index, false)) return false;
+        _marquee.reset(millis());
+        _titleWidth = 0;
+        if (_mode == MODE_PLAYING) {
+            requestPlay(_selectedIdx);
+            if (_mode == MODE_PLAYING) return true;
+            _videos[0] = previous;
+            _videoCount = 1;
+            _pageStart = previousIndex;
+            _catalogIndex = previousIndex;
+            _catalogTotal = previousTotal;
+            _selectedIdx = 0;
+            _dirty = true;
+            return false;
+        }
+        fetchThumbnail(_selectedIdx);
+        return true;
     }
 
     void renderToCanvas() {
@@ -287,7 +341,7 @@ private:
 
         if (_videoCount > 0) {
             char badge[16];
-            snprintf(badge, sizeof(badge), "%d/%d", _selectedIdx + 1, _videoCount);
+            snprintf(badge, sizeof(badge), "%d/%d", _catalogIndex + 1, _catalogTotal);
             _canvas->setTextColor(theme.muted, theme.headerBg);
             _canvas->getTextBounds(badge, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(125 - w, 11);
@@ -329,12 +383,13 @@ private:
         _canvas->setTextColor(theme.text, theme.bg);
         const char* title = (_videoCount > 0) ? _videos[_selectedIdx].title : (_serverError ? "Start PoKo Server" : "No Videos");
         _canvas->getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
+        _titleWidth = w;
         if (w <= 120) {
             _canvas->setCursor(max(4, (128 - (int)w) / 2), 94);
             _canvas->print(title);
         } else {
             int loopLen = w + 32;
-            int offset = _scrollOffset % loopLen;
+            int offset = _marquee.offset();
             int dx = 4 - offset;
             _canvas->setCursor(dx, 94);
             _canvas->print(title);
@@ -343,6 +398,9 @@ private:
                 _canvas->print(title);
             }
         }
+
+        _canvas->fillRect(0, 86, 4, 16, theme.bg);
+        _canvas->fillRect(124, 86, 4, 16, theme.bg);
 
         // Subtitle / Duration (y=102..112)
         _canvas->setFont(u8g2_font_5x7_tf);
@@ -367,7 +425,7 @@ private:
         _canvas->drawFastHLine(0, 114, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(theme.footerText, theme.headerBg);
-        const char* hint = (_videoCount > 0) ? "L:Prv  R:Nxt  2R:Play" : "2R:Retry  2L:Back";
+        const char* hint = _serverError ? "Failed  2R:Retry" : ((_videoCount > 0) ? "L:Prv  R:Nxt  2R:Play" : "2R:Retry  2L:Back");
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
         _canvas->print(hint);
@@ -381,6 +439,10 @@ public:
         _instance = this;
     }
 
+    static bool playbackStoppedStatic() {
+        return !syncPlugin || !syncPlugin->isLoaded();
+    }
+
     static void stopPlaybackStatic() {
         if (_instance) _instance->requestStopInternal();
     }
@@ -391,7 +453,7 @@ public:
             _canvas->begin();
         }
         if (audioManager) {
-            audioManager->setVideoHandlers(stopPlaybackStatic);
+            audioManager->setVideoHandlers(stopPlaybackStatic, playbackStoppedStatic);
         }
     }
 
@@ -399,29 +461,50 @@ public:
         _active = true;
         _dirty  = true;
         _mode   = MODE_BROWSE;
+        _marquee.reset(millis());
+        _titleWidth = 0;
         begin();
 
-        if (_videoCount == 0) {
-            fetchVideoList();
-        } else {
-            fetchThumbnail(_selectedIdx);
-        }
+        _pageStart = -1;
+        if (!fetchVideoList(_catalogIndex) && _catalogIndex > 0) fetchVideoList(0);
         renderToCanvas();
+    }
+
+    bool prepareRemoteStream() {
+        if (!syncPlugin) return false;
+        syncPlugin->unload();
+        if (syncPlugin->isLoaded() || !audioManager || !audioManager->request(AUDIO_VIDEO)) return false;
+        if (!ensureAudioOutput(44100)) {
+            audioManager->release(AUDIO_VIDEO);
+            return false;
+        }
+        syncPlugin->load();
+        if (!syncPlugin->isLoaded() || !syncPlugin->isRunning()) {
+            failPlayback();
+            return false;
+        }
+        _mode = MODE_PLAYING;
+        _streamStarted = false;
+        _playStartMs = millis();
+        _serverError = false;
+        _dirty = true;
+        if (powerManager) powerManager->acquireLock(POWER_LOCK_DISPLAY | POWER_LOCK_REALTIME_NET, LOCK_OWNER_VIDEO);
+        return true;
     }
 
     void unload() {
         _active = false;
         if (powerManager) {
-            powerManager->releaseLock(POWER_LOCK_DISPLAY | POWER_LOCK_REALTIME_NET);
+            powerManager->releaseLock(POWER_LOCK_DISPLAY | POWER_LOCK_REALTIME_NET, LOCK_OWNER_VIDEO);
         }
         if (_mode == MODE_PLAYING) {
             requestStop();
         } else {
-            if (audioManager) {
-                audioManager->release(AUDIO_VIDEO);
-            }
             if (syncPlugin) {
                 syncPlugin->unload();
+            }
+            if (audioManager && (!syncPlugin || !syncPlugin->isLoaded())) {
+                audioManager->release(AUDIO_VIDEO);
             }
         }
         if (_canvas) {
@@ -438,45 +521,31 @@ public:
 
     bool isLoaded() const { return _active; }
 
+    void refreshTheme() { if (_active && _mode != MODE_PLAYING) renderToCanvas(); }
+
     void onLeft() {
-        if (_videoCount <= 0) return;
-        _selectedIdx = (_selectedIdx == 0) ? (_videoCount - 1) : (_selectedIdx - 1);
-        _scrollOffset = 0;
-        _lastScrollMs = millis();
-        _dirty = true;
-        if (_mode == MODE_PLAYING) {
-            requestPlay(_selectedIdx);
-        } else {
-            fetchThumbnail(_selectedIdx);
-        }
+        if (_catalogTotal <= 0) return;
+        selectVideo((_catalogIndex == 0) ? (_catalogTotal - 1) : (_catalogIndex - 1));
     }
 
     void onRight() {
-        if (_videoCount <= 0) return;
-        _selectedIdx = (_selectedIdx + 1) % _videoCount;
-        _scrollOffset = 0;
-        _lastScrollMs = millis();
-        _dirty = true;
-        if (_mode == MODE_PLAYING) {
-            requestPlay(_selectedIdx);
-        } else {
-            fetchThumbnail(_selectedIdx);
+        if (_catalogTotal <= 0) return;
+        selectVideo((_catalogIndex + 1) % _catalogTotal);
+    }
+
+    void volumeRampDown(int step = 2) {
+        if (audioManager) audioManager->rampVolume(-step);
+        else {
+            int v = getCurrentAppVolume();
+            if (v > 0) setScaledVolume(max(0, v - step));
         }
     }
 
-    void volumeRampDown() {
-        if (audioManager) audioManager->rampVolume(-2);
+    void volumeRampUp(int step = 2) {
+        if (audioManager) audioManager->rampVolume(step);
         else {
             int v = getCurrentAppVolume();
-            if (v > 0) setScaledVolume(max(0, v - 2));
-        }
-    }
-
-    void volumeRampUp() {
-        if (audioManager) audioManager->rampVolume(2);
-        else {
-            int v = getCurrentAppVolume();
-            if (v < 100) setScaledVolume(min(100, v + 2));
+            if (v < 100) setScaledVolume(min(100, v + step));
         }
     }
 
@@ -500,8 +569,9 @@ public:
     }
 
     void onPlaybackEnded() {
-        if (_mode == MODE_PLAYING) {
-            onRight();
+        if (_mode == MODE_PLAYING && _catalogTotal > 0 &&
+            !selectVideo((_catalogIndex + 1) % _catalogTotal)) {
+            requestStop();
         }
     }
 
@@ -511,12 +581,21 @@ public:
         if (_mode == MODE_PLAYING) {
             if (syncPlugin) {
                 syncPlugin->update();
+                if (!_streamStarted && syncPlugin->hasStarted()) {
+                    _streamStarted = true;
+                    _playStartMs = millis();
+                }
                 if (syncPlugin->hasFinished()) {
                     onPlaybackEnded();
                     return;
                 }
             }
-            if (_videos[_selectedIdx].duration_s > 0) {
+            if (!_streamStarted && millis() - _playStartMs > 10000) {
+                Serial.println("[video] stream startup timed out");
+                failPlayback();
+                return;
+            }
+            if (_streamStarted && _videos[_selectedIdx].duration_s > 0) {
                 if (millis() - _playStartMs > (_videos[_selectedIdx].duration_s + 2) * 1000UL) {
                     onPlaybackEnded();
                     return;
@@ -525,11 +604,7 @@ public:
             return;
         } else {
             uint32_t now = millis();
-            if (now - _lastScrollMs >= 40) {
-                _lastScrollMs = now;
-                _scrollOffset++;
-                _dirty = true;
-            }
+            if (_marquee.update(now, _titleWidth)) _dirty = true;
         }
 
         if (_dirty) {
@@ -541,3 +616,4 @@ public:
 
 inline Arduino_Canvas* VideoApp::_activeCanvas = nullptr;
 inline VideoApp*       VideoApp::_instance     = nullptr;
+

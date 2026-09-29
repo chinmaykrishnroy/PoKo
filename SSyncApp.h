@@ -12,7 +12,7 @@
 
 // ─────────────────────────────────────────────────────────────
 //  SSyncApp — Direct Snapcast Client UI (128×128)
-//  Connects to Snapcast server (default 192.168.0.20:1780 / 1704)
+//  Connects to the configured Snapcast server on port 1704 by default
 //  with client name PoKo and full ESP-IDF 5.x I2S audio playback.
 // ─────────────────────────────────────────────────────────────
 
@@ -39,7 +39,7 @@ public:
         bool suspended = _player ? _player->isSuspended() : false;
         bool muted     = _player ? _player->isMuted() : false;
         int  volume    = _player ? _player->getVolume() : 75;
-        String srvHost = _player ? _player->getServerHost() : "192.168.0.20";
+        String srvHost = _player ? _player->getServerHost() : "";
         String codec   = _player ? _player->getCodec() : "FLAC/Opus";
         int32_t bufMs  = _player ? _player->getBufferMs() : 1000;
         int32_t latMs  = _player ? _player->getLatencyMs() : 0;
@@ -78,7 +78,7 @@ public:
         if (shortHost.startsWith("192.168.")) {
             shortHost = shortHost.substring(8);
         }
-        String srv = shortHost + ":" + String(srvPort);
+        String srv = shortHost.length() ? shortHost + ":" + String(srvPort) : "Not set";
         if (srv.length() > 11) {
             srv = srv.substring(0, 10) + "..";
         }
@@ -180,6 +180,8 @@ public:
 
     bool isLoaded() const { return _active; }
 
+    void refreshTheme() { if (_active) renderToCanvas(); }
+
     bool isPlaying() const { return _player ? _player->isPlaying() : false; }
 
     SnapPlayer* getPlayer() { return _player; }
@@ -206,24 +208,24 @@ public:
         _dirty = true;
     }
 
-    void volumeRampDown() {
+    void volumeRampDown(int step = 2) {
         bool isSsyncActive = (audioManager && audioManager->activeSource() == AUDIO_SSYNC);
         if (isSsyncActive) {
-            if (audioManager) audioManager->rampVolume(-2);
+            if (audioManager) audioManager->rampVolume(-step);
         } else if (_player) {
             int curVol = _player->getVolume();
-            _player->setRemoteVolumePercent(max(0, curVol - 2));
+            _player->setRemoteVolumePercent(max(0, curVol - step));
         }
         _dirty = true;
     }
 
-    void volumeRampUp() {
+    void volumeRampUp(int step = 2) {
         bool isSsyncActive = (audioManager && audioManager->activeSource() == AUDIO_SSYNC);
         if (isSsyncActive) {
-            if (audioManager) audioManager->rampVolume(2);
+            if (audioManager) audioManager->rampVolume(step);
         } else if (_player) {
             int curVol = _player->getVolume();
-            _player->setRemoteVolumePercent(min(100, curVol + 2));
+            _player->setRemoteVolumePercent(min(100, curVol + step));
         }
         _dirty = true;
     }
@@ -285,3 +287,4 @@ public:
         return j;
     }
 };
+

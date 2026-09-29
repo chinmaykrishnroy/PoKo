@@ -62,3 +62,4 @@ inline void setPokoTheme(bool dark) {
 inline bool isDarkTheme() {
     return pokoIsDarkTheme;
 }
+

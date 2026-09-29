@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import threading
 import time
 from dataclasses import replace
@@ -63,6 +64,25 @@ class MediaIndex:
         if self._scan_thread and self._scan_thread.is_alive():
             self._scan_thread.join(timeout=timeout)
 
+    def reconfigure(self, config: AppConfig, *, restart_scan: bool = True, join_timeout: float = 10.0) -> bool:
+        """Apply a new config only after the current scan has fully stopped."""
+        self.stop()
+        self.join(timeout=join_timeout)
+        if self._scan_thread and self._scan_thread.is_alive():
+            self._stop_event.clear()
+            raise RuntimeError("index scan did not stop in time; configuration was not changed")
+
+        old_db_path = self.db.path
+        try:
+            new_db = PokoDatabase(config.library.db_path) if old_db_path != config.library.db_path else self.db
+        except Exception:
+            self.start_background_scan()
+            raise
+        self.config = config
+        self._ffprobe = None
+        self.db = new_db
+        return self.start_background_scan() if restart_scan else False
+
     def status(self) -> dict[str, Any]:
         with self._scan_lock:
             data = dict(self._status)
@@ -81,10 +101,14 @@ class MediaIndex:
             self._status["errors"] = errors[-20:]
 
     def rescan(self) -> None:
+        # Hold a stable config snapshot for the entire scan. reload_config() stops
+        # and joins this worker before swapping configuration.
+        config = self.config
         scan_id = f"{time.time():.6f}"
-        ffmpeg = default_ffmpeg_executable(self.config.ffmpeg.executable)
-        ffprobe = default_ffprobe_executable(ffmpeg, self.config.ffmpeg.ffprobe)
+        ffmpeg = default_ffmpeg_executable(config.ffmpeg.executable)
+        ffprobe = default_ffprobe_executable(ffmpeg, config.ffmpeg.ffprobe)
         self._ffprobe = ffprobe
+        scan_complete = True
 
         self._set_status(
             running=True,
@@ -102,50 +126,86 @@ class MediaIndex:
         )
 
         try:
-            for folder in self.config.library.read_folders:
+            for folder in config.library.read_folders:
                 if self._stop_event.is_set():
                     break
                 self._set_status(current_folder=str(folder))
                 if not folder.exists() or not folder.is_dir():
+                    scan_complete = False
                     self._add_error(f"Missing folder: {folder}")
                     continue
-                for path in folder.rglob("*"):
-                    if self._stop_event.is_set():
-                        break
-                    if not path.is_file():
-                        continue
-                    self._set_status(scanned_files=int(self._status["scanned_files"]) + 1)
-                    kind = media_kind_for(path)
-                    if kind is None:
-                        continue
-                    item = self._item_from_path(path, kind, ffprobe, scan_id)
-                    if not item:
-                        continue
-                    result = self.db.upsert_item(item, scan_id, enriched=self.config.library.probe_on_scan)
-                    with self._scan_lock:
-                        self._status["indexed_files"] = int(self._status["indexed_files"]) + 1
-                        if result == "added":
-                            self._status["added"] = int(self._status["added"]) + 1
-                        elif result == "updated":
-                            self._status["updated"] = int(self._status["updated"]) + 1
-                        self._status["current_path"] = str(path)
-            if not self._stop_event.is_set():
+                try:
+                    paths = folder.rglob("*")
+                    for path in paths:
+                        if self._stop_event.is_set():
+                            break
+                        try:
+                            if not path.is_file():
+                                continue
+                        except OSError as exc:
+                            scan_complete = False
+                            self._add_error(f"Could not inspect {path}: {exc}")
+                            continue
+                        with self._scan_lock:
+                            self._status["scanned_files"] = int(self._status["scanned_files"]) + 1
+                        kind = media_kind_for(path)
+                        if kind is None:
+                            continue
+                        item = self._item_from_path(path, kind, ffprobe, scan_id, probe_on_scan=config.library.probe_on_scan)
+                        if not item:
+                            scan_complete = False
+                            continue
+                        try:
+                            result = self.db.upsert_item(item, scan_id, enriched=config.library.probe_on_scan)
+                        except Exception as exc:
+                            scan_complete = False
+                            self._add_error(f"Could not index {path}: {exc}")
+                            continue
+                        with self._scan_lock:
+                            self._status["indexed_files"] = int(self._status["indexed_files"]) + 1
+                            if result == "added":
+                                self._status["added"] = int(self._status["added"]) + 1
+                            elif result == "updated":
+                                self._status["updated"] = int(self._status["updated"]) + 1
+                            self._status["current_path"] = str(path)
+                except OSError as exc:
+                    scan_complete = False
+                    self._add_error(f"Could not scan folder {folder}: {exc}")
+
+            if self._stop_event.is_set():
+                self._set_status(phase="stopped")
+            elif scan_complete:
                 removed = self.db.remove_missing_for_scan(scan_id)
                 self._set_status(removed=removed, phase="idle")
             else:
-                self._set_status(phase="stopped")
+                # Never purge rows after a partial scan. A temporarily missing
+                # drive or unreadable subtree must not erase the media catalog.
+                self._set_status(phase="partial")
+        except Exception as exc:
+            # A background worker must not die silently. Preserve the existing DB
+            # and expose the failure through status instead.
+            scan_complete = False
+            self._add_error(f"Index scan failed: {exc}")
+            self._set_status(phase="error")
         finally:
             self._set_status(running=False, current_folder=None, current_path=None, finished_at=time.time())
 
-    def _item_from_path(self, path: Path, kind: str, ffprobe: str, scan_id: str) -> MediaItem | None:
+    def _item_from_path(
+        self, path: Path, kind: str, ffprobe: str, scan_id: str, *, probe_on_scan: bool | None = None
+    ) -> MediaItem | None:
         try:
             stat = path.stat()
         except OSError as exc:
             self._add_error(f"Could not stat {path}: {exc}")
             return None
 
-        probe = self._probe_fn(path, ffprobe) if self.config.library.probe_on_scan and kind in {"audio", "video", "image"} else {}
-        meta = metadata_from_probe(path, kind, probe)
+        should_probe = self.config.library.probe_on_scan if probe_on_scan is None else probe_on_scan
+        try:
+            probe = self._probe_fn(path, ffprobe) if should_probe and kind in {"audio", "video", "image"} else {}
+            meta = metadata_from_probe(path, kind, probe)
+        except Exception as exc:
+            self._add_error(f"Could not probe {path}: {exc}")
+            return None
         if kind == "text":
             meta["title"] = self._text_title(path)
         elif not probe:
@@ -172,9 +232,9 @@ class MediaIndex:
     @staticmethod
     def _id_for(path: Path) -> str:
         try:
-            stable = str(path.resolve()).lower()
+            stable = os.path.normcase(str(path.resolve()))
         except OSError:
-            stable = str(path.absolute()).lower()
+            stable = os.path.normcase(str(path.absolute()))
         return hashlib.sha1(stable.encode("utf-8", errors="ignore")).hexdigest()[:16]
 
     @staticmethod
@@ -208,8 +268,12 @@ class MediaIndex:
             ffmpeg = default_ffmpeg_executable(self.config.ffmpeg.executable)
             ffprobe = default_ffprobe_executable(ffmpeg, self.config.ffmpeg.ffprobe)
             self._ffprobe = ffprobe
-        probe = self._probe_fn(item.path, ffprobe)
-        meta = metadata_from_probe(item.path, item.kind, probe)
+        try:
+            probe = self._probe_fn(item.path, ffprobe)
+            meta = metadata_from_probe(item.path, item.kind, probe)
+        except Exception as exc:
+            self._add_error(f"Could not probe {item.path}: {exc}")
+            return item
         enriched = replace(
             item,
             title=str(meta.get("title") or item.title),
@@ -237,6 +301,8 @@ class MediaIndex:
             return ("probed" in item.metadata and not item.metadata.get("probed")) or (
                 bool(item.metadata.get("probed")) and (not item.has_video or item.duration_s is None)
             )
+        if item.kind == "image":
+            return "probed" in item.metadata and (not item.metadata["probed"] or not item.has_video or not item.width or not item.height)
         return False
 
     @staticmethod
@@ -305,3 +371,4 @@ class MediaIndex:
             "format": item.extension.lstrip("."),
             "content": content,
         }
+

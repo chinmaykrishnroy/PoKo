@@ -20,19 +20,20 @@ Poko uses [Semantic Versioning 2.0.0](https://semver.org/): **`vMAJOR.MINOR.PATC
 
 ## 2. Where the Version Is Defined
 
-The canonical version string lives in **`InfoApp.h`** inside `buildRows()`:
+The displayed version string lives in **`InfoApp.h`** inside `buildRows()`:
 
 ```cpp
-rows.push_back({"Firmware",   "v1.2.0",  pokoClrCyan()});
+add("Ver", "v1.3.2", pokoClrCyan());
 ```
 
-Update this string before tagging. It is displayed live in the System Info app.
-
-Optionally mirror it in `Poko.ino` as a `#define` for use in OTA metadata:
+Mirror the same version in the `/api/health` response in **`PokoAPI.h`**:
 
 ```cpp
-#define POKO_FW_VERSION "v1.2.0"
+json += "\"firmware_version\":\"v1.3.2\",";
 ```
+
+Update both strings before tagging. They are shown in the System Info app and
+the web dashboard.
 
 ---
 
@@ -48,16 +49,17 @@ git status
 arduino-cli compile -b "esp32:esp32:esp32s3:FlashSize=8M,PSRAM=opi,PartitionScheme=default_8MB" --output-dir ./build .
 
 # 3. OTA flash to the device and verify
-curl.exe -F "update=@./build/Poko.ino.bin" http://192.168.0.4/ota/upload
-curl.exe -s "http://192.168.0.4/api/health"
+curl.exe -F "update=@./build/esp32.esp32.esp32s3/Poko.ino.bin" http://<device-ip>/ota/upload
+curl.exe -s "http://<device-ip>/api/health"
 # Confirm uptime_ms is small (device rebooted with new firmware)
 ```
 
 ### 3.2 Update Version String
 
-Edit `InfoApp.h`:
+Edit `InfoApp.h` and `PokoAPI.h`:
 ```cpp
-rows.push_back({"Firmware",   "v1.X.Y",  pokoClrCyan()});
+add("Ver", "vX.Y.Z", pokoClrCyan());
+json += "\"firmware_version\":\"vX.Y.Z\",";
 ```
 
 ### 3.3 Update CHANGELOG.md
@@ -127,6 +129,7 @@ git push origin main --tags
 | v1.0.0 | 2026-09-20 | Initial release: launcher, all apps, dual-button combos, dark/light themes |
 | v1.1.0 | 2026-09-26 | Safe Mode, OTA, REST API, screen-wake on plug-in/OTA, TWDT, crash recovery |
 | v1.2.0 | 2026-09-28 | Themed loading screens, real-time InfoApp, high-contrast light theme, button bug fixes |
+| v1.3.2 | 2026-09-30 | Reliable physical buttons and wake gestures, safe audio/video transitions, silent-video streaming, title marquees, and backend hardening |
 
 ---
 
@@ -134,7 +137,7 @@ git push origin main --tags
 
 If a firmware update changes the NVS keys or value types, document it here and provide a migration note in the changelog. Users upgrading from an incompatible version may need to wipe NVS via the Settings app (hold L+R for 5 s).
 
-Current NVS keys (as of v1.2.0):
+Current NVS keys (reviewed for v1.3.2):
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|

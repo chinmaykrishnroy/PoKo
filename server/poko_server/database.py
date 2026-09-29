@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import sqlite3
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from .models import MediaItem
 
@@ -15,13 +18,18 @@ class PokoDatabase:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.init_schema()
 
-    def connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def init_schema(self) -> None:
         with self.connect() as conn:
@@ -100,13 +108,54 @@ class PokoDatabase:
     def _db_bool(value: bool | None) -> int | None:
         return None if value is None else int(bool(value))
 
+    @staticmethod
+    def _stable_id_for_path(path: str) -> str:
+        candidate = Path(path)
+        try:
+            stable = os.path.normcase(str(candidate.resolve()))
+        except OSError:
+            stable = os.path.normcase(str(candidate.absolute()))
+        return hashlib.sha1(stable.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+    @classmethod
+    def _available_id(cls, conn: sqlite3.Connection, path: str, *, avoid: str) -> str:
+        candidate = cls._stable_id_for_path(path)
+        salt = 0
+        while candidate == avoid or conn.execute("SELECT 1 FROM media_items WHERE id = ?", (candidate,)).fetchone():
+            salt += 1
+            candidate = hashlib.sha1(f"{os.path.normcase(path)}\0{salt}".encode("utf-8", errors="ignore")).hexdigest()[:16]
+        return candidate
+
     def upsert_item(self, item: MediaItem, scan_id: str, *, enriched: bool) -> str:
         now = time.time()
+        item_path = str(item.path)
         with self.connect() as conn:
-            previous = conn.execute(
-                "SELECT size_bytes, modified_ts, enriched FROM media_items WHERE id = ?",
+            # IDs used to be generated from lower-cased paths. On case-sensitive
+            # filesystems that both collided distinct paths and means an existing
+            # catalog may carry the old ID. Migrate rows transactionally before
+            # the upsert so upgrades neither fail UNIQUE(path) nor lose an entry.
+            path_row = conn.execute(
+                "SELECT id, path, size_bytes, modified_ts, enriched FROM media_items WHERE path = ?",
+                (item_path,),
+            ).fetchone()
+            id_row = conn.execute(
+                "SELECT id, path, size_bytes, modified_ts, enriched FROM media_items WHERE id = ?",
                 (item.id,),
             ).fetchone()
+
+            previous = path_row
+            if path_row is not None and path_row["id"] != item.id:
+                if id_row is not None and id_row["path"] != item_path:
+                    replacement = self._available_id(conn, id_row["path"], avoid=item.id)
+                    conn.execute("UPDATE media_items SET id = ? WHERE id = ?", (replacement, id_row["id"]))
+                conn.execute("UPDATE media_items SET id = ? WHERE id = ?", (item.id, path_row["id"]))
+            elif path_row is None and id_row is not None and id_row["path"] != item_path:
+                replacement = self._available_id(conn, id_row["path"], avoid=item.id)
+                conn.execute("UPDATE media_items SET id = ? WHERE id = ?", (replacement, id_row["id"]))
+                previous = None
+            elif previous is None:
+                previous = id_row
+
             conn.execute(
                 """
                 INSERT INTO media_items (
@@ -121,22 +170,22 @@ class PokoDatabase:
                     title = excluded.title,
                     extension = excluded.extension,
                     size_bytes = excluded.size_bytes,
-                    duration_s = CASE WHEN excluded.enriched = 1 THEN excluded.duration_s ELSE media_items.duration_s END,
-                    artist = CASE WHEN excluded.enriched = 1 THEN excluded.artist ELSE media_items.artist END,
-                    has_audio = CASE WHEN excluded.enriched = 1 THEN excluded.has_audio ELSE media_items.has_audio END,
-                    has_video = CASE WHEN excluded.enriched = 1 THEN excluded.has_video ELSE media_items.has_video END,
-                    width = CASE WHEN excluded.enriched = 1 THEN excluded.width ELSE media_items.width END,
-                    height = CASE WHEN excluded.enriched = 1 THEN excluded.height ELSE media_items.height END,
+                    duration_s = CASE WHEN excluded.enriched = 1 OR excluded.size_bytes != media_items.size_bytes OR excluded.modified_ts != media_items.modified_ts THEN excluded.duration_s ELSE media_items.duration_s END,
+                    artist = CASE WHEN excluded.enriched = 1 OR excluded.size_bytes != media_items.size_bytes OR excluded.modified_ts != media_items.modified_ts THEN excluded.artist ELSE media_items.artist END,
+                    has_audio = CASE WHEN excluded.enriched = 1 OR excluded.size_bytes != media_items.size_bytes OR excluded.modified_ts != media_items.modified_ts THEN excluded.has_audio ELSE media_items.has_audio END,
+                    has_video = CASE WHEN excluded.enriched = 1 OR excluded.size_bytes != media_items.size_bytes OR excluded.modified_ts != media_items.modified_ts THEN excluded.has_video ELSE media_items.has_video END,
+                    width = CASE WHEN excluded.enriched = 1 OR excluded.size_bytes != media_items.size_bytes OR excluded.modified_ts != media_items.modified_ts THEN excluded.width ELSE media_items.width END,
+                    height = CASE WHEN excluded.enriched = 1 OR excluded.size_bytes != media_items.size_bytes OR excluded.modified_ts != media_items.modified_ts THEN excluded.height ELSE media_items.height END,
                     modified_ts = excluded.modified_ts,
-                    metadata_json = CASE WHEN excluded.enriched = 1 THEN excluded.metadata_json ELSE media_items.metadata_json END,
+                    metadata_json = CASE WHEN excluded.enriched = 1 OR excluded.size_bytes != media_items.size_bytes OR excluded.modified_ts != media_items.modified_ts THEN excluded.metadata_json ELSE media_items.metadata_json END,
                     last_seen_scan = excluded.last_seen_scan,
                     missing = 0,
-                    enriched = CASE WHEN excluded.enriched = 1 THEN 1 ELSE media_items.enriched END
+                    enriched = CASE WHEN excluded.enriched = 1 THEN 1 WHEN excluded.size_bytes != media_items.size_bytes OR excluded.modified_ts != media_items.modified_ts THEN 0 ELSE media_items.enriched END
                 """,
                 (
                     item.id,
                     item.kind,
-                    str(item.path),
+                    item_path,
                     item.title,
                     item.extension,
                     item.size_bytes,
@@ -296,3 +345,4 @@ class PokoDatabase:
             return json.loads(row["value"])
         except json.JSONDecodeError:
             return default
+

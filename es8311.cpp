@@ -532,3 +532,4 @@ es8311_handle_t es8311_create(const i2c_port_t port, const uint16_t dev_addr)
     sensor->dev_addr = dev_addr;
     return (es8311_handle_t) sensor;
 }
+

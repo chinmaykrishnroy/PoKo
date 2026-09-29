@@ -335,8 +335,9 @@ private:
             if (monoSamples == 0) {
                 // Stop playback only if BOTH transports are gone.
                 if (_playReleased && !_audioConnected && !_videoConnected) {
-                    _playReleased = false;
-                    _playStarted = false;
+                    // Keep the clock released so update() can drain queued
+                    // video and hasFinished() can observe end-of-stream.
+                    vTaskDelay(pdMS_TO_TICKS(5));
                     continue;
                 }
 
@@ -428,6 +429,8 @@ public:
     }
 
     bool isLoaded() const { return _isLoaded; }
+    bool isRunning() const { return _isRunning; }
+    bool hasStarted() const { return _playReleased; }
     bool isConnected() const { return _clientConnected; }
     bool isPlaying() const { return _playReleased && _clientConnected; }
     float getRenderFps() const { return _renderFps; }
@@ -457,7 +460,12 @@ public:
     }
 
     void reset() {
-        resetPlaybackState();
+        // Public resets must never clear buffers while producers still use them.
+        bool reload = _isLoaded;
+        if (reload) unload();
+        if (_isLoaded) return; // timed-out shutdown: preserve worker resources
+        if (reload) load();
+        else resetPlaybackState();
     }
 
     void load() {
@@ -520,6 +528,21 @@ public:
             xQueueSend(_emptyQueue, &ptr, 0);
         }
 
+        if (!_netTaskDone) _netTaskDone = xSemaphoreCreateBinary();
+        if (!_videoTaskDone) _videoTaskDone = xSemaphoreCreateBinary();
+        if (!_audioTaskDone) _audioTaskDone = xSemaphoreCreateBinary();
+        if (!_netTaskDone || !_videoTaskDone || !_audioTaskDone) {
+            Serial.println("[synced] Error: could not allocate worker completion semaphore(s)");
+            _allocationFailed = true;
+            _isRunning = false;
+            _isLoaded = false;
+            releaseResources();
+            return;
+        }
+        xSemaphoreTake(_netTaskDone, 0);
+        xSemaphoreTake(_videoTaskDone, 0);
+        xSemaphoreTake(_audioTaskDone, 0);
+
         resetPlaybackState();
         _isRunning = true;
         _isLoaded = true;
@@ -527,13 +550,6 @@ public:
         _audioConnected = false;
         _videoConnected = false;
         _wasConnected = false;
-
-        if (!_netTaskDone) _netTaskDone = xSemaphoreCreateBinary();
-        if (!_videoTaskDone) _videoTaskDone = xSemaphoreCreateBinary();
-        if (!_audioTaskDone) _audioTaskDone = xSemaphoreCreateBinary();
-        if (_netTaskDone) xSemaphoreTake(_netTaskDone, 0);
-        if (_videoTaskDone) xSemaphoreTake(_videoTaskDone, 0);
-        if (_audioTaskDone) xSemaphoreTake(_audioTaskDone, 0);
 
         if (xTaskCreatePinnedToCore(audioTaskWrapper, "SyncAudio", 4096, this, 3, &_audioTaskHandle, 0) != pdPASS ||
             xTaskCreatePinnedToCore(networkTaskWrapper, "SyncAudNet", 8192, this, 2, &_netTaskHandle, 0) != pdPASS ||
@@ -630,3 +646,4 @@ public:
 };
 
 inline SyncedAVPlayer* SyncedAVPlayer::_instance = nullptr;
+

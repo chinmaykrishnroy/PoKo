@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import base64
-import binascii
 import json
 import re
+import socket
 import subprocess
+import threading
 import time
 from dataclasses import replace
 from http import HTTPStatus
@@ -24,8 +24,22 @@ from .ui import ADMIN_HTML, FAVICON_SVG
 
 
 class PokoHTTPServer(ThreadingHTTPServer):
-    allow_reuse_address = False
+    allow_reuse_address = not hasattr(socket, "SO_EXCLUSIVEADDRUSE")
+    allow_reuse_port = False
     daemon_threads = True
+
+    def server_bind(self) -> None:
+        # Windows SO_REUSEADDR can admit a second listener on the same port.
+        # Refuse it before constructing backend workers or touching the catalog.
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+    def server_close(self) -> None:
+        backend = getattr(self.RequestHandlerClass, "backend", None)
+        if backend is not None and hasattr(backend, "close"):
+            backend.close()
+        super().server_close()
 
 
 class PokoBackend:
@@ -34,11 +48,19 @@ class PokoBackend:
         self.config_path = config_path
         self.dry_run = dry_run
         self.started_at = time.time()
+        self._config_lock = threading.RLock()
         self.index = MediaIndex(config)
         self.device = DeviceClient(config, enabled=not dry_run)
         self.playback = PlaybackManager(config, self.index, self.device, dry_run=dry_run)
         started = self.index.start_background_scan()
         print(f"Background indexer {'started' if started else 'already running'}", flush=True)
+
+    def close(self) -> None:
+        if hasattr(self, "playback"):
+            self.playback.close()
+        if hasattr(self, "index"):
+            self.index.stop()
+            self.index.join(timeout=2.0)
 
     def page_json(
         self,
@@ -51,23 +73,20 @@ class PokoBackend:
         page_size: int | None = None,
     ) -> dict[str, Any]:
         page_data = self.index.page(kind, page, page_size=page_size)
-        items: list[MediaItem] = page_data.pop("items")
-        rendered: list[dict[str, Any]] = []
-        removed_invalid = 0
-        for item in items:
-            data = self._item_json(item, include_icons=include_icons, enrich=enrich, icon_size=icon_size)
-            if data is None:
-                removed_invalid += 1
-                continue
-            rendered.append(data)
-        if removed_invalid:
-            refreshed = self.index.page(kind, page, page_size=page_size)
-            for key in ("total", "total_pages", "empty"):
-                page_data[key] = refreshed[key]
-        return {
-            **page_data,
-            "items": rendered,
-        }
+        for _ in range(min(page_data["total"] + 1, 1000)):
+            items: list[MediaItem] = page_data.pop("items")
+            rendered: list[dict[str, Any]] = []
+            removed_invalid = False
+            for item in items:
+                data = self._item_json(item, include_icons=include_icons, enrich=enrich, icon_size=icon_size)
+                if data is None:
+                    removed_invalid = True
+                else:
+                    rendered.append(data)
+            if not removed_invalid:
+                return {**page_data, "items": rendered}
+            page_data = self.index.page(kind, page, page_size=page_size)
+        return {**page_data, "items": []}
 
     def _icon_for_item(self, item: MediaItem, icon_size: int = 28):
         if item.kind in {"audio", "video", "image"}:
@@ -150,26 +169,76 @@ class PokoBackend:
             },
         }
 
+    @staticmethod
+    def _body_bool(value: Any, default: bool) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        text = str(value).strip().lower()
+        if text in {"1", "true", "yes", "on", "enabled"}:
+            return True
+        if text in {"0", "false", "no", "off", "disabled", ""}:
+            return False
+        raise ValueError(f"invalid boolean value: {value}")
+
     def update_audio_filters(self, body: dict[str, Any]) -> dict[str, Any]:
         ffmpeg = replace(
             self.config.ffmpeg,
-            highpass_enabled=bool(body.get("highpass_enabled", self.config.ffmpeg.highpass_enabled)),
+            highpass_enabled=self._body_bool(body.get("highpass_enabled"), self.config.ffmpeg.highpass_enabled),
             highpass_hz=max(20, min(2000, int(body.get("highpass_hz", self.config.ffmpeg.highpass_hz)))),
-            lowpass_enabled=bool(body.get("lowpass_enabled", self.config.ffmpeg.lowpass_enabled)),
+            lowpass_enabled=self._body_bool(body.get("lowpass_enabled"), self.config.ffmpeg.lowpass_enabled),
             lowpass_hz=max(1000, min(20000, int(body.get("lowpass_hz", self.config.ffmpeg.lowpass_hz)))),
         )
         if ffmpeg.highpass_enabled and ffmpeg.lowpass_enabled and ffmpeg.highpass_hz >= ffmpeg.lowpass_hz:
             raise ValueError("high-pass cutoff must be below low-pass cutoff")
         updated = replace(self.config, ffmpeg=ffmpeg)
-        self.config_path.write_text(config_to_yaml(updated), encoding="utf-8")
-        self.reload_config()
+        self.apply_config_text(config_to_yaml(updated))
         return self.audio_filters_json()
 
-    def reload_config(self) -> None:
-        self.config = load_config(self.config_path)
-        self.index.config = self.config
-        self.device.config = self.config
-        self.playback.config = self.config
+    def _apply_loaded_config(self, updated: AppConfig, *, rescan: bool = True) -> bool:
+        self.index.reconfigure(updated, restart_scan=False)
+        self.config = updated
+        self.device.config = updated
+        self.playback.config = updated
+        return self.index.start_background_scan() if rescan else False
+
+    def reload_config(self, *, rescan: bool = True) -> bool:
+        # Parse first so a bad config never disrupts a healthy running backend.
+        with self._config_lock:
+            updated = load_config(self.config_path)
+            return self._apply_loaded_config(updated, rescan=rescan)
+
+    def apply_config_text(self, text: str, *, rescan: bool = True) -> bool:
+        """Validate, atomically persist, and apply config; roll back the file on failure."""
+        if not text.strip():
+            raise ValueError("config text is empty")
+        with self._config_lock:
+            temp_path = self.config_path.parent / f".{self.config_path.name}.tmp"
+            previous = self.config_path.read_text(encoding="utf-8") if self.config_path.exists() else None
+            temp_path.write_text(text, encoding="utf-8")
+            try:
+                try:
+                    updated = load_config(temp_path)
+                except Exception as exc:
+                    raise ValueError(f"invalid configuration: {exc}") from exc
+                temp_path.replace(self.config_path)
+                try:
+                    return self._apply_loaded_config(updated, rescan=rescan)
+                except Exception:
+                    # Keep on-disk and in-memory configuration aligned if an
+                    # index worker refuses to stop or another apply step fails.
+                    if previous is None:
+                        self.config_path.unlink(missing_ok=True)
+                    else:
+                        rollback = self.config_path.parent / f".{self.config_path.name}.rollback"
+                        rollback.write_text(previous, encoding="utf-8")
+                        rollback.replace(self.config_path)
+                    raise
+            finally:
+                temp_path.unlink(missing_ok=True)
 
     @property
     def camera_dir(self) -> Path:
@@ -178,10 +247,21 @@ class PokoBackend:
         return path
 
     def camera_items(self, limit: int = 20) -> list[dict[str, Any]]:
-        files = sorted(self.camera_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime, reverse=True)
+        entries: list[tuple[float, Path, int]] = []
+        for path in self.camera_dir.iterdir():
+            try:
+                if not path.is_file() or path.suffix.lower() not in {".jpg", ".jpeg"}:
+                    continue
+                stat = path.stat()
+                entries.append((stat.st_mtime, path, stat.st_size))
+            except OSError:
+                # Uploads may be rotated/deleted concurrently; skip entries that
+                # disappear instead of failing the whole camera-list request.
+                continue
+        entries.sort(key=lambda entry: entry[0], reverse=True)
         return [
-            {"name": p.name, "size_bytes": p.stat().st_size, "modified_ts": p.stat().st_mtime}
-            for p in files[:limit]
+            {"name": path.name, "size_bytes": size, "modified_ts": modified}
+            for modified, path, size in entries[:limit]
         ]
 
     def camera_preview_jpeg(self, name: str) -> bytes | None:
@@ -281,6 +361,9 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
         error = None
         try:
             self._handle()
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            error = str(exc)
+            self._json({"ok": False, "error": f"invalid request: {error}"}, HTTPStatus.BAD_REQUEST)
         except Exception as exc:
             error = str(exc)
             self._json({"ok": False, "error": error}, HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -340,27 +423,18 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
             if not text.strip():
                 self._json({"ok": False, "error": "config text is empty"}, HTTPStatus.BAD_REQUEST)
                 return
-            temp_path = self.backend.config_path.parent / f".{self.backend.config_path.name}.tmp"
-            try:
-                temp_path.write_text(text, encoding="utf-8")
-                load_config(temp_path)
-            except Exception as exc:
-                if temp_path.exists():
-                    temp_path.unlink(missing_ok=True)
-                self._json({"ok": False, "error": f"Invalid YAML configuration: {exc}"}, HTTPStatus.BAD_REQUEST)
-                return
-
             old_host = self.backend.config.host
             old_port = self.backend.config.port
-            temp_path.replace(self.backend.config_path)
-            self.backend.reload_config()
-            self.backend.index.start_background_scan()
+            try:
+                self.backend.apply_config_text(text)
+            except (ValueError, TypeError) as exc:
+                self._json({"ok": False, "error": f"Invalid YAML configuration: {exc}"}, HTTPStatus.BAD_REQUEST)
+                return
             restart_required = self.backend.config.host != old_host or self.backend.config.port != old_port
             self._json({"ok": True, "restart_required": restart_required, "config": self.backend.config_summary()})
             return
         if path == "/api/server/config/reload" and self.command == "POST":
             self.backend.reload_config()
-            self.backend.index.start_background_scan()
             self._json({"ok": True, "config": self.backend.config_summary()})
             return
         if path == "/api/server/audio-filters":
@@ -370,89 +444,40 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
             else:
                 self._json({"ok": True, "filters": self.backend.audio_filters_json()})
             return
-        if path == "/api/device/status":
-            status, payload, content_type = self.backend.device.request("/api/info")
+        if path in {"/api/device/status", "/api/device/power", "/api/device/sys", "/api/device/gallery/files"}:
+            target = {"/api/device/status": "/api/health", "/api/device/power": "/api/power", "/api/device/sys": "/api/sys", "/api/device/gallery/files": "/api/gallery/files"}[path]
+            if self.command != "GET":
+                self._json({"ok": False, "error": "GET required"}, HTTPStatus.METHOD_NOT_ALLOWED)
+                return
+            if path in {"/api/device/power", "/api/device/sys"}:
+                ranges = {"dim_timeout": (0, 604800), "sleep_timeout": (0, 604800), "auto_off": (0, 604800), "ambient_clock": (0, 1), "usb_perf": (0, 1), "wifi_sleep": (0, 1)} if path.endswith("power") else {"brightness": (1, 100), "volume": (0, 100), "master_vol": (1, 100), "amp_boost": (0, 5)}
+                for key, values in query.items():
+                    if len(values) != 1:
+                        self._json({"ok": False, "error": "invalid control"}, HTTPStatus.BAD_REQUEST)
+                        return
+                    if key == "screen" and path.endswith("power") and values[0] in {"on", "off", "dim", "toggle"}:
+                        continue
+                    if key not in ranges or not values[0].isdigit() or not ranges[key][0] <= int(values[0]) <= ranges[key][1]:
+                        self._json({"ok": False, "error": "invalid control"}, HTTPStatus.BAD_REQUEST)
+                        return
+                target += "?" + urlencode({key: values[0] for key, values in query.items()}) if query else ""
+            elif query:
+                self._json({"ok": False, "error": "unexpected query"}, HTTPStatus.BAD_REQUEST)
+                return
+            status, payload, content_type = self.backend.device.request(target)
             self._binary(payload, content_type, HTTPStatus(status))
             return
         if path == "/api/device/app":
             app = _first(query, "set", "home") or "home"
-            if app not in {"audio", "audio_stream", "sync", "truevideo", "stream", "graphics", "graphics_player"}:
+            allowed = {"home", "launcher", "info", "clock", "video", "video_ui", "audio", "music", "audio_ui", "music_ui", "ssync", "snap", "snapclient", "gallery", "gallery_ui", "pixels", "pixel", "settings", "settings_ui", "sync"}
+            if app not in allowed:
+                self._json({"ok": False, "error": "unsupported PoKo app"}, HTTPStatus.BAD_REQUEST)
+                return
+            if app not in {"audio", "sync"}:
                 self.backend.playback.stop(notify_device=False)
             response = self.backend.device.switch(app)
             self._json({"ok": response.ok, "device": response.__dict__}, HTTPStatus.OK if response.ok else HTTPStatus.SERVICE_UNAVAILABLE)
             return
-        if path == "/api/device/wallpaper":
-            if self.command == "GET":
-                status, payload, content_type = self.backend.device.request("/api/wallpaper")
-                self._binary(payload, content_type, HTTPStatus(status))
-                return
-            if self.command == "DELETE":
-                status, payload, content_type = self.backend.device.request("/api/wallpaper", method="DELETE")
-                self._binary(payload, content_type, HTTPStatus(status))
-                return
-            if self.command == "POST":
-                body = self._read_json_body()
-                if "enabled" in body and "content_base64" not in body:
-                    enabled = bool(body.get("enabled"))
-                    status, payload, content_type = self.backend.device.request(
-                        f"/api/wallpaper/enabled?{urlencode({'set': '1' if enabled else '0'})}",
-                        method="POST",
-                        data=b"",
-                    )
-                    self._binary(payload, content_type, HTTPStatus(status))
-                    return
-                encoded = str(body.get("content_base64", ""))
-                try:
-                    image = base64.b64decode(encoded, validate=True)
-                except (ValueError, binascii.Error):
-                    self._json({"ok": False, "error": "invalid base64 wallpaper"}, HTTPStatus.BAD_REQUEST)
-                    return
-                if len(image) < 4 or len(image) > 96 * 1024 or not image.startswith(b"\xff\xd8"):
-                    self._json({"ok": False, "error": "wallpaper must be a JPEG no larger than 96 KB"}, HTTPStatus.BAD_REQUEST)
-                    return
-                boundary = f"NexusWallpaper{int(time.time() * 1000)}"
-                multipart = (
-                    f"--{boundary}\r\n"
-                    'Content-Disposition: form-data; name="wallpaper"; filename="wallpaper.jpg"\r\n'
-                    "Content-Type: image/jpeg\r\n\r\n"
-                ).encode("ascii") + image + f"\r\n--{boundary}--\r\n".encode("ascii")
-                status, payload, content_type = self.backend.device.request(
-                    "/api/wallpaper",
-                    method="POST",
-                    data=multipart,
-                    content_type=f"multipart/form-data; boundary={boundary}",
-                    timeout=12,
-                )
-                self._binary(payload, content_type, HTTPStatus(status))
-                return
-        if path == "/api/device/littlefs":
-            status, payload, content_type = self.backend.device.request("/api/littlefs")
-            self._binary(payload, content_type, HTTPStatus(status))
-            return
-        if path == "/api/device/littlefs/file":
-            device_path = _first(query, "path", "") or ""
-            encoded_path = urlencode({"path": device_path})
-            if self.command == "GET":
-                status, payload, content_type = self.backend.device.request(f"/api/littlefs/file?{encoded_path}")
-                self._binary(payload, content_type, HTTPStatus(status))
-                return
-            if self.command == "POST":
-                body = self._read_json_body()
-                device_path = str(body.get("path", ""))
-                content = str(body.get("content", "")).encode("utf-8")
-                encoded_path = urlencode({"path": device_path})
-                status, payload, content_type = self.backend.device.request(
-                    f"/api/littlefs/file?{encoded_path}", method="POST", data=content, content_type="text/plain; charset=utf-8"
-                )
-                self._binary(payload, content_type, HTTPStatus(status))
-                return
-            if self.command == "DELETE":
-                encoded_path = urlencode({"path": device_path, "confirm": "1"})
-                status, payload, content_type = self.backend.device.request(
-                    f"/api/littlefs/file?{encoded_path}", method="DELETE"
-                )
-                self._binary(payload, content_type, HTTPStatus(status))
-                return
         if path in {"/api/rescan", "/api/library/rescan"}:
             started = self.backend.index.start_background_scan()
             self._json({"ok": True, "started": started, "indexing": self.backend.index.status()})
@@ -535,7 +560,8 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                 if not item:
                     return
                 switch_device = str(_first(query, "switch", "true")).lower() not in {"0", "false", "no", "off"}
-                self._json(self.backend.playback.play_audio(item, _float_query(query, "start", 0), switch_device=switch_device))
+                result = self.backend.playback.play_audio(item, _float_query(query, "start", 0), switch_device=switch_device)
+                self._json(result, HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_GATEWAY)
                 return
             if path.startswith("/api/video/") and path.endswith("/play"):
                 item = self._item_from_path(path, "video")
@@ -555,28 +581,26 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                 }
                 if async_request:
                     play_options["request_id"] = _first(query, "request_id", None)
-                self._json(
-                    play(item, **play_options),
-                    HTTPStatus.ACCEPTED if async_request else HTTPStatus.OK,
-                )
+                result = play(item, **play_options)
+                self._json(result, HTTPStatus.ACCEPTED if result.get("ok") and async_request else
+                           HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_GATEWAY)
                 return
             if path.startswith("/api/image/") and path.endswith("/show"):
                 item = self._item_from_path(path, "image")
                 if not item:
                     return
                 switch_device = str(_first(query, "switch", "true")).lower() not in {"0", "false", "no", "off"}
-                self._json(
-                    self.backend.playback.play_image(
-                        item,
-                        aspect=_first(query, "aspect", None),
-                        seconds=_float_query(query, "seconds", 0) or None,
-                        mode=_first(query, "mode", "oneshot") or "oneshot",
-                        switch_device=switch_device,
-                        profile=_first(query, "profile", "balanced"),
-                        fps=_float_query(query, "fps", 0) or None,
-                        jpeg_quality=_int_query(query, "jpeg_quality", 0) or None,
-                    )
+                result = self.backend.playback.play_image(
+                    item,
+                    aspect=_first(query, "aspect", None),
+                    seconds=_float_query(query, "seconds", 0) or None,
+                    mode=_first(query, "mode", "oneshot") or "oneshot",
+                    switch_device=switch_device,
+                    profile=_first(query, "profile", "balanced"),
+                    fps=_float_query(query, "fps", 0) or None,
+                    jpeg_quality=_int_query(query, "jpeg_quality", 0) or None,
                 )
+                self._json(result, HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_GATEWAY)
                 return
             if path.startswith("/api/image/") and path.endswith("/jpeg"):
                 item_id = unquote(path.split("/")[3])
@@ -659,6 +683,9 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                     self._json({"ok": False, "error": "invalid image size"}, HTTPStatus.BAD_REQUEST)
                     return
                 payload = self.rfile.read(length)
+                if len(payload) != length or len(payload) < 4 or not payload.startswith(b"\xff\xd8"):
+                    self._json({"ok": False, "error": "camera upload must contain JPEG data"}, HTTPStatus.BAD_REQUEST)
+                    return
                 target = self.backend.camera_dir / name
                 target.write_bytes(payload)
                 self._json({"ok": True, "name": target.name, "size_bytes": len(payload)})
@@ -674,6 +701,8 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                 )
                 return
             self._json({"ok": False, "error": "not found"}, HTTPStatus.NOT_FOUND)
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            self._json({"ok": False, "error": f"invalid request: {exc}"}, HTTPStatus.BAD_REQUEST)
         except Exception as exc:
             self._json({"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
@@ -751,8 +780,15 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0") or "0")
         if length <= 0:
             return {}
+        if length > 1024 * 1024:
+            raise ValueError("JSON request body exceeds 1 MiB")
         raw = self.rfile.read(length)
-        return json.loads(raw.decode("utf-8"))
+        if len(raw) != length:
+            raise ValueError("incomplete request body")
+        payload = json.loads(raw.decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("JSON request body must be an object")
+        return payload
 
 
 def make_server(config: AppConfig, *, dry_run: bool = False, config_path: Path = DEFAULT_CONFIG_PATH) -> ThreadingHTTPServer:
@@ -792,3 +828,4 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         server.server_close()
     return 0
+

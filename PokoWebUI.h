@@ -12,7 +12,7 @@ const char poko_web_html[] PROGMEM = R"POKOHTML(<!doctype html>
 <style>
 :root{color-scheme:dark;--bg:#0f1115;--surface:#181b20;--surface2:#22262c;--text:#edf0f3;--muted:#9da6b0;--line:#30353d;--black:#f5f7f9;--green:#3aba7d;--blue:#00c8ff;--red:#ef6a73;--yellow:#e4b94d;--orange:#f18450;--focus:#00c8ff;--shadow:0 10px 30px rgba(0,0,0,.25)}
 [data-theme=light]{color-scheme:light;--bg:#f4f6f8;--surface:#fff;--surface2:#eef1f4;--text:#15191f;--muted:#68717d;--line:#dce1e6;--black:#111418;--green:#168b5b;--blue:#0055aa;--red:#cf3e48;--yellow:#c48909;--orange:#d85d20;--focus:#0055aa;--shadow:0 8px 24px rgba(17,20,24,.08)}
-*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,select,textarea{font:inherit}button{color:inherit}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,select,textarea{font:inherit}button{color:inherit}svg{width:18px;height:18px;display:inline-block;vertical-align:middle;flex-shrink:0}.upload-zone svg{width:42px;height:42px;margin:0 auto 8px;display:block}.empty svg{width:32px;height:32px}
 .shell{min-height:100vh;display:grid;grid-template-columns:220px minmax(0,1fr)}
 .sidebar{position:sticky;top:0;height:100vh;padding:16px 12px;border-right:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;z-index:20}
 .brand{height:48px;display:flex;align-items:center;gap:10px;padding:0 8px}.brand-mark{width:32px;height:32px;border-radius:8px;background:var(--blue);color:#000;display:grid;place-items:center;font-weight:900;font-size:18px}.brand strong{display:block;font-size:15px;font-weight:800}.brand small{display:block;color:var(--muted);font-size:11px;margin-top:1px}
@@ -38,7 +38,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--focus)!important;box-
 .toast-stack{position:fixed;right:16px;bottom:16px;z-index:150;display:grid;gap:7px}.toast{min-width:240px;max-width:360px;padding:11px 13px;border-radius:7px;background:var(--text);color:var(--surface);box-shadow:var(--shadow);font-size:12px;font-weight:600;animation:fadeIn .2s}.toast.error{background:var(--red);color:#fff}@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .mobile-nav{display:none}
 @media(max-width:1080px){.metrics{grid-template-columns:repeat(2,1fr)}.metric:nth-child(2){border-right:0}.metric:nth-child(-n+2){border-bottom:1px solid var(--line)}.app-grid{grid-template-columns:repeat(3,1fr)}.columns{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.field:nth-last-child(-n+2){border-bottom:1px solid var(--line)}.field:last-child{border-bottom:0}}
-@media(max-width:700px){.shell{display:block}.sidebar{display:none}.workspace{padding-bottom:66px}.topbar{height:54px;padding:0 14px}.content{padding:18px 14px 32px}.mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(5,1fr);left:0;right:0;bottom:0;z-index:50;height:60px;padding-bottom:env(safe-area-inset-bottom);background:var(--surface);border-top:1px solid var(--line)}.mobile-nav button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--muted);font-size:9px;border:0;background:transparent;cursor:pointer}.mobile-nav button.active{color:var(--text)}.mobile-nav svg{width:18px;height:18px}.metrics{grid-template-columns:1fr 1fr}.metric{padding:13px 14px}.metric strong{font-size:18px}.app-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.section-head{display:block}.section-head .actions{margin-top:10px}.crop-wrap{grid-template-columns:1fr}}
+@media(max-width:700px){.shell{display:block}.sidebar{display:none}.workspace{padding-bottom:66px}.topbar{height:54px;padding:0 14px}.content{padding:18px 14px 32px}.mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(6,1fr);left:0;right:0;bottom:0;z-index:50;height:60px;padding-bottom:env(safe-area-inset-bottom);background:var(--surface);border-top:1px solid var(--line)}.mobile-nav button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--muted);font-size:9px;border:0;background:transparent;cursor:pointer}.mobile-nav button.active{color:var(--text)}.mobile-nav svg{width:18px;height:18px}.metrics{grid-template-columns:1fr 1fr}.metric{padding:13px 14px}.metric strong{font-size:18px}.app-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.section-head{display:block}.section-head .actions{margin-top:10px}.crop-wrap{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -68,6 +68,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--focus)!important;box-
       <section class="view" id="view-controls"></section>
       <section class="view" id="view-gallery"></section>
       <section class="view" id="view-settings"></section>
+      <section class="view" id="view-system"></section>
     </main>
   </div>
 </div>
@@ -83,7 +84,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--focus)!important;box-
 <input hidden type="file" id="galleryPicker" accept="image/*">
 <script>
 const $=id=>document.getElementById(id);
-let activeView='dashboard',healthCache=null,croppedBlob=null,curTheme='dark';
+let activeView='dashboard',healthCache=null,croppedBlob=null,galleryImage=null,galleryImageUrl=null,galleryPreviewVersion=0,curTheme='dark';
 
 const paths={
   dashboard:'<path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/>',
@@ -107,11 +108,15 @@ const paths={
   home:'<path d="m3 11 9-8 9 8v10h-6v-6H9v6H3z"/>',
   brightness:'<circle cx="12" cy="12" r="5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/>',
   volume:'<path d="M11 5 6 9H2v6h4l5 4zM19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>',
-  snapcast:'<path d="M9 18V5l10-2v13M9 9l10-2"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/>',
+  snapcast:'<circle cx="12" cy="12" r="2"/><path d="M7 7a7 7 0 0 0 0 10M17 7a7 7 0 0 1 0 10M4 4a11 11 0 0 0 0 16M20 4a11 11 0 0 1 0 16"/>',
   reboot:'<path d="M12 2v10M6.3 5.3a8 8 0 1 0 11.4 0"/>',
   eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   plus:'<path d="M12 5v14M5 12h14"/>',
-  image:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>'
+  image:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>',
+  gallery:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m3 17 5-5 4 4 3-3 6 5"/><circle cx="8" cy="9" r="1"/>',
+  sparkle:'<path d="m12 2 2 7 7 3-7 2-2 8-2-8-7-2 7-3zM4 2v3M2.5 3.5h3M20 19v3M18.5 20.5h3"/>',
+  system:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/>',
+  battery:'<rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 10v4M5 10h10"/>'
 };
 function icon(n){return`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[n]||paths.info}</svg>`}
 
@@ -120,7 +125,8 @@ const navItems=[
   ['apps','Applications','apps'],
   ['controls','Controls','controls'],
   ['gallery','Gallery','gallery'],
-  ['settings','Settings','settings']
+  ['settings','Settings','settings'],
+  ['system','System','system']
 ];
 
 function setupChrome(){
@@ -149,10 +155,11 @@ function setTheme(t){
   document.querySelector('meta[name=theme-color]').content=t==='dark'?'#0f1115':'#f4f6f8';
   updateThemeBtn();
 }
-function toggleTheme(){setTheme(curTheme==='dark'?'light':'dark');fetch('/api/theme?mode='+curTheme).catch(()=>{});}
+async function applyTheme(mode){try{await api('/api/theme?mode='+mode);setTheme(mode)}catch(e){toast(e.message,true)}}
+function toggleTheme(){applyTheme(curTheme==='dark'?'light':'dark');}
 function updateThemeBtn(){if($('themeBtn'))$('themeBtn').innerHTML=icon(curTheme==='dark'?'sun':'moon');}
 
-async function api(path,opt={}){const r=await fetch(path,opt);const ct=r.headers.get('content-type')||'';const body=ct.includes('json')?await r.json():await r.text();if(!r.ok)throw new Error(body.error||body||`HTTP ${r.status}`);return body;}
+async function api(path,opt={}){const r=await fetch(path,opt);const ct=r.headers.get('content-type')||'';const body=ct.includes('json')?await r.json():await r.text();if(!r.ok||body?.ok===false)throw new Error(body.error||body||`HTTP ${r.status}`);return body;}
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function fmtBytes(n){n=Number(n)||0;if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(1)+' KB';return(n/1048576).toFixed(2)+' MB'}
 function fmtUptime(ms){const s=Math.floor((ms||0)/1000);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),ss=s%60;return(h?h+'h ':'')+(m?m+'m ':'')+(ss+'s');}
@@ -174,7 +181,7 @@ async function renderDashboard(){
       <div class="metric"><small>Active App</small><strong id="dApp">...</strong><span id="dShell"></span></div>
       <div class="metric"><small>Wi-Fi</small><strong id="dRssi">...</strong><span id="dSsid"></span></div>
       <div class="metric"><small>Free PSRAM</small><strong id="dPsram">...</strong><span id="dHeap"></span></div>
-      <div class="metric"><small>Uptime</small><strong id="dUptime">...</strong><span id="dIp"></span></div>
+      <div class="metric"><small>Battery estimate</small><strong id="dBattery">...</strong><span id="dBatVolt"></span></div>
     </div>
     <div class="columns">
       <div class="panel">
@@ -189,6 +196,7 @@ async function renderDashboard(){
         <div class="panel-head"><h3>Device status</h3><span class="badge" id="dashNet">Connecting</span></div>
         <div class="panel-body status-list">
           <div class="status-row"><span>IP address</span><strong id="dIpRow">...</strong></div>
+          <div class="status-row"><span>Uptime</span><strong id="dUptime">...</strong></div>
           <div class="status-row"><span>CPU</span><strong id="dCpu">...</strong></div>
           <div class="status-row"><span>Brightness</span><strong id="dBr">...</strong></div>
           <div class="status-row"><span>Theme</span><strong id="dTheme">...</strong></div>
@@ -213,6 +221,7 @@ function quickLaunchApps(){
 
 function syncDashboard(d){
   if(!d)return;
+  if((d.theme==='dark'||d.theme==='light')&&d.theme!==curTheme)setTheme(d.theme);
   setOnline(true);
   const appName=APP_NAMES[d.app_state]||('State '+d.app_state);
   liveText('dApp',appName);
@@ -222,7 +231,8 @@ function syncDashboard(d){
   liveText('dPsram',d.psram_free?Math.round(d.psram_free/1024)+' KB':'--');
   liveText('dHeap',d.heap_free?'Heap '+Math.round(d.heap_free/1024)+' KB':'');
   liveText('dUptime',fmtUptime(d.uptime_ms));
-  liveText('dIp',d.ip||'');
+  liveText('dBattery',d.battery_pct>=0?d.battery_pct+'%':'—');
+  liveText('dBatVolt',d.battery_pct>=0?Number(d.battery_v).toFixed(2)+' V · estimate':'No battery detected');
   liveText('dIpRow',d.ip||'--');
   liveText('dCpu',d.cpu_mhz?d.cpu_mhz+' MHz':'--');
   liveText('dBr',d.brightness!=null?d.brightness+'%':'--');
@@ -665,7 +675,7 @@ async function renderControls(){
         <div style="padding:14px 15px">
           <form onsubmit="saveSnap(event)">
             <label style="font-size:12px;color:var(--muted)">Snapcast Server Host</label>
-            <input type="text" id="snap_host" value="${esc(d.snap_host||'192.168.0.20')}" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px" required>
+            <input type="text" id="snap_host" value="${esc(d.snap_host||'')}" placeholder="Snapcast server hostname or IP" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px" required>
             <label style="font-size:12px;color:var(--muted);margin-top:10px;display:block">Port (1780 Web / 1704 Stream)</label>
             <input type="number" id="snap_port" value="${d.snap_port||1704}" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px" required>
             <button type="submit" class="btn blue" style="width:100%;margin-top:12px">${icon('save')} Update</button>
@@ -696,7 +706,7 @@ async function renderControls(){
           <form onsubmit="saveWiFi(event)">
             <label style="font-size:12px;color:var(--muted);font-weight:700">Wi-Fi Settings</label>
             <input type="text" id="wifi_ssid" placeholder="SSID" style="margin-top:6px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px" required>
-            <input type="password" id="wifi_pass" placeholder="Password (blank = keep saved)" style="margin-top:6px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px">
+            <input type="password" id="wifi_pass" placeholder="Password (blank: keep for same SSID)" style="margin-top:6px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px">
             <button type="submit" class="btn" style="width:100%;margin-top:8px">${icon('wifi')} Save &amp; Reconnect</button>
           </form>
           </div>
@@ -738,12 +748,12 @@ function renderGallery(){
     </div>
 
     <div class="panel" style="margin-bottom:16px">
-      <div class="panel-head"><h3>Upload &amp; Crop (128×128)</h3></div>
+      <div class="panel-head"><h3>Upload &amp; Resize (128×128)</h3></div>
       <div class="panel-body">
         <div id="uploadZoneWrap">
           <div class="upload-zone" id="uploadZone" onclick="$('galleryPicker').click()">
             ${icon('image')}
-            <p>Click to select an image — it will be cropped to 128×128 and converted to JPEG for minimal storage.</p>
+            <p>Select an image, then choose Crop or Fit. It will be resized to a 128×128 JPEG.</p>
           </div>
         </div>
         <div id="cropArea" style="display:none">
@@ -751,6 +761,11 @@ function renderGallery(){
             <canvas id="cropCanvas" width="128" height="128" style="border:1px solid var(--line);border-radius:6px;background:#000;width:128px;height:128px;image-rendering:pixelated;flex-shrink:0"></canvas>
             <div style="min-width:0">
               <div id="cropInfo" style="font-size:12px;color:var(--muted)"></div>
+              <label for="imageFitMode" style="font-size:12px;color:var(--muted);display:block;margin-top:10px">Image placement</label>
+              <select id="imageFitMode" onchange="renderGalleryPreview()" style="width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px">
+                <option value="crop">Crop to fill</option>
+                <option value="fit">Fit entire image (black bars)</option>
+              </select>
               <div style="margin-top:10px">
                 <label style="font-size:12px;color:var(--muted)">Photo Name</label>
                 <input type="text" id="photoName" placeholder="e.g. sunset" maxlength="24" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px">
@@ -787,38 +802,51 @@ function renderGallery(){
 }
 
 function resetCrop(){
+  galleryPreviewVersion++;
   $('cropArea').style.display='none';
   $('uploadZoneWrap').style.display='';
   croppedBlob=null;
+  galleryImage=null;
+  if(galleryImageUrl){URL.revokeObjectURL(galleryImageUrl);galleryImageUrl=null;}
   $('galleryPicker').value='';
 }
 
-$('galleryPicker').addEventListener('change',async e=>{
+function renderGalleryPreview(){
+  if(!galleryImage||!$('cropCanvas'))return;
+  const version=++galleryPreviewVersion,canvas=$('cropCanvas'),ctx=canvas.getContext('2d'),img=galleryImage;
+  const fit=$('imageFitMode').value==='fit';
+  const scale=(fit?Math.min:Math.max)(128/img.width,128/img.height);
+  const width=img.width*scale,height=img.height*scale;
+  croppedBlob=null;
+  $('uploadBtn').disabled=true;
+  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+  ctx.fillStyle='#000';ctx.fillRect(0,0,128,128);
+  ctx.drawImage(img,(128-width)/2,(128-height)/2,width,height);
+  canvas.toBlob(blob=>{
+    if(version!==galleryPreviewVersion||!$('cropInfo'))return;
+    if(!blob||blob.size>65536){$('cropInfo').textContent='Could not create a JPEG under 64 KB';return;}
+    croppedBlob=blob;
+    $('cropInfo').textContent=`128×128 JPEG · ${(blob.size/1024).toFixed(1)} KB · ${fit?'Fit':'Crop'}`;
+    $('uploadBtn').disabled=false;
+  },'image/jpeg',0.82);
+}
+
+$('galleryPicker').addEventListener('change',e=>{
   const file=e.target.files[0];
   if(!file)return;
   croppedBlob=null;
   $('uploadZoneWrap').style.display='none';
   $('cropArea').style.display='';
   $('uploadBtn').disabled=true;
-  $('uploadStatus').innerHTML='';
-  const rawName=file.name.replace(/\.[^/.]+$/,'').replace(/[^a-zA-Z0-9_\-]/g,'_').substr(0,20);
-  $('photoName').value=rawName;
-  const img=new Image(),url=URL.createObjectURL(file);
-  img.onload=function(){
-    const canvas=$('cropCanvas'),ctx=canvas.getContext('2d');
-    ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
-    ctx.clearRect(0,0,128,128);
-    const size=Math.min(img.width,img.height),sx=(img.width-size)/2,sy=(img.height-size)/2;
-    ctx.drawImage(img,sx,sy,size,size,0,0,128,128);
-    canvas.toBlob(blob=>{
-      croppedBlob=blob;
-      const kb=(blob.size/1024).toFixed(1);
-      $('cropInfo').innerHTML=`<strong>128×128 JPEG</strong> &bull; ${kb} KB &bull; <span style="color:var(--green)">Optimized</span>`;
-      $('uploadBtn').disabled=false;
-    },'image/jpeg',0.82);
-    URL.revokeObjectURL(url);
-  };
-  img.src=url;
+  $('uploadStatus').textContent='';
+  $('imageFitMode').value='crop';
+  $('photoName').value=file.name.replace(/\.[^/.]+$/,'').replace(/[^a-zA-Z0-9_\-]/g,'_').substr(0,20);
+  if(galleryImageUrl)URL.revokeObjectURL(galleryImageUrl);
+  const img=new Image();
+  galleryImageUrl=URL.createObjectURL(file);
+  img.onload=()=>{galleryImage=img;URL.revokeObjectURL(galleryImageUrl);galleryImageUrl=null;renderGalleryPreview();};
+  img.onerror=()=>{toast('Could not read this image',true);resetCrop();};
+  img.src=galleryImageUrl;
 });
 
 async function uploadCroppedPhoto(){
@@ -865,9 +893,10 @@ async function loadGalleryFiles(){
         <img src="/api/gallery/file?name=${encodeURIComponent(f.name)}" loading="lazy" alt="${esc(f.name)}">
         <div class="gi-foot">
           <span class="gi-name" title="${esc(f.name)}">${esc(f.name)}</span>
-          <button class="gi-del" title="Delete" onclick="deletePhoto('${esc(f.name)}')">${icon('trash')}</button>
+          <button class="gi-del" title="Delete" data-photo="${esc(encodeURIComponent(f.name))}">${icon('trash')}</button>
         </div>
       </div>`).join('');
+    grid.querySelectorAll('[data-photo]').forEach(button=>button.onclick=()=>deletePhoto(decodeURIComponent(button.dataset.photo)));
   } catch(e){
     if(grid)grid.innerHTML=`<div style="color:var(--red);text-align:center;padding:16px;grid-column:1/-1">Error: ${esc(e.message)}</div>`;
   }
@@ -886,8 +915,8 @@ function renderSettings(){
     <div class="form-section">
       <div class="form-title"><h3>Appearance</h3><p>Theme changes apply immediately on device and web UI.</p></div>
       <div style="padding:14px 15px;display:flex;gap:10px">
-        <button class="btn" onclick="setTheme('dark');fetch('/api/theme?mode=dark')">${icon('moon')} Dark</button>
-        <button class="btn" onclick="setTheme('light');fetch('/api/theme?mode=light')">${icon('sun')} Light</button>
+        <button class="btn" onclick="applyTheme('dark')">${icon('moon')} Dark</button>
+        <button class="btn" onclick="applyTheme('light')">${icon('sun')} Light</button>
       </div>
     </div>
     <div class="form-section">
@@ -898,6 +927,62 @@ function renderSettings(){
         <button class="btn danger" onclick="rebootDevice()">${icon('reboot')} Reboot Device</button>
       </div>
     </div>`;
+}
+
+async function renderSystem(){
+  const root=$('view-system');
+  root.innerHTML='<div class="section-head"><div><h2>System</h2><p>Loading live device telemetry...</p></div></div>';
+  try{
+    const [h,p,fs]=await Promise.all([api('/api/health'),api('/api/power'),api('/api/gallery/files').catch(()=>({used:0,total:0}))]);
+    const battery=p.battery_present?(p.percentage+'% estimate'):'Not detected';
+    const source=!p.battery_present?'External power':p.charging?'Charging (USB present)':'USB presence unknown';
+    root.innerHTML=`
+      <div class="section-head"><div><h2>System</h2><p>Live health, power policy and maintenance for PoKo.</p></div><button class="btn" onclick="renderSystem()">${icon('refresh')} Refresh</button></div>
+      <div class="metrics">
+        <div class="metric"><small>Battery (voltage estimate)</small><strong>${esc(battery)}</strong><span>${p.battery_present?Number(p.voltage).toFixed(2)+' V':'No battery'}</span></div>
+        <div class="metric"><small>Power</small><strong style="font-size:16px">${esc(source)}</strong><span>${p.full?'Battery near full':p.critical?'Critical voltage':p.low?'Low voltage':'Voltage-based estimate'}</span></div>
+        <div class="metric"><small>Display</small><strong>${esc(p.display_state)}</strong><span>CPU ${h.cpu_mhz} MHz</span></div>
+        <div class="metric"><small>Storage</small><strong>${fmtBytes(fs.used||0)}</strong><span>${fmtBytes(fs.total||0)} capacity</span></div>
+      </div>
+      <div class="columns">
+        <div class="form-section"><div class="form-title"><h3>${icon('battery')} Power policy</h3><p>Timeout values of 0 disable the corresponding automatic action.</p></div>
+          <form id="systemPowerForm" class="form-grid">
+            <div class="field"><label>Dim after<small>Seconds without input</small></label><input type="number" name="dim_timeout" min="0" max="604800" value="${p.dim_timeout}" required></div>
+            <div class="field"><label>Sleep after<small>Seconds without input</small></label><input type="number" name="sleep_timeout" min="0" max="604800" value="${p.sleep_timeout}" required></div>
+            <div class="field"><label>Battery auto-off<small>Seconds without input</small></label><input type="number" name="auto_off" min="0" max="604800" value="${p.auto_off}" required></div>
+            <div class="field"><span class="label">Ambient clock</span><label class="switch"><input name="ambient_clock" type="checkbox" ${p.ambient_clock?'checked':''}><span></span></label></div>
+            <div class="field"><span class="label">USB max performance<small>Only when power source can be detected</small></span><label class="switch"><input name="usb_perf" type="checkbox" ${p.usb_perf_max?'checked':''}><span></span></label></div>
+            <div class="field"><span class="label">Allow Wi-Fi sleep<small>Lower idle power, except during realtime audio</small></span><label class="switch"><input name="wifi_sleep" type="checkbox" ${p.wifi_sleep_allowed?'checked':''}><span></span></label></div>
+            <div class="form-foot" style="grid-column:1/-1"><button class="btn blue" type="submit">${icon('save')} Save power policy</button></div>
+          </form>
+        </div>
+        <div>
+          <div class="form-section"><div class="form-title"><h3>${icon('system')} Device details</h3></div><div class="panel-body status-list">
+            <div class="status-row"><span>App</span><strong>${esc(APP_NAMES[h.app_state]||'Unknown')}</strong></div>
+            <div class="status-row"><span>Firmware</span><strong>${esc(h.firmware_version||'Unknown')}</strong></div>
+            <div class="status-row"><span>IP / SSID</span><strong>${esc(h.ip||'—')} · ${esc(h.ssid||'—')}</strong></div>
+            <div class="status-row"><span>Heap / PSRAM</span><strong>${fmtBytes(h.heap_free)} / ${fmtBytes(h.psram_free)}</strong></div>
+            <div class="status-row"><span>Uptime</span><strong>${fmtUptime(h.uptime_ms)}</strong></div>
+            <div class="status-row"><span>Locks</span><strong>${Number(p.locks)||0}</strong></div>
+            <div class="status-row"><span>Audio amplifier</span><strong>${p.speaker_amp?'Active':'Standby'}</strong></div>
+          </div></div>
+          <div class="form-section"><div class="form-title"><h3>Display &amp; maintenance</h3></div><div class="panel-body actions">
+            <button class="btn" data-screen="on">Wake display</button><button class="btn" data-screen="dim">Dim</button><button class="btn" data-screen="off">Sleep display</button>
+            <a class="btn" href="/ota">${icon('upload')} OTA updates</a>
+            <button class="btn danger" onclick="rebootDevice()">${icon('reboot')} Reboot</button>
+          </div></div>
+        </div>
+      </div>`;
+    $('systemPowerForm').onsubmit=savePowerPolicy;
+    root.querySelectorAll('[data-screen]').forEach(button=>button.onclick=async()=>{try{await api('/api/power?screen='+button.dataset.screen);toast('Display updated');renderSystem()}catch(e){toast(e.message,true)}});
+  }catch(e){root.innerHTML=`<div class="form-section"><div class="panel-body" style="color:var(--red)">${esc(e.message)}</div></div>`}
+}
+async function savePowerPolicy(e){
+  e.preventDefault();
+  const form=e.currentTarget,values=new FormData(form),query=new URLSearchParams();
+  for(const key of ['dim_timeout','sleep_timeout','auto_off'])query.set(key,values.get(key));
+  for(const key of ['ambient_clock','usb_perf','wifi_sleep'])query.set(key,values.has(key)?'1':'0');
+  try{await api('/api/power?'+query);toast('Power policy saved');renderSystem()}catch(err){toast(err.message,true)}
 }
 
 // ── Common controls ───────────────────────────────────────────────────────────
@@ -989,7 +1074,7 @@ async function saveMediaServer(e){
     toast('Update failed: '+err.message,true);
   }
 }
-async function saveWiFi(e){e.preventDefault();const s=$('wifi_ssid').value,p=$('wifi_pass').value;try{await fetch(`/api/wifi?ssid=${encodeURIComponent(s)}&pass=${encodeURIComponent(p)}`,{method:'POST'});}catch(err){}toast('Wi-Fi saved — rebooting to connect to '+s+'...');setTimeout(()=>location.reload(),4000);}
+async function saveWiFi(e){e.preventDefault();const s=$('wifi_ssid').value,p=$('wifi_pass').value;try{await api('/api/wifi',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({ssid:s,pass:p})});toast('Wi-Fi saved — reconnecting...');setTimeout(()=>location.reload(),4000)}catch(err){toast(err.message,true)}}
 
 // ── Render dispatch ───────────────────────────────────────────────────────────
 function renderView(){
@@ -999,6 +1084,7 @@ function renderView(){
     case 'controls': renderControls();break;
     case 'gallery': renderGallery();break;
     case 'settings': renderSettings();break;
+    case 'system': renderSystem();break;
   }
 }
 
@@ -1009,6 +1095,7 @@ async function pollHealth(){
   try{
     const d=await api('/api/health');
     healthCache=d;
+    if((d.theme==='dark'||d.theme==='light')&&d.theme!==curTheme)setTheme(d.theme);
     setOnline(true);
     // Update dashboard live if visible
     if(activeView==='dashboard')syncDashboard(d);
@@ -1048,3 +1135,4 @@ async function pollHealth(){
 </body>
 </html>
 )POKOHTML";
+

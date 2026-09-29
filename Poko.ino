@@ -59,19 +59,32 @@ SnapPlayer*   snapService        = nullptr;
 
 AppState activeApp = STATE_LAUNCHER;
 
-// Manual rapid-click tracking for InfoApp exit.
-// ANY button clicked twice within INFO_EXIT_MS exits to launcher — bypasses OneButton timing entirely.
-static const uint32_t INFO_EXIT_MS = 600;
-static uint32_t _infoLastClickMs  = 0;  // last single-click timestamp while in InfoApp
-
 // ── WiFi State Machine ────────────────────────────────────────
 WifiModeState wifiState = STATE_WIFI_CONNECTING;
 unsigned long wifiTimer = 0;
 String savedSSID = "";
 String savedPass = "";
+String apPassword = "";
 bool webServerStarted = false;
 uint32_t staTimeoutMs = 15000;
 uint32_t apTimeoutMs  = 120000;
+
+bool startSetupAP() {
+    static const char alphabet[] = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+    WiFi.mode(WIFI_AP);
+    apPassword = "";
+    for (int i = 0; i < 8; ++i) {
+        apPassword += alphabet[esp_random() % (sizeof(alphabet) - 1)];
+    }
+    if (!WiFi.softAP("POKO_SETUP", apPassword.c_str())) {
+        apPassword = "";
+        return false;
+    }
+    dnsServer.start(53, "*", WiFi.softAPIP());
+    wifiState = STATE_WIFI_AP;
+    wifiTimer = millis();
+    return true;
+}
 
 void ensureWebServerStarted(const char* reason) {
     if (webServerStarted) return;
@@ -211,7 +224,11 @@ void onAppChange(AppState newState) {
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->unload();
 
     activeApp = newState;
-    _infoLastClickMs = 0;  // reset InfoApp rapid-exit tracker on every app switch
+    btnInput.setHoldRepeatEnabled(newState == STATE_PIXELS_UI || newState == STATE_SSYNC ||
+                                  newState == STATE_MUSIC_UI || newState == STATE_VIDEO_UI ||
+                                  newState == STATE_SETTINGS_UI);
+    // Do not replay a held gesture into the newly opened application.
+    btnInput.suppressUntilAllReleased();
 
     // Show themed loading screen between apps to eliminate black freeze flash
     if (newState == STATE_LAUNCHER) {
@@ -232,8 +249,20 @@ void onAppChange(AppState newState) {
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->load();
 }
 
+void refreshActiveAppTheme() {
+    if (activeApp == STATE_LAUNCHER && pokoUI)                      pokoUI->renderDirect();
+    else if (activeApp == STATE_INFO && infoAppInstance)            infoAppInstance->refreshTheme();
+    else if (activeApp == STATE_CLOCK && clockAppInstance)          clockAppInstance->refreshTheme();
+    else if (activeApp == STATE_SSYNC && ssyncAppInstance)          ssyncAppInstance->refreshTheme();
+    else if (activeApp == STATE_MUSIC_UI && musicAppInstance)       musicAppInstance->refreshTheme();
+    else if (activeApp == STATE_VIDEO_UI && videoAppInstance)       videoAppInstance->refreshTheme();
+    else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)   galleryAppInstance->refreshTheme();
+    else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->refreshTheme();
+    else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance) settingsAppInstance->refreshTheme();
+}
+
 // ── Driver Reset Handler (Combo: Both held 5s) ────────────────
-void handleDriverReset() {
+bool handleDriverReset() {
     Serial.println("[poko] performing driver reset");
     // Ensure all audio streaming tasks are safely stopped before resetting drivers
     if (audioManager) {
@@ -246,9 +275,17 @@ void handleDriverReset() {
     } else if (activeApp == STATE_VIDEO_UI && videoAppInstance) {
         videoAppInstance->unload();
     }
-    if (audioPlugin) audioPlugin->stopStream();
+    if (audioPlugin) audioPlugin->unload();
     if (syncPlugin) syncPlugin->unload();
     vTaskDelay(pdMS_TO_TICKS(50));
+
+    // Never reset shared I2S/display drivers while a worker still owns them.
+    if ((audioPlugin && audioPlugin->isLoaded()) ||
+        (syncPlugin && syncPlugin->isLoaded()) ||
+        (audioManager && audioManager->hasActiveSession())) {
+        Serial.println("[poko] driver reset aborted: media worker did not shut down safely");
+        return false;
+    }
 
     driverReset(pokoGfx);
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->redraw();
@@ -260,6 +297,7 @@ void handleDriverReset() {
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->load();
     else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->load();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->load();
+    return true;
 }
 
 // ── Power-aware Button Wake & Action Filter ──────────────────
@@ -279,27 +317,12 @@ bool handleButtonWakeCheck(bool isVolumeAction = false) {
     return true;
 }
 
-// Returns true if this is the second click within INFO_EXIT_MS and we should exit.
-// Resets the tracker after a non-consecutive click so the user gets a clean state.
-static bool infoRapidClickExit() {
-    uint32_t now = millis();
-    if (now - _infoLastClickMs < INFO_EXIT_MS) {
-        _infoLastClickMs = 0;  // reset so triple-click doesn't keep exiting
-        return true;
-    }
-    _infoLastClickMs = now;
-    return false;
-}
-
 // ── Button & Combo Callbacks ──────────────────────────────────
 void onBtnLeft() {
     if (!handleButtonWakeCheck(false)) return;
     Serial.println("[action] Left (BOOT) Clicked");
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->navigateLeft();
-    else if (activeApp == STATE_INFO && infoAppInstance) {
-        if (infoRapidClickExit()) { infoAppInstance->onBack(); return; }
-        infoAppInstance->onLeft();
-    }
+    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onLeft();
     else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->onLeft();
     else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->onLeft();
     else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->onLeft();
@@ -313,10 +336,7 @@ void onBtnRight() {
     if (!handleButtonWakeCheck(false)) return;
     Serial.println("[action] Right (KEY) Clicked");
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->navigateRight();
-    else if (activeApp == STATE_INFO && infoAppInstance) {
-        if (infoRapidClickExit()) { infoAppInstance->onBack(); return; }
-        infoAppInstance->onRight();
-    }
+    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onRight();
     else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->onRight();
     else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->onRight();
     else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->onRight();
@@ -326,26 +346,32 @@ void onBtnRight() {
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->onRight();
 }
 
+int acceleratedVolumeStep(bool increasing) {
+    static uint32_t holdStartMs = 0;
+    static uint32_t lastHoldMs = 0;
+    static AppState holdApp = STATE_LAUNCHER;
+    static bool lastIncreasing = false;
+    uint32_t now = millis();
+    if (holdApp != activeApp || lastIncreasing != increasing || now - lastHoldMs > 350) holdStartMs = now;
+    holdApp = activeApp;
+    lastIncreasing = increasing;
+    lastHoldMs = now;
+    uint32_t held = now - holdStartMs;
+    return held < 1000 ? 2 : held < 2500 ? 5 : 10;
+}
+
 void onBtnLeftHolding() {
     if (!handleButtonWakeCheck(true)) return;
     if (activeApp == STATE_PIXELS_UI && pixelAppInstance) {
         pixelAppInstance->onHoldingLeft();
     } else if (activeApp == STATE_SSYNC && ssyncAppInstance) {
-        ssyncAppInstance->volumeRampDown();
+        ssyncAppInstance->volumeRampDown(acceleratedVolumeStep(false));
     } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {
-        musicAppInstance->volumeRampDown();
+        musicAppInstance->volumeRampDown(acceleratedVolumeStep(false));
     } else if (activeApp == STATE_VIDEO_UI && videoAppInstance) {
-        videoAppInstance->volumeRampDown();
-    } else {
-        if (audioManager) {
-            audioManager->rampVolume(-2);
-        } else {
-            int cur = getCurrentAppVolume();
-            if (cur > 0) {
-                setScaledVolume(max(0, cur - 2));
-                prefs.putInt("volume", getCurrentAppVolume());
-            }
-        }
+        videoAppInstance->volumeRampDown(acceleratedVolumeStep(false));
+    } else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance) {
+        settingsAppInstance->onHoldingLeft();
     }
 }
 
@@ -354,21 +380,13 @@ void onBtnRightHolding() {
     if (activeApp == STATE_PIXELS_UI && pixelAppInstance) {
         pixelAppInstance->onHoldingRight();
     } else if (activeApp == STATE_SSYNC && ssyncAppInstance) {
-        ssyncAppInstance->volumeRampUp();
+        ssyncAppInstance->volumeRampUp(acceleratedVolumeStep(true));
     } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {
-        musicAppInstance->volumeRampUp();
+        musicAppInstance->volumeRampUp(acceleratedVolumeStep(true));
     } else if (activeApp == STATE_VIDEO_UI && videoAppInstance) {
-        videoAppInstance->volumeRampUp();
-    } else {
-        if (audioManager) {
-            audioManager->rampVolume(2);
-        } else {
-            int cur = getCurrentAppVolume();
-            if (cur < 100) {
-                setScaledVolume(min(100, cur + 2));
-                prefs.putInt("volume", getCurrentAppVolume());
-            }
-        }
+        videoAppInstance->volumeRampUp(acceleratedVolumeStep(true));
+    } else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance) {
+        settingsAppInstance->onHoldingRight();
     }
 }
 
@@ -402,7 +420,7 @@ void onBtnRightDouble() {
     if (!handleButtonWakeCheck(false)) return;
     Serial.println("[action] Right Double-Click -> Enter / Action");
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->enter();
-    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onEnter();
+    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->onBack();
     else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->onEnter();
     else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->onEnter();
     else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->onEnter();
@@ -539,7 +557,7 @@ void setup() {
     }
 
     // LittleFS Storage for offline photos & assets
-    if (!LittleFS.begin(true)) {
+    if (!LittleFS.begin(false)) {
         Serial.println("[fs] LittleFS mount failed!");
     } else {
         Serial.printf("[fs] LittleFS ready (%u / %u bytes used)\n",
@@ -579,7 +597,16 @@ void setup() {
     pixelEngine.loadFromPreferences(prefs);
 
     // 5. Button Input Setup (3 physical buttons: DOWN=0, UP=4, PWR=5)
-    btnInput.begin();
+    btnInput.onPress([]() -> bool {
+        if (!powerManager) return false;
+        auto state = powerManager->getDisplayState();
+        if (state == DISPLAY_POWER_OFF || state == DISPLAY_POWER_SLEEP) {
+            powerManager->wakeDisplay();
+            return true;
+        }
+        powerManager->notifyUserActivity(ACTIVITY_BUTTON);
+        return false;
+    });
     btnInput.onDown(onBtnLeft);
     btnInput.onUp(onBtnRight);
     btnInput.onDownDouble(onBtnLeftDouble);
@@ -600,6 +627,7 @@ void setup() {
     btnInput.onBothLong(onComboBothLong);
     btnInput.onBothVLong(onComboBothVLong);
     btnInput.onBothUltra(onComboBothUltra);
+    btnInput.begin();
 
     // 6. Instantiate Central AudioManager & Background SnapPlayer Service
     audioManager = new AudioManager();
@@ -685,14 +713,12 @@ void setup() {
         wifiState = STATE_WIFI_CONNECTING;
         Serial.printf("[wifi] connecting to %s...\n", savedSSID.c_str());
     } else {
-        // No saved WiFi -> start setup AP with password 12345678
-        WiFi.mode(WIFI_AP);
-        WiFi.softAP("POKO_SETUP", "12345678");
-        dnsServer.start(53, "*", WiFi.softAPIP());
-        wifiState = STATE_WIFI_AP;
-        wifiTimer = millis();
-        ensureWebServerStarted("first-time AP");
-        Serial.println("[wifi] no credentials, started POKO_SETUP AP (password: 12345678)");
+        if (startSetupAP()) {
+            ensureWebServerStarted("first-time AP");
+            Serial.println("[wifi] setup AP started");
+        } else {
+            Serial.println("[wifi] setup AP failed to start");
+        }
     }
 
     // 8. REST API & Web Dashboard
@@ -714,6 +740,10 @@ void setup() {
 
     // Initial state: Start on restored safe app or Launcher
     activeApp = initialApp;
+    btnInput.setHoldRepeatEnabled(initialApp == STATE_PIXELS_UI || initialApp == STATE_SSYNC ||
+                                  initialApp == STATE_MUSIC_UI || initialApp == STATE_VIDEO_UI ||
+                                  initialApp == STATE_SETTINGS_UI);
+    btnInput.suppressUntilAllReleased();
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->renderDirect();
     else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->load();
     else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->load();
@@ -759,7 +789,7 @@ void loop() {
                 ArduinoOTA.onStart([]() {
                     if (powerManager) {
                         powerManager->wakeDisplay();
-                        powerManager->acquireLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
+                        powerManager->acquireLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY, LOCK_OWNER_OTA);
                     }
                     if (audioManager) audioManager->stopAll();
                     if (snapService && snapService->isLoaded()) {
@@ -774,12 +804,12 @@ void loop() {
                     }
                 });
                 ArduinoOTA.onError([](ota_error_t error) {
-                    if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
+                    if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY, LOCK_OWNER_OTA);
                     pixelEngine.showOtaError();
                 });
                 ArduinoOTA.onEnd([]() {
                     pixelEngine.showOtaProgress(100.0f);
-                    if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
+                    if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY, LOCK_OWNER_OTA);
                     Preferences p;
                     p.begin("poko", false);
                     p.putBool("clean_shutdown", true);
@@ -807,12 +837,12 @@ void loop() {
         } else if (millis() - wifiTimer > staTimeoutMs) {
             Serial.println("[wifi] connection timeout -> fallback to AP mode");
             WiFi.disconnect();
-            WiFi.mode(WIFI_AP);
-            WiFi.softAP("POKO_SETUP", "12345678");
-            dnsServer.start(53, "*", WiFi.softAPIP());
-            wifiState = STATE_WIFI_AP;
-            wifiTimer = millis();
-            ensureWebServerStarted("AP fallback (password: 12345678)");
+            if (startSetupAP()) {
+                ensureWebServerStarted("AP fallback");
+            } else {
+                wifiTimer = millis();
+                Serial.println("[wifi] AP fallback failed to start");
+            }
             if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
         }
     } else if (wifiState == STATE_WIFI_AP) {
@@ -868,3 +898,4 @@ void loop() {
     bool isSSyncPlaying = (snapService && snapService->isPlaying());
     pixelEngine.update(isMusicPlaying, isSSyncPlaying);
 }
+

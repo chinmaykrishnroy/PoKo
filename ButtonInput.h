@@ -1,328 +1,258 @@
 #pragma once
 #include <Arduino.h>
 #include <OneButton.h>
+#include <atomic>
 #include "PokoPins.h"
+#ifdef ARDUINO_ARCH_ESP32
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <driver/rtc_io.h>
+#endif
 
-// ─────────────────────────────────────────────────────────────
-//  ButtonInput — Physical button management for PoKo
-//  Hardware:
-//    BOOT/DOWN: GPIO 0 (Left / Down navigation)
-//    PLUS/UP:   GPIO 4 (Right / Up navigation / Select)
-//    PWR:       GPIO 5 (Dedicated System Power / Sleep / Wake)
-// ─────────────────────────────────────────────────────────────
-
+// GPIO sampling and OneButton run on one worker. Only update(), on the Arduino
+// loop, calls application callbacks. No UI, I2S, network or prefs on the worker.
 class ButtonInput {
 public:
-    typedef void (*SimpleCb)();
+    using SimpleCb = void (*)();
+    using WakeCb = bool (*)(); // true means consume the entire wake gesture
+    static constexpr uint16_t BUTTON_CLICK_MS = 300;
+    static constexpr uint16_t BUTTON_PRESS_MS = 700;
+    static constexpr uint16_t BUTTON_DEBOUNCE_MS = 25;
+    static constexpr uint16_t PWR_CLICK_MS = 300;
+    static constexpr uint16_t PWR_PRESS_MS = 2000;
+    static constexpr uint32_t DUAL_CLICK_MS = 450;
 
 private:
-    OneButton _btnDown;
-    OneButton _btnUp;
-    OneButton _btnPwr;
+    enum Kind : uint8_t { Press, Down, Up, DownDouble, UpDouble, LongDown,
+        LongUp, RepeatDown, RepeatUp, Power, PowerDouble, PowerLong,
+        Both, BothDouble, BothLong, BothVLong, BothUltra };
+    struct Event { Kind kind; uint32_t generation; };
+    static constexpr uint32_t QUEUE_SIZE = 64;
+    Event _events[QUEUE_SIZE];
+    std::atomic<uint32_t> _head{0}, _tail{0}, _generation{0};
+    std::atomic<bool> _overflow{false};
+    uint32_t _sampleGeneration = 0;
+    OneButton _btnDown, _btnUp, _btnPwr;
+    SimpleCb _callbacks[17] = {};
+    WakeCb _wake = nullptr;
+    bool _repeatEnabled = false; // main-loop only
+    bool _taskStarted = false;
+    bool _raw[3] = {}, _pressed[3] = {};
+    uint32_t _changedAt[3] = {};
+    bool _suppressed = false, _releaseTiming = false;
+    uint32_t _releasedAt = 0;
+    bool _combo = false, _comboReleasing = false;
+    uint32_t _comboStart = 0, _dualReleased = 0;
+    uint8_t _dualClicks = 0;
+    static inline ButtonInput* _instance = nullptr;
 
-    SimpleCb _onDown         = nullptr;
-    SimpleCb _onUp           = nullptr;
-    SimpleCb _onDownDouble   = nullptr;
-    SimpleCb _onUpDouble     = nullptr;
-    SimpleCb _onLongDown     = nullptr;
-    SimpleCb _onLongUp       = nullptr;
-    SimpleCb _onDownHolding  = nullptr;
-    SimpleCb _onUpHolding    = nullptr;
-
-    SimpleCb _onPwrClick     = nullptr;
-    SimpleCb _onPwrDouble    = nullptr;
-    SimpleCb _onPwrLong      = nullptr;
-
-    SimpleCb _onBothClick    = nullptr;
-    SimpleCb _onBothDouble   = nullptr;
-    SimpleCb _onBothLong     = nullptr;
-    SimpleCb _onBothVLong    = nullptr;
-    SimpleCb _onBothUltra    = nullptr;
-
-    // Single-button continuous hold tracking (e.g. volume ramping)
-    uint32_t _downHoldStartMs   = 0;
-    uint32_t _downLastRepeatMs  = 0;
-    uint32_t _upHoldStartMs     = 0;
-    uint32_t _upLastRepeatMs    = 0;
-    // Set true once the ramp callback actually fires so the OneButton long-press
-    // callback (at 650ms) is suppressed — prevents double-action (ramp + long-press).
-    bool     _downRampFired     = false;
-    bool     _upRampFired       = false;
-
-    // Dual-button combo tracking (DOWN + UP held simultaneously)
-    bool     _comboHolding       = false;
-    bool     _comboLongFired     = false;
-    bool     _comboVLongFired    = false;
-    bool     _comboUltraFired    = false;
-    uint32_t _comboStartMs       = 0;
-    bool     _suppressSingle     = false;
-
-    // Dual-button short click / double click detection
-    uint8_t  _dualClickCount     = 0;
-    uint32_t _lastDualReleaseMs  = 0;
-    bool     _dualCandidate      = false;
-
-    static ButtonInput* _instance;
-
-    static void _cbClickDown() {
-        if (_instance && !_instance->_suppressSingle && _instance->_onDown) {
-            Serial.println("[btn] DOWN Click");
-            _instance->_onDown();
+    void emit(Kind kind) {
+        uint32_t head = _head.load(std::memory_order_relaxed);
+        uint32_t next = (head + 1) % QUEUE_SIZE;
+        if (next == _tail.load(std::memory_order_acquire)) {
+            _overflow.store(true, std::memory_order_release);
+            return;
+        }
+        _events[head] = {kind, _sampleGeneration};
+        _head.store(next, std::memory_order_release);
+    }
+    bool pop(Event& event) {
+        uint32_t tail = _tail.load(std::memory_order_relaxed);
+        if (tail == _head.load(std::memory_order_acquire)) return false;
+        event = _events[tail];
+        _tail.store((tail + 1) % QUEUE_SIZE, std::memory_order_release);
+        return true;
+    }
+    static void resetButton(OneButton& button) {
+        // OneButton::reset() leaves its internal debounced level unchanged.
+        // Prime it inactive before resuming after a consumed hold/chord.
+        button.reset();
+        button.tick(false);
+        button.tick(false);
+        button.reset();
+    }
+    void resetRecognizers() {
+        resetButton(_btnDown); resetButton(_btnUp); resetButton(_btnPwr);
+        _combo = _comboReleasing = false;
+        _dualClicks = 0;
+    }
+    template<Kind kind> static void callback() { if (_instance) _instance->emit(kind); }
+#ifdef ARDUINO_ARCH_ESP32
+    static void task(void* context) {
+        auto* self = static_cast<ButtonInput*>(context);
+        TickType_t last = xTaskGetTickCount();
+        for (;;) {
+            self->sample();
+            vTaskDelayUntil(&last, pdMS_TO_TICKS(5));
         }
     }
-    static void _cbDblClickDown() {
-        if (_instance && !_instance->_suppressSingle && _instance->_onDownDouble) {
-            Serial.println("[btn] DOWN Double-Click");
-            _instance->_onDownDouble();
-        }
-    }
-    static void _cbLongDown() {
-        // Suppress if volume ramp already started (ramp fires at 450ms, long-press at 650ms)
-        if (_instance && !_instance->_suppressSingle && !_instance->_downRampFired && _instance->_onLongDown) {
-            Serial.println("[btn] DOWN Long-Press");
-            _instance->_onLongDown();
-        }
-    }
-
-    static void _cbClickUp() {
-        if (_instance && !_instance->_suppressSingle && _instance->_onUp) {
-            Serial.println("[btn] UP Click");
-            _instance->_onUp();
-        }
-    }
-    static void _cbDblClickUp() {
-        if (_instance && !_instance->_suppressSingle && _instance->_onUpDouble) {
-            Serial.println("[btn] UP Double-Click");
-            _instance->_onUpDouble();
-        }
-    }
-    static void _cbLongUp() {
-        // Suppress if volume ramp already started (ramp fires at 450ms, long-press at 650ms)
-        if (_instance && !_instance->_suppressSingle && !_instance->_upRampFired && _instance->_onLongUp) {
-            Serial.println("[btn] UP Long-Press");
-            _instance->_onLongUp();
-        }
-    }
-
-    static void _cbClickPwr() {
-        if (_instance && _instance->_onPwrClick) {
-            Serial.println("[btn] PWR Click");
-            _instance->_onPwrClick();
-        }
-    }
-    static void _cbDblClickPwr() {
-        if (_instance && _instance->_onPwrDouble) {
-            Serial.println("[btn] PWR Double-Click");
-            _instance->_onPwrDouble();
-        }
-    }
-    static void _cbLongPwr() {
-        if (_instance && _instance->_onPwrLong) {
-            Serial.println("[btn] PWR Long-Press (Shutdown)");
-            _instance->_onPwrLong();
-        }
-    }
-
+#endif
 public:
-    ButtonInput()
-        : _btnDown(POKO_PIN_BTN_DOWN, true),
-          _btnUp(POKO_PIN_BTN_UP, true),
-          _btnPwr(POKO_PIN_BTN_PWR, true) {
-        _instance = this;
-    }
-
+    ButtonInput() { _instance = this; }
     void begin() {
-        // DOWN & UP navigation button timings
-        _btnDown.setClickMs(450);  // 450ms window to detect double-click vs two singles
-        _btnDown.setPressMs(650);
-        _btnDown.setDebounceMs(20);
-
-        _btnUp.setClickMs(450);  // 450ms window to detect double-click vs two singles
-        _btnUp.setPressMs(650);
-        _btnUp.setDebounceMs(20);
-
-        // PWR button timings: 2000ms pressMs for long-press power off
-        _btnPwr.setClickMs(300);
-        _btnPwr.setPressMs(2000);
-        _btnPwr.setDebounceMs(20);
-
-        // Attach callbacks
-        _btnDown.attachClick(_cbClickDown);
-        _btnDown.attachDoubleClick(_cbDblClickDown);
-        _btnDown.attachLongPressStart(_cbLongDown);
-
-        _btnUp.attachClick(_cbClickUp);
-        _btnUp.attachDoubleClick(_cbDblClickUp);
-        _btnUp.attachLongPressStart(_cbLongUp);
-
-        _btnPwr.attachClick(_cbClickPwr);
-        _btnPwr.attachDoubleClick(_cbDblClickPwr);
-        _btnPwr.attachLongPressStart(_cbLongPwr);
-
-        Serial.println("[btn] OneButton initialized (DOWN=GPIO0, UP=GPIO4, PWR=GPIO5)");
+#ifdef ARDUINO_ARCH_ESP32
+        for (int pin : {POKO_PIN_BTN_DOWN, POKO_PIN_BTN_UP, POKO_PIN_BTN_PWR}) {
+            rtc_gpio_deinit((gpio_num_t)pin);
+        }
+#endif
+        _btnDown.setup(POKO_PIN_BTN_DOWN, INPUT_PULLUP, true);
+        _btnUp.setup(POKO_PIN_BTN_UP, INPUT_PULLUP, true);
+        _btnPwr.setup(POKO_PIN_BTN_PWR, INPUT_PULLUP, true);
+        for (OneButton* button : {&_btnDown, &_btnUp}) {
+            button->setClickMs(BUTTON_CLICK_MS);
+            button->setPressMs(BUTTON_PRESS_MS);
+            // sample() debounces all pins once, shared with chord recognition.
+            button->setDebounceMs(0);
+            button->setLongPressIntervalMs(100);
+        }
+        _btnPwr.setClickMs(PWR_CLICK_MS);
+        _btnPwr.setPressMs(PWR_PRESS_MS);
+        _btnPwr.setDebounceMs(0);
+        _btnDown.attachClick(callback<Down>);
+        _btnUp.attachClick(callback<Up>);
+        _btnDown.attachDoubleClick(callback<DownDouble>);
+        _btnUp.attachDoubleClick(callback<UpDouble>);
+        _btnDown.attachLongPressStart(callback<LongDown>);
+        _btnUp.attachLongPressStart(callback<LongUp>);
+        _btnDown.attachDuringLongPress(callback<RepeatDown>);
+        _btnUp.attachDuringLongPress(callback<RepeatUp>);
+        _btnPwr.attachClick(callback<Power>);
+        if (_callbacks[PowerDouble]) _btnPwr.attachDoubleClick(callback<PowerDouble>);
+        _btnPwr.attachLongPressStart(callback<PowerLong>);
+#ifdef ARDUINO_ARCH_ESP32
+        // Consume a button still held from boot/deep-sleep wake.
+        _suppressed = true;
+        _taskStarted = xTaskCreatePinnedToCore(task, "PokoInput", 4096, this, 3, nullptr, 1) == pdPASS;
+        if (!_taskStarted) Serial.println("[btn] input task unavailable; using loop polling");
+#endif
     }
 
-    // New semantic setters
-    void onDown(SimpleCb cb)          { _onDown        = cb; }
-    void onUp(SimpleCb cb)            { _onUp          = cb; }
-    void onDownDouble(SimpleCb cb)    { _onDownDouble  = cb; }
-    void onUpDouble(SimpleCb cb)      { _onUpDouble    = cb; }
-    void onLongDown(SimpleCb cb)      { _onLongDown    = cb; }
-    void onLongUp(SimpleCb cb)        { _onLongUp      = cb; }
-    void onDownHolding(SimpleCb cb)   { _onDownHolding = cb; }
-    void onUpHolding(SimpleCb cb)     { _onUpHolding   = cb; }
+    void onPress(WakeCb cb) { _wake = cb; }
+    void setHoldRepeatEnabled(bool enabled) { _repeatEnabled = enabled; }
+    void onDown(SimpleCb cb) { _callbacks[Down] = cb; }
+    void onUp(SimpleCb cb) { _callbacks[Up] = cb; }
+    void onDownDouble(SimpleCb cb) { _callbacks[DownDouble] = cb; }
+    void onUpDouble(SimpleCb cb) { _callbacks[UpDouble] = cb; }
+    void onLongDown(SimpleCb cb) { _callbacks[LongDown] = cb; }
+    void onLongUp(SimpleCb cb) { _callbacks[LongUp] = cb; }
+    void onDownHolding(SimpleCb cb) { _callbacks[RepeatDown] = cb; }
+    void onUpHolding(SimpleCb cb) { _callbacks[RepeatUp] = cb; }
+    void onPwrClick(SimpleCb cb) { _callbacks[Power] = cb; }
+    // Register before begin() if a future product defines a power double action.
+    void onPwrDouble(SimpleCb cb) { _callbacks[PowerDouble] = cb; }
+    void onPwrLong(SimpleCb cb) { _callbacks[PowerLong] = cb; }
+    void onBothClick(SimpleCb cb) { _callbacks[Both] = cb; }
+    void onBothDouble(SimpleCb cb) { _callbacks[BothDouble] = cb; }
+    void onBothLong(SimpleCb cb) { _callbacks[BothLong] = cb; }
+    void onBothVLong(SimpleCb cb) { _callbacks[BothVLong] = cb; }
+    void onBothUltra(SimpleCb cb) { _callbacks[BothUltra] = cb; }
+    void onLeft(SimpleCb cb) { onDown(cb); }
+    void onRight(SimpleCb cb) { onUp(cb); }
+    void onLeftDouble(SimpleCb cb) { onDownDouble(cb); }
+    void onRightDouble(SimpleCb cb) { onUpDouble(cb); }
+    void onLongLeft(SimpleCb cb) { onLongDown(cb); }
+    void onLongRight(SimpleCb cb) { onLongUp(cb); }
+    void onLeftHolding(SimpleCb cb) { onDownHolding(cb); }
+    void onRightHolding(SimpleCb cb) { onUpHolding(cb); }
 
-    void onPwrClick(SimpleCb cb)      { _onPwrClick    = cb; }
-    void onPwrDouble(SimpleCb cb)     { _onPwrDouble   = cb; }
-    void onPwrLong(SimpleCb cb)       { _onPwrLong     = cb; }
+    void suppressUntilAllReleased() {
+        _generation.fetch_add(1, std::memory_order_acq_rel);
+        // A concurrent producer can still enqueue an old-generation event; the
+        // consumer rejects it below. Only the worker resets the recognizers.
+        _tail.store(_head.load(std::memory_order_acquire), std::memory_order_release);
+    }
+    void reset() { suppressUntilAllReleased(); }
 
-    // Dual-button combos (DOWN + UP)
-    void onBothClick(SimpleCb cb)     { _onBothClick   = cb; }
-    void onBothDouble(SimpleCb cb)    { _onBothDouble  = cb; }
-    void onBothLong(SimpleCb cb)      { _onBothLong    = cb; }
-    void onBothVLong(SimpleCb cb)     { _onBothVLong   = cb; }
-    void onBothUltra(SimpleCb cb)     { _onBothUltra   = cb; }
-
-    // Backward-compatibility aliases
-    void onLeft(SimpleCb cb)          { _onDown        = cb; }
-    void onRight(SimpleCb cb)         { _onUp          = cb; }
-    void onLeftDouble(SimpleCb cb)    { _onDownDouble  = cb; }
-    void onRightDouble(SimpleCb cb)   { _onUpDouble    = cb; }
-    void onLongLeft(SimpleCb cb)      { _onLongDown    = cb; }
-    void onLongRight(SimpleCb cb)     { _onLongUp      = cb; }
-    void onLeftHolding(SimpleCb cb)   { _onDownHolding = cb; }
-    void onRightHolding(SimpleCb cb)  { _onUpHolding   = cb; }
-
-    void reset() {
-        _btnDown.reset();
-        _btnUp.reset();
-        _btnPwr.reset();
-        _downHoldStartMs = 0;
-        _upHoldStartMs = 0;
-        _comboHolding = false;
-        _suppressSingle = false;
+    // Single producer: worker in firmware, explicitly stepped in host tests.
+    void sample() {
+        const uint32_t now = millis();
+        const int pins[3] = {POKO_PIN_BTN_DOWN, POKO_PIN_BTN_UP, POKO_PIN_BTN_PWR};
+        bool pressEdge = false;
+        for (int i = 0; i < 3; ++i) {
+            bool raw = digitalRead(pins[i]) == LOW;
+            if (raw != _raw[i]) { _raw[i] = raw; _changedAt[i] = now; }
+            if (_pressed[i] != raw && now - _changedAt[i] >= BUTTON_DEBOUNCE_MS) {
+                _pressed[i] = raw;
+                pressEdge |= raw;
+            }
+        }
+        uint32_t generation = _generation.load(std::memory_order_acquire);
+        if (_sampleGeneration != generation) {
+            _sampleGeneration = generation;
+            resetRecognizers();
+            _suppressed = true;
+            _releaseTiming = false;
+        }
+        if (_suppressed) {
+            if (_raw[0] || _raw[1] || _raw[2] || _pressed[0] || _pressed[1] || _pressed[2]) {
+                _releaseTiming = false;
+            } else if (!_releaseTiming) {
+                _releaseTiming = true; _releasedAt = now;
+            } else if (now - _releasedAt >= BUTTON_CLICK_MS) {
+                resetRecognizers();
+                _suppressed = false;
+            }
+            return;
+        }
+        if (pressEdge) emit(Press);
+        bool down = _pressed[0], up = _pressed[1];
+        // Expire a pending chord before accepting another outside its window.
+        if (!_combo && _dualClicks == 1 && now - _dualReleased >= DUAL_CLICK_MS) {
+            _dualClicks = 0; emit(Both);
+        }
+        if (down && up && !_comboReleasing) {
+            if (!_combo) {
+                _combo = true; _comboStart = now;
+                resetButton(_btnDown); resetButton(_btnUp);
+            }
+        } else if (_combo) {
+            _combo = false;
+            _comboReleasing = true;
+            uint32_t held = now - _comboStart;
+            if (held >= 2500) {
+                _dualClicks = 0;
+                emit(held >= 10000 ? BothUltra : held >= 5000 ? BothVLong : BothLong);
+            } else if (held < DUAL_CLICK_MS) {
+                _dualReleased = now;
+                if (++_dualClicks == 2) { _dualClicks = 0; emit(BothDouble); }
+            } else _dualClicks = 0;
+        }
+        if (_comboReleasing) {
+            // Reset throughout staggered release; the remaining key must not
+            // become a fresh single click/hold after a chord.
+            resetButton(_btnDown); resetButton(_btnUp);
+            if (!down && !up) _comboReleasing = false;
+        } else if (!_combo) {
+            _btnDown.tick(down);
+            _btnUp.tick(up);
+        }
+        _btnPwr.tick(_pressed[2]);
     }
 
     void update() {
-        bool downPressed = (digitalRead(POKO_PIN_BTN_DOWN) == LOW);
-        bool upPressed   = (digitalRead(POKO_PIN_BTN_UP) == LOW);
-
-        uint32_t now = millis();
-
-        if (downPressed && upPressed) {
-            // Both DOWN and UP buttons are held together
-            _downHoldStartMs = 0;
-            _upHoldStartMs = 0;
-
-            if (!_comboHolding) {
-                _comboHolding    = true;
-                _comboStartMs    = now;
-                _comboLongFired  = false;
-                _comboVLongFired = false;
-                _comboUltraFired = false;
-                _suppressSingle  = true;
-                _dualCandidate   = true;
-                _btnDown.reset();
-                _btnUp.reset();
-            } else {
-                uint32_t held = now - _comboStartMs;
-                if (!_comboLongFired && held >= 2500) {
-                    _comboLongFired = true;
-                    _dualCandidate  = false;
-                    _dualClickCount = 0;
-                    Serial.println("[combo] Both held 2.5s (Reboot)");
-                    if (_onBothLong) _onBothLong();
-                }
-                if (!_comboVLongFired && held >= 5000) {
-                    _comboVLongFired = true;
-                    Serial.println("[combo] Both held 5s");
-                    if (_onBothVLong) _onBothVLong();
-                }
-                if (!_comboUltraFired && held >= 10000) {
-                    _comboUltraFired = true;
-                    Serial.println("[combo] Both held 10s");
-                    if (_onBothUltra) _onBothUltra();
-                }
+        if (!_taskStarted) sample();
+        if (_overflow.exchange(false, std::memory_order_acq_rel)) {
+            Serial.println("[btn] queue overflow: discarding stale gesture");
+            suppressUntilAllReleased();
+            return;
+        }
+        Event event;
+        // Bound dispatch work; slow callbacks must not starve the rest of loop.
+        for (int count = 0; count < 16 && pop(event); ++count) {
+            if (event.generation != _generation.load(std::memory_order_acquire)) continue;
+            Kind kind = event.kind;
+            if (kind == Press) {
+                if (_wake && _wake()) { suppressUntilAllReleased(); return; }
+                continue;
             }
-        } else {
-            // At least one button is NOT pressed
-            if (_comboHolding) {
-                _comboHolding = false;
-                _btnDown.reset();
-                _btnUp.reset();
-
-                // If released before 2s hold (and within 600ms of dual press), it's a dual click candidate
-                if (_dualCandidate && !_comboLongFired && (now - _comboStartMs < 600)) {
-                    _dualClickCount++;
-                    _lastDualReleaseMs = now;
-                    if (_dualClickCount >= 2) {
-                        Serial.println("[combo] Both Double-Click");
-                        _dualClickCount = 0;
-                        _dualCandidate = false;
-                        if (_onBothDouble) _onBothDouble();
-                    }
-                } else {
-                    _dualCandidate = false;
-                    _dualClickCount = 0;
-                }
-            }
-
-            // Only clear suppression when both buttons are fully released
-            if (!downPressed && !upPressed) {
-                _suppressSingle = false;
-            }
-
-            // Check if dual single-click pending window expired
-            if (_dualClickCount == 1 && (now - _lastDualReleaseMs > 350)) {
-                Serial.println("[combo] Both Click");
-                _dualClickCount = 0;
-                _dualCandidate = false;
-                if (_onBothClick) _onBothClick();
-            }
-
-            // Single button continuous press-and-hold (e.g. volume ramp)
-            if (!_suppressSingle) {
-                if (downPressed && !upPressed) {
-                    if (_downHoldStartMs == 0) {
-                        _downHoldStartMs = now;
-                        _downLastRepeatMs = now;
-                    } else if (now - _downHoldStartMs >= 450) {
-                        if (now - _downLastRepeatMs >= 100) {
-                            _downLastRepeatMs = now;
-                            _downRampFired = true;  // suppress OneButton long-press from here on
-                            if (_onDownHolding) _onDownHolding();
-                        }
-                    }
-                } else {
-                    _downHoldStartMs = 0;
-                    _downRampFired = false;
-                }
-
-                if (upPressed && !downPressed) {
-                    if (_upHoldStartMs == 0) {
-                        _upHoldStartMs = now;
-                        _upLastRepeatMs = now;
-                    } else if (now - _upHoldStartMs >= 450) {
-                        if (now - _upLastRepeatMs >= 100) {
-                            _upLastRepeatMs = now;
-                            _upRampFired = true;  // suppress OneButton long-press from here on
-                            if (_onUpHolding) _onUpHolding();
-                        }
-                    }
-                } else {
-                    _upHoldStartMs = 0;
-                    _upRampFired = false;
-                }
+            if (kind == LongDown || kind == LongUp) {
+                if (_repeatEnabled) kind = kind == LongDown ? RepeatDown : RepeatUp;
+            } else if ((kind == RepeatDown || kind == RepeatUp) && !_repeatEnabled) continue;
+            if (_callbacks[kind]) {
+                Serial.printf("[btn] dispatch %u\n", (unsigned)kind);
+                _callbacks[kind]();
             }
         }
-
-        // Tick OneButton instances
-        if (!_comboHolding && !_suppressSingle) {
-            _btnDown.tick();
-            _btnUp.tick();
-        }
-        _btnPwr.tick();
     }
 };
 
-inline ButtonInput* ButtonInput::_instance = nullptr;

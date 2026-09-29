@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <Preferences.h>
 #include <esp_sleep.h>
+#include <driver/rtc_io.h>
 #include <esp_wifi.h>
 #include <functional>
 #include "PokoPins.h"
@@ -35,6 +36,15 @@ enum PowerLock : uint32_t {
     POWER_LOCK_OTA                  = 1 << 6  // OTA flashing in progress
 };
 
+enum PowerLockOwner : uint8_t {
+    LOCK_OWNER_SYSTEM  = 0,
+    LOCK_OWNER_AUDIO   = 1,
+    LOCK_OWNER_VIDEO   = 2,
+    LOCK_OWNER_GALLERY = 3,
+    LOCK_OWNER_OTA     = 4,
+    LOCK_OWNER_COUNT   = 5
+};
+
 enum DisplayPowerState : uint8_t {
     DISPLAY_POWER_ACTIVE = 0, // User-configured full brightness
     DISPLAY_POWER_DIMMED,     // Reduced brightness (15-20%)
@@ -57,6 +67,7 @@ private:
     std::function<void()> _wakeCb = nullptr;
 
     uint32_t              _locks               = POWER_LOCK_NONE;
+    uint32_t              _ownerLocks[LOCK_OWNER_COUNT] = {0};
     DisplayPowerState     _displayState        = DISPLAY_POWER_ACTIVE;
 
     uint32_t              _lastActivityMs      = 0;
@@ -70,12 +81,21 @@ private:
     bool                  _ambientClockEnabled = false;
 
     // Backlight ramp
+    int                   _userBrightnessPercent = 80;
     uint8_t               _targetDuty          = 204; // 80% default
     uint8_t               _currentDuty         = 204;
     bool                  _wifiSleepEnabled    = false;
     bool                  _paStandbyDone       = false;
     bool                  _usbPerfMax          = true;
     SemaphoreHandle_t     _lockMutex           = nullptr;
+
+    void _recalcLocks() {
+        uint32_t combined = 0;
+        for (uint8_t i = 0; i < LOCK_OWNER_COUNT; i++) {
+            combined |= _ownerLocks[i];
+        }
+        _locks = combined;
+    }
 
 public:
     void setWakeCallback(std::function<void()> cb) { _wakeCb = cb; }
@@ -85,10 +105,7 @@ public:
     }
 
     int getUserBrightnessPercent() const {
-        if (_prefs) {
-            return _prefs->getInt("brightness", 80);
-        }
-        return 80;
+        return _userBrightnessPercent;
     }
 
     bool isBatteryPresent() const {
@@ -96,7 +113,7 @@ public:
     }
 
     bool isUsbPowered() const {
-        return !isBatteryPresent() || (_battery && (_battery->isCharging() || _battery->isFull()));
+        return !isBatteryPresent() || (_battery && _battery->isCharging());
     }
 
     bool isUsbPerfMax() const {
@@ -135,6 +152,7 @@ public:
             _autoOffSec = _prefs->getUInt("auto_off", 900);
             _ambientClockEnabled = _prefs->getBool("ambient_clock", false);
             _usbPerfMax = _prefs->getBool("usb_perf", true);
+            _userBrightnessPercent = constrain(_prefs->getInt("brightness", 80), 1, 100);
         }
 
         int userBr = getUserBrightnessPercent();
@@ -147,15 +165,21 @@ public:
     }
 
     // ── Lock Management ──────────────────────────────────────────
-    void acquireLock(uint32_t mask) {
+    void acquireLock(uint32_t mask, PowerLockOwner owner = LOCK_OWNER_SYSTEM) {
         if (_lockMutex) xSemaphoreTake(_lockMutex, portMAX_DELAY);
-        _locks |= mask;
+        if ((uint8_t)owner < LOCK_OWNER_COUNT) {
+            _ownerLocks[owner] |= mask;
+        }
+        _recalcLocks();
         if (_lockMutex) xSemaphoreGive(_lockMutex);
     }
 
-    void releaseLock(uint32_t mask) {
+    void releaseLock(uint32_t mask, PowerLockOwner owner = LOCK_OWNER_SYSTEM) {
         if (_lockMutex) xSemaphoreTake(_lockMutex, portMAX_DELAY);
-        _locks &= ~mask;
+        if ((uint8_t)owner < LOCK_OWNER_COUNT) {
+            _ownerLocks[owner] &= ~mask;
+        }
+        _recalcLocks();
         if (_lockMutex) xSemaphoreGive(_lockMutex);
     }
 
@@ -282,9 +306,23 @@ public:
         delay(100);
 
         // 7. If USB power is attached, the board remains powered.
-        // Fallback into ESP32-S3 Deep Sleep with wake-up on PWR button (GPIO 5) or BOOT (GPIO 0).
+        // USB fallback: all three active-low RTC GPIO buttons can wake the chip.
         Serial.println("[power] USB power active or fallback; entering Deep Sleep with GPIO wake...");
-        esp_sleep_enable_ext1_wakeup((1ULL << POKO_PIN_BTN_PWR) | (1ULL << POKO_PIN_BTN_DOWN), ESP_EXT1_WAKEUP_ANY_LOW);
+        // Wait for the shutdown gesture to release, otherwise ANY_LOW wakes
+        // immediately. RTC pull-ups keep the active-low inputs stable in sleep.
+        uint32_t releaseStart = millis();
+        while ((digitalRead(POKO_PIN_BTN_PWR) == LOW || digitalRead(POKO_PIN_BTN_DOWN) == LOW ||
+                digitalRead(POKO_PIN_BTN_UP) == LOW) && millis() - releaseStart < 3000) {
+            esp_task_wdt_reset();
+            delay(10);
+        }
+        uint64_t wakeMask = 0;
+        for (int pin : {POKO_PIN_BTN_PWR, POKO_PIN_BTN_DOWN, POKO_PIN_BTN_UP}) {
+            rtc_gpio_pullup_en((gpio_num_t)pin);
+            rtc_gpio_pulldown_dis((gpio_num_t)pin);
+            if (digitalRead(pin) != LOW) wakeMask |= 1ULL << pin;
+        }
+        if (wakeMask) esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
         esp_deep_sleep_start();
     }
 
@@ -327,11 +365,11 @@ public:
 
             if (isRendering) {
                 _lastAudioActiveMs = now;
-                acquireLock(POWER_LOCK_AUDIO);
+                acquireLock(POWER_LOCK_AUDIO, LOCK_OWNER_AUDIO);
 
                 // SSync and Video only lock low-latency Wi-Fi while actively rendering
                 if (src == AUDIO_SSYNC || src == AUDIO_VIDEO) {
-                    acquireLock(POWER_LOCK_REALTIME_NET);
+                    acquireLock(POWER_LOCK_REALTIME_NET, LOCK_OWNER_AUDIO);
                 }
 
                 // If speaker amp was in standby, wake it up cleanly
@@ -341,11 +379,9 @@ public:
                 }
             } else {
                 // Audio is not actively rendering: allow Wi-Fi modem sleep on battery
-                releaseLock(POWER_LOCK_REALTIME_NET);
+                releaseLock(POWER_LOCK_REALTIME_NET, LOCK_OWNER_AUDIO);
 
-                if (src == AUDIO_NONE) {
-                    releaseLock(POWER_LOCK_AUDIO);
-                }
+                releaseLock(POWER_LOCK_AUDIO, LOCK_OWNER_AUDIO);
 
                 // Put speaker amp to standby after 3 seconds of continuous audio idle
                 if (!_paStandbyDone && (now - _lastAudioActiveMs >= 3000)) {
@@ -422,21 +458,35 @@ public:
     }
 
     // ── Setters & Getters for Settings / API ─────────────────────
-    void setDimTimeout(uint32_t sec) {
+    void setBrightnessPercent(int pct, bool persist = true) {
+        pct = constrain(pct, 1, 100);
+        _userBrightnessPercent = pct;
+        if (persist && _prefs) _prefs->putInt("brightness", pct);
+        if (_displayState == DISPLAY_POWER_ACTIVE) {
+            _targetDuty = percentToDuty(pct);
+            _currentDuty = _targetDuty;
+            setBacklight(_currentDuty);
+        } else if (_displayState == DISPLAY_POWER_DIMMED) {
+            int dimmedPct = max(5, pct / 4);
+            _targetDuty = percentToDuty(dimmedPct);
+        }
+    }
+
+    void setDimTimeout(uint32_t sec, bool persist = true) {
         _dimTimeoutSec = sec;
-        if (_prefs) _prefs->putUInt("dim_timeout", sec);
+        if (persist && _prefs) _prefs->putUInt("dim_timeout", sec);
     }
     uint32_t getDimTimeout() const { return _dimTimeoutSec; }
 
-    void setSleepTimeout(uint32_t sec) {
+    void setSleepTimeout(uint32_t sec, bool persist = true) {
         _sleepTimeoutSec = sec;
-        if (_prefs) _prefs->putUInt("sleep_timeout", sec);
+        if (persist && _prefs) _prefs->putUInt("sleep_timeout", sec);
     }
     uint32_t getSleepTimeout() const { return _sleepTimeoutSec; }
 
-    void setAutoOffTimeout(uint32_t sec) {
+    void setAutoOffTimeout(uint32_t sec, bool persist = true) {
         _autoOffSec = sec;
-        if (_prefs) _prefs->putUInt("auto_off", sec);
+        if (persist && _prefs) _prefs->putUInt("auto_off", sec);
     }
     uint32_t getAutoOffTimeout() const { return _autoOffSec; }
 
@@ -458,7 +508,8 @@ public:
         else          json += "0.0";
         json += ",\"percentage\":";
         if (_battery) json += String(_battery->getPercentage());
-        else          json += "0";
+        else          json += "-1";
+        json += ",\"percentage_source\":\"voltage_estimate\"";
         json += ",\"charging\":";
         json += (_battery && _battery->isCharging()) ? "true" : "false";
         json += ",\"full\":";
@@ -470,7 +521,7 @@ public:
         json += ",\"battery_present\":";
         json += isBatteryPresent() ? "true" : "false";
         json += ",\"usb_powered\":";
-        json += isUsbPowered() ? "true" : "false";
+        json += (!isBatteryPresent() || (_battery && _battery->isCharging())) ? "true" : "null";
         json += ",\"usb_perf_max\":";
         json += _usbPerfMax ? "true" : "false";
 
@@ -505,8 +556,11 @@ public:
         json += isSpeakerAmpEnabled() ? "true" : "false";
         json += ",\"wifi_sleep\":";
         json += _wifiSleepEnabled ? "true" : "false";
+        json += ",\"wifi_sleep_allowed\":";
+        json += (_prefs && _prefs->getBool("wifi_sleep", true)) ? "true" : "false";
 
         json += "}";
         return json;
     }
 };
+

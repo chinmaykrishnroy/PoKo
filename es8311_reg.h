@@ -74,3 +74,4 @@
 #define ES8311_CHD1_REGFD               0xFD /* CHIP ID1 */
 
 #define ES8311_MAX_REGISTER             0xFF
+

@@ -1,14 +1,14 @@
-# Nexus Backend
+# PoKo Backend
 
-Python backend for the XIAO ESP32S3 Nexus device. It indexes local media folders,
+Python backend for the PoKo ESP32-S3 device. It indexes local media folders,
 serves paged JSON libraries for the firmware, switches the ESP32 app, and streams
 audio/video/image content in the formats the current firmware already understands.
 
 ## Quick Start
 
 ```powershell
-cd C:\Users\morph\Documents\Arduino\ECO
-python -m server.nexus_server --config server\config.yml
+cd <project-root>
+python -m server.poko_server --config server\config.yml
 ```
 
 Default server URL:

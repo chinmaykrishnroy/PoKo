@@ -18,7 +18,7 @@
 // ─────────────────────────────────────────────────────────────
 
 extern Preferences prefs;
-extern void handleDriverReset();
+extern bool handleDriverReset();
 extern SnapPlayer* snapService;
 extern PowerManager* powerManager;
 
@@ -33,6 +33,10 @@ private:
     uint8_t  _selected  = 0;
     uint8_t  _scroll    = 0;
     uint32_t _lastBlinkMs = 0;
+    uint32_t _holdStartMs = 0;
+    uint32_t _lastHoldMs = 0;
+    int8_t   _holdDirection = 0;
+    int8_t   _pendingItem = -1;
 
     static constexpr uint8_t ITEM_COUNT   = 16;
     static constexpr uint8_t ROW_H        = 16;
@@ -67,6 +71,48 @@ private:
         }
     }
 
+    void flushHeldValue() {
+        switch (_pendingItem) {
+            case 1: prefs.putInt("master_vol", getMasterVolumeLimit()); break;
+            case 2: if (powerManager) prefs.putInt("brightness", powerManager->getUserBrightnessPercent()); break;
+            case 4: if (powerManager) prefs.putUInt("dim_timeout", powerManager->getDimTimeout()); break;
+            case 5: if (powerManager) prefs.putUInt("sleep_timeout", powerManager->getSleepTimeout()); break;
+            case 6: if (powerManager) prefs.putUInt("auto_off", powerManager->getAutoOffTimeout()); break;
+        }
+        _pendingItem = -1;
+    }
+
+    void adjustHeldValue(int direction) {
+        if (!powerManager || (_selected != 1 && _selected != 2 && _selected != 4 &&
+                              _selected != 5 && _selected != 6)) return;
+        uint32_t now = millis();
+        if (_holdDirection != direction || now - _lastHoldMs > 350) _holdStartMs = now;
+        _holdDirection = direction;
+        _lastHoldMs = now;
+        uint32_t held = now - _holdStartMs;
+        int percentStep = held < 1000 ? 1 : held < 2500 ? 3 : 8;
+        uint32_t secondsStep = held < 1000 ? 5 : held < 2500 ? 30 : 120;
+        uint32_t autoOffStep = held < 1000 ? 60 : held < 2500 ? 300 : 1800;
+        auto adjustSeconds = [&](uint32_t value, uint32_t step) -> uint32_t {
+            const uint32_t maximum = 604800;
+            return direction > 0 ? min(value + step, maximum)
+                                 : (value > step ? value - step : uint32_t{0});
+        };
+        if (_selected == 1) {
+            setMasterVolumeLimit(constrain(getMasterVolumeLimit() + direction * percentStep, 0, 100));
+        } else if (_selected == 2) {
+            powerManager->setBrightnessPercent(powerManager->getUserBrightnessPercent() + direction * percentStep, false);
+        } else if (_selected == 4) {
+            powerManager->setDimTimeout(adjustSeconds(powerManager->getDimTimeout(), secondsStep), false);
+        } else if (_selected == 5) {
+            powerManager->setSleepTimeout(adjustSeconds(powerManager->getSleepTimeout(), secondsStep), false);
+        } else {
+            powerManager->setAutoOffTimeout(adjustSeconds(powerManager->getAutoOffTimeout(), autoOffStep), false);
+        }
+        _pendingItem = _selected;
+        _dirty = true;
+    }
+
 public:
     void renderToCanvas() {
         if (!_canvas) return;
@@ -96,7 +142,7 @@ public:
         _canvas->fillRect(0, TOP_Y, 128, FOOTER_Y - TOP_Y, theme.bg);
         _canvas->setFont(u8g2_font_profont10_mf);
 
-        int curBr      = prefs.getInt("brightness", 80);
+        int curBr      = powerManager ? powerManager->getUserBrightnessPercent() : prefs.getInt("brightness", 80);
         int curMaster  = getMasterVolumeLimit();
         int curBoost   = getAmpBoostDb();
         int curSlide   = prefs.getInt("gallery_timer", 0);
@@ -137,9 +183,8 @@ public:
                 }
                 case 5: {
                     uint32_t st = powerManager ? powerManager->getSleepTimeout() : prefs.getUInt("sleep_timeout", 30);
-                    if (st == 0)      snprintf(valBuf, sizeof(valBuf), "Off");
-                    else if (st < 60) snprintf(valBuf, sizeof(valBuf), "%us", st);
-                    else              snprintf(valBuf, sizeof(valBuf), "%um", st / 60);
+                    if (st == 0) snprintf(valBuf, sizeof(valBuf), "Off");
+                    else         snprintf(valBuf, sizeof(valBuf), "%us", st);
                     break;
                 }
                 case 6: {
@@ -201,7 +246,8 @@ public:
         _canvas->drawFastHLine(0, FOOTER_Y, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(theme.footerText, theme.headerBg);
-        const char* hint = "L:Prv  R:Nxt  2R:Set";
+        const char* hint = (_selected == 1 || _selected == 2 || _selected == 4 ||
+                            _selected == 5 || _selected == 6) ? "Hold L:- R:+  2R:Set" : "L:Prv  R:Nxt  2R:Set";
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
         _canvas->print(hint);
@@ -230,8 +276,11 @@ public:
                 else if (b <= 60) b = 75;
                 else if (b <= 85) b = 100;
                 else              b = 25;
-                prefs.putInt("brightness", b);
-                setBacklightPercent(b);
+                if (powerManager) powerManager->setBrightnessPercent(b);
+                else {
+                    prefs.putInt("brightness", b);
+                    setBacklightPercent(b);
+                }
                 break;
             }
             case 3: { // Cycle Amp Boost: 0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 0
@@ -398,6 +447,7 @@ public:
 
     void unload() {
         _active = false;
+        flushHeldValue();
         if (_canvas) {
             delete _canvas;
             _canvas = nullptr;
@@ -406,13 +456,17 @@ public:
 
     bool isLoaded() const { return _active; }
 
+    void refreshTheme() { if (_active) renderToCanvas(); }
+
     void onLeft() {
+        flushHeldValue();
         _selected = (_selected == 0) ? (ITEM_COUNT - 1) : (_selected - 1);
         adjustScroll();
         _dirty = true;
     }
 
     void onRight() {
+        flushHeldValue();
         _selected = (_selected + 1) % ITEM_COUNT;
         adjustScroll();
         _dirty = true;
@@ -423,12 +477,17 @@ public:
     }
 
     void onEnter() {
+        flushHeldValue();
         applyAction();
     }
+
+    void onHoldingLeft() { adjustHeldValue(-1); }
+    void onHoldingRight() { adjustHeldValue(1); }
 
     void update() {
         if (!_active) return;
         uint32_t now = millis();
+        if (_pendingItem >= 0 && now - _lastHoldMs >= 500) flushHeldValue();
         bool audioBlinking = (audioManager && (audioManager->isSoundPlaying() || audioManager->hasError()));
         if (audioBlinking && (now - _lastBlinkMs >= 100)) {
             _lastBlinkMs = now;
@@ -440,3 +499,4 @@ public:
         }
     }
 };
+

@@ -3,6 +3,8 @@
 #include <Preferences.h>
 #include <WiFi.h>
 #include <LittleFS.h>
+#include <TJpg_Decoder.h>
+#include <esp_heap_caps.h>
 #include "PokoAppState.h"
 #include "PokoDrivers.h"
 #include "PokoWebUI.h"
@@ -21,18 +23,20 @@
 
 extern AppState activeApp;
 extern void onAppChange(AppState newState);
+extern void refreshActiveAppTheme();
 extern InfoApp* infoAppInstance;
 extern SSyncApp* ssyncAppInstance;
 extern MusicApp* musicAppInstance;
 extern VideoApp* videoAppInstance;
 extern GalleryApp* galleryAppInstance;
-extern void handleDriverReset();
+extern bool handleDriverReset();
 extern void onBtnLeft();
 extern void onBtnRight();
 extern void onBtnLeftDouble();
 extern void onBtnRightDouble();
 extern BatteryManager batteryManager;
 extern PowerManager* powerManager;
+extern AudioManager* audioManager;
 
 class PokoAPI {
 private:
@@ -40,6 +44,21 @@ private:
     Preferences* _prefs;
     bool         _uploadSuccess = false;
     String       _uploadErrMsg  = "";
+
+    static bool validateJpegBlock(int16_t, int16_t, uint16_t, uint16_t, uint16_t*) {
+        return true;
+    }
+
+    static bool isDecodableJpeg(const uint8_t* bytes, size_t size) {
+        if (size < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8 ||
+            bytes[size - 2] != 0xFF || bytes[size - 1] != 0xD9) return false;
+        uint16_t width = 0, height = 0;
+        if (TJpgDec.getJpgSize(&width, &height, bytes, size) != JDR_OK ||
+            width == 0 || height == 0 || width > 2048 || height > 2048) return false;
+        TJpgDec.setJpgScale(1);
+        TJpgDec.setCallback(validateJpegBlock);
+        return TJpgDec.drawJpg(0, 0, bytes, size) == JDR_OK;
+    }
 
 public:
     PokoAPI(WebServer* srv, Preferences* prf)
@@ -62,6 +81,7 @@ public:
             json += "\"psram_free\":" + String(ESP.getFreePsram()) + ",";
             json += "\"uptime_ms\":" + String(millis()) + ",";
             json += "\"cpu_mhz\":" + String(getCpuFrequencyMhz()) + ",";
+            json += "\"firmware_version\":\"v1.3.2\",";
             json += "\"app_state\":" + String((int)activeApp) + ",";
             json += "\"theme\":\"" + String(isDarkTheme() ? "dark" : "light") + "\",";
             json += "\"master_vol\":" + String(getMasterVolumeLimit()) + ",";
@@ -69,7 +89,7 @@ public:
             json += "\"brightness\":" + String(_prefs->getInt("brightness", 80)) + ",";
             json += "\"amp_boost\":" + String(getAmpBoostDb()) + ",";
             json += "\"gallery_timer\":" + String(_prefs->getInt("gallery_timer", 0)) + ",";
-            String snapHost = _prefs->getString("snap_host", "192.168.0.20");
+            String snapHost = _prefs->getString("snap_host", "");
             int snapPort = _prefs->getInt("snap_port", 1704);
             json += "\"snap_host\":\"" + escapeJson(snapHost) + "\",";
             json += "\"snap_port\":" + String(snapPort) + ",";
@@ -102,13 +122,19 @@ public:
         _server->on("/api/sys", HTTP_GET, [this]() {
             if (_server->hasArg("brightness")) {
                 int b = constrain(_server->arg("brightness").toInt(), 1, 100);
-                _prefs->putInt("brightness", b);
-                setBacklightPercent(b);
+                if (powerManager) powerManager->setBrightnessPercent(b);
+                else {
+                    _prefs->putInt("brightness", b);
+                    setBacklightPercent(b);
+                }
             }
             if (_server->hasArg("volume")) {
                 int v = constrain(_server->arg("volume").toInt(), 0, 100);
-                _prefs->putInt("volume", v);
-                setScaledVolume(v);
+                if (audioManager) audioManager->setVolume(v, true);
+                else {
+                    _prefs->putInt("volume", v);
+                    setScaledVolume(v);
+                }
             }
             if (_server->hasArg("master_vol")) {
                 int mv = constrain(_server->arg("master_vol").toInt(), 1, 100);
@@ -139,16 +165,25 @@ public:
             }
 
             if (_server->hasArg("dim_timeout")) {
-                powerManager->setDimTimeout(_server->arg("dim_timeout").toInt());
+                long value = _server->arg("dim_timeout").toInt();
+                powerManager->setDimTimeout((uint32_t)constrain(value, 0L, 604800L));
             }
             if (_server->hasArg("sleep_timeout")) {
-                powerManager->setSleepTimeout(_server->arg("sleep_timeout").toInt());
+                long value = _server->arg("sleep_timeout").toInt();
+                powerManager->setSleepTimeout((uint32_t)constrain(value, 0L, 604800L));
             }
             if (_server->hasArg("auto_off")) {
-                powerManager->setAutoOffTimeout(_server->arg("auto_off").toInt());
+                long value = _server->arg("auto_off").toInt();
+                powerManager->setAutoOffTimeout((uint32_t)constrain(value, 0L, 604800L));
             }
             if (_server->hasArg("ambient_clock")) {
                 powerManager->setAmbientClock(_server->arg("ambient_clock").toInt() != 0);
+            }
+            if (_server->hasArg("usb_perf")) {
+                powerManager->setUsbPerfMax(_server->arg("usb_perf").toInt() != 0);
+            }
+            if (_server->hasArg("wifi_sleep")) {
+                _prefs->putBool("wifi_sleep", _server->arg("wifi_sleep").toInt() != 0);
             }
 
             if (_server->hasArg("screen")) {
@@ -185,12 +220,10 @@ public:
         _server->on("/api/theme", HTTP_GET, [this]() {
             if (_server->hasArg("mode")) {
                 String m = _server->arg("mode");
-                if (m == "dark") {
-                    setPokoTheme(true);
-                    _prefs->putString("ui_theme", "dark");
-                } else if (m == "light") {
-                    setPokoTheme(false);
-                    _prefs->putString("ui_theme", "light");
+                if (m == "dark" || m == "light") {
+                    setPokoTheme(m == "dark");
+                    _prefs->putString("ui_theme", m);
+                    refreshActiveAppTheme();
                 }
             }
             String mode = isDarkTheme() ? "dark" : "light";
@@ -371,7 +404,8 @@ public:
                 }
             } else {
                 String err = (_uploadErrMsg.length() > 0) ? _uploadErrMsg : "Upload write failed";
-                _server->send(500, "application/json", "{\"ok\":false,\"error\":\"" + escapeJson(err) + "\"}");
+                int code = (err == "Invalid or incomplete JPEG" || err == "Empty file received" || err == "File size exceeds 64 KB limit") ? 400 : 500;
+                _server->send(code, "application/json", "{\"ok\":false,\"error\":\"" + escapeJson(err) + "\"}");
             }
         }, [this]() {
             HTTPUpload& upload = _server->upload();
@@ -400,7 +434,9 @@ public:
                 int bslash = fname.lastIndexOf('\\');
                 if (bslash >= 0) fname = fname.substring(bslash + 1);
                 if (fname.length() == 0) fname = "photo_" + String(millis()) + ".jpg";
-                if (!fname.endsWith(".jpg") && !fname.endsWith(".jpeg")) fname += ".jpg";
+                String lowerName = fname;
+                lowerName.toLowerCase();
+                if (!lowerName.endsWith(".jpg") && !lowerName.endsWith(".jpeg")) fname += ".jpg";
 
                 targetPath = "/photos/" + fname;
                 Serial.printf("[gallery] start upload %s -> /photos/upload.tmp\n", targetPath.c_str());
@@ -445,6 +481,21 @@ public:
                     _uploadErrMsg = "File size exceeds 64 KB limit";
                     LittleFS.remove("/photos/upload.tmp");
                 } else if (_uploadSuccess) {
+                    File candidate = LittleFS.open("/photos/upload.tmp", "r");
+                    size_t size = candidate ? candidate.size() : 0;
+                    bool valid = size >= 4 && size <= MAX_GALLERY_SIZE && size == upload.totalSize;
+                    uint8_t* jpeg = valid ? (uint8_t*)heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : nullptr;
+                    if (valid && !jpeg) jpeg = (uint8_t*)malloc(size);
+                    if (jpeg) valid = candidate.read(jpeg, size) == size && isDecodableJpeg(jpeg, size);
+                    else valid = false;
+                    if (jpeg) free(jpeg);
+                    if (candidate) candidate.close();
+                    if (!valid) {
+                        _uploadSuccess = false;
+                        _uploadErrMsg = "Invalid or incomplete JPEG";
+                        LittleFS.remove("/photos/upload.tmp");
+                        return;
+                    }
                     if (targetPath.length() > 0) {
                         String backupPath = targetPath + ".bak";
                         bool hadPrevious = LittleFS.exists(targetPath);
@@ -522,16 +573,39 @@ public:
                 else if (appName == "info") onAppChange(STATE_INFO);
                 else if (appName == "clock") onAppChange(STATE_CLOCK);
                 else if (appName == "video" || appName == "video_ui") onAppChange(STATE_VIDEO_UI);
-                else if (appName == "audio" || appName == "music" || appName == "audio_ui" || appName == "music_ui") onAppChange(STATE_MUSIC_UI);
+                else if (appName == "audio") {
+                    onAppChange(STATE_MUSIC_UI);
+                    if (!musicAppInstance || !musicAppInstance->prepareRemoteStream()) {
+                        _server->send(503, "application/json", "{\"ok\":false,\"error\":\"audio listener could not start\"}");
+                        return;
+                    }
+                }
+                else if (appName == "music" || appName == "audio_ui" || appName == "music_ui") onAppChange(STATE_MUSIC_UI);
                 else if (appName == "ssync" || appName == "snap" || appName == "snapclient") onAppChange(STATE_SSYNC);
                 else if (appName == "gallery" || appName == "gallery_ui") onAppChange(STATE_GALLERY_UI);
                 else if (appName == "pixels" || appName == "pixel") onAppChange(STATE_PIXELS_UI);
                 else if (appName == "settings" || appName == "settings_ui") onAppChange(STATE_SETTINGS_UI);
-            } else if (_server->hasArg("state")) {
-                int s = _server->arg("state").toInt();
-                if (s >= 0 && s < STATE_COUNT) {
-                    onAppChange((AppState)s);
+                else if (appName == "sync") {
+                    onAppChange(STATE_VIDEO_UI);
+                    if (!videoAppInstance || !videoAppInstance->prepareRemoteStream()) {
+                        _server->send(503, "application/json", "{\"ok\":false,\"error\":\"video listener could not start\"}");
+                        return;
+                    }
+                } else {
+                    _server->send(400, "application/json", "{\"ok\":false,\"error\":\"unsupported app\"}");
+                    return;
                 }
+            } else if (_server->hasArg("state")) {
+                String stateValue = _server->arg("state");
+                int s = stateValue.toInt();
+                if (stateValue != String(s) || s < 0 || s >= STATE_COUNT) {
+                    _server->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid app state\"}");
+                    return;
+                }
+                onAppChange((AppState)s);
+            } else {
+                _server->send(400, "application/json", "{\"ok\":false,\"error\":\"missing app\"}");
+                return;
             }
             _server->send(200, "application/json", "{\"ok\":true,\"app\":" + String((int)activeApp) + "}");
         });
@@ -740,9 +814,12 @@ public:
         // WiFi credentials save & reconnect (reboot)
         _server->on("/api/wifi", HTTP_POST, [this]() {
             String s = "";
-            String p = "12345678";
+            String p = "";
             if (_server->hasArg("ssid")) s = _server->arg("ssid");
             if (_server->hasArg("pass")) p = _server->arg("pass");
+            if (p.length() == 0 && s == _prefs->getString("wifi_ssid", "")) {
+                p = _prefs->getString("wifi_pass", "");
+            }
 
             if (s.length() > 0) {
                 Serial.printf("[api] saving WiFi SSID: %s\n", s.c_str());
@@ -759,8 +836,10 @@ public:
 
         // Driver reset
         _server->on("/api/reset", HTTP_GET, [this]() {
-            handleDriverReset();
-            _server->send(200, "application/json", "{\"ok\":true,\"msg\":\"Drivers reset\"}");
+            bool reset = handleDriverReset();
+            _server->send(reset ? 200 : 503, "application/json",
+                          reset ? "{\"ok\":true,\"msg\":\"Drivers reset\"}"
+                                : "{\"ok\":false,\"error\":\"Media worker did not stop; drivers were not reset\"}");
         });
 
         // Reboot
@@ -772,3 +851,4 @@ public:
         });
     }
 };
+

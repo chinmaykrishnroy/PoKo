@@ -7,6 +7,38 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v1.3.2] — 2026-09-30
+
+### Fixed
+- Physical L/R doubles now use the documented 450 ms window; GPIO initialization
+  is deferred to setup and a 5 ms input worker queues actions for the main loop.
+- Any button wakes a sleeping display without triggering its normal action;
+  Right also participates in deep-sleep wake. Unused PWR double recognition removed.
+- Info Hold-R refreshes metrics; repeat holds cannot change volume in unrelated apps.
+- Audio ownership transitions no longer hold the state mutex while waiting for
+  SSync workers, and failed worker shutdown cannot hand I2S to another producer.
+- Video changes stop old transports before resetting buffers; startup errors
+  recover to the browser. Backend stop unblocks senders, and silent clips keep
+  the embedded player's NAV1 video transport.
+- Gallery and Video use a bounded Music-style title marquee; Gallery allows a
+  complete long-title pass before entering fullscreen.
+- Windows backend bind is exclusive so a second server cannot start workers on
+  an already occupied port.
+- Hardened backend config parsing/round-tripping, atomic reloads, database-path changes, and invalid-request handling.
+- Prevented partial media scans from purging the catalog; fixed case-sensitive media IDs and automatic migration of legacy ID collisions.
+- Hardened FFmpeg lifecycle handling, failed device switches, process cleanup, safe image durations, and synchronized-stream shutdown.
+- Fixed camera JPEG validation/listing edge cases and configuration serialization duplication.
+- Hardened firmware audio ownership, TCP/SyncedAV worker shutdown, driver reset safety, brightness/volume state synchronization, and power-setting bounds.
+- Restored host-side OneButton test support and expanded regression coverage for the repaired failure modes.
+
+### Validation
+- Passed 30 firmware host regressions and 56 backend tests; two case-sensitive
+  filename cases are skipped on Windows.
+- Passed real FFmpeg loopback streaming for audio/video and silent-video NAV1
+  sessions, including sender shutdown between videos.
+- Compiled the ESP32-S3 application image and installed it through Web OTA;
+  the device rebooted and returned a healthy API response.
+
 ## [v1.2.0] — 2026-09-28
 
 ### Added
@@ -26,7 +58,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **InfoApp double-click exit** — Added unified rapid-click timestamp tracking (`INFO_EXIT_MS = 600ms`) across both `L` and `R` buttons. Two quick clicks on either button immediately exit the app, while single clicks smoothly scroll up/down.
 - **Power-aware CPU scaling & Perf indicator** — Implemented dynamic CPU frequency throttling: automatically scales to 160 MHz when running on battery power to conserve energy, and returns to 240 MHz (MaxPerf) when plugged into USB power/charging. Updated InfoApp `Perf` row to reflect the real hardware operational state (`USB/MaxPerf` vs `Batt/160MHz`).
 - **InfoApp footer** updated from `2R:Exit` → `2L/R:Exit` to reflect that either double-click exits.
-- **SSync volume hold triggering mute** — `SSyncApp::onLongRight()` made a no-op; mute/unmute is exclusively triggered by double-R click (`onBtnRightDouble`). Additionally, `ButtonInput` now sets `_upRampFired`/`_downRampFired` flags when the volume ramp starts (450 ms hold), which suppresses OneButton's long-press callback (650 ms) for the same physical hold — eliminates the race entirely.
+- **SSync volume hold triggering mute** — `SSyncApp::onLongRight()` made a no-op; mute/unmute is exclusively triggered by double-R click (`onBtnRightDouble`). Additionally, `ButtonInput` routes long-press callbacks into hold-repeat events only when hold-repeat is enabled, preventing a volume hold from also triggering the mute action.
 - **Light theme accent visibility** — Changed light theme accent from `0x001F` (blue, invisible on white) to `0x01F4` (Deep Royal Navy/Teal).
 - **Screen black-flash on app switch** — `onAppChange()` now calls `showThemedLoadingScreen()` before `load()`, replacing the abrupt black flash with a themed transition frame.
 - **Launcher tile switch** — Uses `fillScreen(theme.bg)` instead of loading screen for instant-feel home navigation.
@@ -79,3 +111,4 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **AudioManager** — Exclusive audio session model: only one audio source active at a time; status dot on status bar.
 - **Power management** — Battery low-voltage cutoff, auto-sleep, screen brightness control.
 - **NVS persistence** — Volume, brightness, theme, gallery timer, SSync auto-connect saved across reboots.
+

@@ -34,6 +34,7 @@ extern BatteryManager batteryManager;
 extern PowerManager* powerManager;
 extern AudioManager* audioManager;
 extern String getNetworkStatusMsg();
+extern String apPassword;
 
 class InfoApp {
 private:
@@ -60,7 +61,7 @@ private:
 
     void buildRows() {
         _rowCount = 0;
-        auto add = [&](const char* lbl, String val, uint16_t col = POKO_CLR_TEXT) {
+        auto add = [&](const char* lbl, String val, uint16_t col = currentTheme().text) {
             if (_rowCount >= 32) return;
             strncpy(_rows[_rowCount].label, lbl, 13);
             _rows[_rowCount].label[13] = '\0';
@@ -71,6 +72,10 @@ private:
         };
 
         char buf[24];
+        if ((WiFi.getMode() & WIFI_AP) && apPassword.length() == 8) {
+            add("AP SSID:", "POKO_SETUP", pokoClrCyan());
+            add("AP pswd:", apPassword, pokoClrCyan());
+        }
 
         // 1. Battery & Power Subsystem
         if (batteryManager.isPresent()) {
@@ -82,7 +87,7 @@ private:
             add("Bat", buf, batCol);
 
             const char* stateStr = chg ? "Charging" : (batteryManager.isFull() ? "Full" : (batteryManager.isCritical() ? "Critical" : "Dischg"));
-            add("State", stateStr, chg ? pokoClrGreen() : (batteryManager.isCritical() ? pokoClrErr() : POKO_CLR_TEXT));
+            add("State", stateStr, chg ? pokoClrGreen() : (batteryManager.isCritical() ? pokoClrErr() : currentTheme().text));
         } else {
             add("Bat", "None (USB)", pokoClrCyan());
             add("Pwr", "5V VBUS", pokoClrGreen());
@@ -90,12 +95,21 @@ private:
 
         if (powerManager) {
             bool maxPerf = powerManager->isMaxPerfActive();
-            add("Perf", maxPerf ? "USB/MaxPerf" : "Batt/160MHz", maxPerf ? pokoClrGreen() : pokoClrCyan());
+            uint32_t mhz = getCpuFrequencyMhz();
+            char perfBuf[24];
+            if (maxPerf) {
+                snprintf(perfBuf, sizeof(perfBuf), "USB/MaxPerf");
+            } else if (mhz >= 240) {
+                snprintf(perfBuf, sizeof(perfBuf), "Batt/Boost");
+            } else {
+                snprintf(perfBuf, sizeof(perfBuf), "Batt/%uMHz", (unsigned)mhz);
+            }
+            add("Perf", perfBuf, maxPerf ? pokoClrGreen() : (mhz >= 240 ? pokoClrWarn() : pokoClrCyan()));
         }
 
         // 2. Firmware Version & Build
-        add("Ver", "v1.2.0", pokoClrCyan());
-        add("Build", __DATE__, POKO_CLR_DIM);
+        add("Ver", "v1.3.2", pokoClrCyan());
+        add("Build", __DATE__, currentTheme().muted);
 
         // 3. Reset Reason
         esp_reset_reason_t rst = esp_reset_reason();
@@ -106,7 +120,7 @@ private:
         else if (rst == ESP_RST_PANIC) rstStr = "Crash";
         else if (rst == ESP_RST_INT_WDT || rst == ESP_RST_TASK_WDT || rst == ESP_RST_WDT) rstStr = "Watchdog";
         else if (rst == ESP_RST_BROWNOUT) rstStr = "Brownout";
-        add("Reset", rstStr, (rst == ESP_RST_PANIC || rst == ESP_RST_WDT) ? pokoClrErr() : POKO_CLR_DIM);
+        add("Reset", rstStr, (rst == ESP_RST_PANIC || rst == ESP_RST_WDT) ? pokoClrErr() : currentTheme().muted);
 
         // 4. Memory (Heap & PSRAM)
         uint32_t freeH   = ESP.getFreeHeap();
@@ -116,32 +130,32 @@ private:
         add("Heap", buf, freeH < 50000 ? pokoClrWarn() : pokoClrGreen());
 
         snprintf(buf, sizeof(buf), "%u KB", (unsigned)(minH / 1024));
-        add("MinHp", buf, minH < 35000 ? pokoClrWarn() : POKO_CLR_TEXT);
+        add("MinHp", buf, minH < 35000 ? pokoClrWarn() : currentTheme().text);
 
         snprintf(buf, sizeof(buf), "%.2f/8MB", freePSR / (1024.0f * 1024.0f));
-        add("PSRAM", buf, POKO_CLR_TEXT);
+        add("PSRAM", buf, currentTheme().text);
 
         // 5. Hardware Specifications
         snprintf(buf, sizeof(buf), "%u MHz", (unsigned)getCpuFrequencyMhz());
-        add("CPU", buf, POKO_CLR_TEXT);
+        add("CPU", buf, currentTheme().text);
 
         esp_chip_info_t ci;
         esp_chip_info(&ci);
         snprintf(buf, sizeof(buf), "S3 r%d", ci.revision);
-        add("SoC", buf, POKO_CLR_DIM);
+        add("SoC", buf, currentTheme().muted);
 
         snprintf(buf, sizeof(buf), "%u MB QIO", (unsigned)(ESP.getFlashChipSize() / (1024 * 1024)));
-        add("Flash", buf, POKO_CLR_TEXT);
+        add("Flash", buf, currentTheme().text);
 
         snprintf(buf, sizeof(buf), "%u KB", (unsigned)(ESP.getSketchSize() / 1024));
-        add("AppSz", buf, POKO_CLR_DIM);
+        add("AppSz", buf, currentTheme().muted);
 
         // 6. Display & Power Subsystem
-        add("Disp", "GC9107", POKO_CLR_DIM);
+        add("Disp", "GC9107", currentTheme().muted);
 
         int curBr = powerManager ? powerManager->getUserBrightnessPercent() : 80;
         snprintf(buf, sizeof(buf), "%d%%", curBr);
-        add("BLite", buf, POKO_CLR_TEXT);
+        add("BLite", buf, currentTheme().text);
 
         const char* dispPwr = "Active";
         if (powerManager) {
@@ -163,10 +177,10 @@ private:
             if (locks & POWER_LOCK_OTA) lStr += "OTA ";
             snprintf(buf, sizeof(buf), "%s", lStr.c_str());
         }
-        add("Locks", buf, locks ? pokoClrWarn() : POKO_CLR_DIM);
+        add("Locks", buf, locks ? pokoClrWarn() : currentTheme().muted);
 
         // 7. Audio Subsystem
-        add("Codec", "ES8311", POKO_CLR_DIM);
+        add("Codec", "ES8311", currentTheme().muted);
         const char* aSrc = "Idle";
         if (audioManager) {
             AudioSource as = audioManager->activeSource();
@@ -174,32 +188,33 @@ private:
             else if (as == AUDIO_MUSIC) aSrc = "Music";
             else if (as == AUDIO_VIDEO) aSrc = "Video";
         }
-        add("Audio", aSrc, (audioManager && audioManager->activeSource() != AUDIO_NONE) ? pokoClrGreen() : POKO_CLR_DIM);
+        add("Audio", aSrc, (audioManager && audioManager->activeSource() != AUDIO_NONE) ? pokoClrGreen() : currentTheme().muted);
 
-        add("Amp", isSpeakerAmpEnabled() ? "Active" : "Standby", isSpeakerAmpEnabled() ? pokoClrGreen() : POKO_CLR_DIM);
+        add("Amp", isSpeakerAmpEnabled() ? "Active" : "Standby", isSpeakerAmpEnabled() ? pokoClrGreen() : currentTheme().muted);
 
         snprintf(buf, sizeof(buf), "%d%% +%ddB", getCurrentAppVolume(), getAmpBoostDb());
-        add("Vol", buf, POKO_CLR_TEXT);
+        add("Vol", buf, currentTheme().text);
 
         // 8. Network (Wi-Fi & Storage)
-        String ip = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "No STA";
+        String ip = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() :
+                    (WiFi.getMode() & WIFI_AP ? WiFi.softAPIP().toString() : "No STA");
         add("IP", ip, pokoClrCyan());
 
         String ssid = WiFi.SSID();
         if (ssid.length() > 12) ssid = ssid.substring(0, 11) + "..";
-        add("SSID", ssid.length() ? ssid : (WiFi.getMode() & WIFI_AP ? "AP_SETUP" : "None"), POKO_CLR_TEXT);
+        add("SSID", ssid.length() ? ssid : (WiFi.getMode() & WIFI_AP ? "POKO_SETUP" : "None"), currentTheme().text);
 
         if (WiFi.status() == WL_CONNECTED) {
             snprintf(buf, sizeof(buf), "%d dBm", WiFi.RSSI());
-            add("RSSI", buf, POKO_CLR_DIM);
+            add("RSSI", buf, currentTheme().muted);
         }
 
         uint8_t mac[6]; WiFi.macAddress(mac);
-        snprintf(buf, sizeof(buf), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-        add("MAC", buf, POKO_CLR_DIM);
+        snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        add("MAC", buf, currentTheme().muted);
 
         snprintf(buf, sizeof(buf), "%u/%uKB", (unsigned)(LittleFS.usedBytes() / 1024), (unsigned)(LittleFS.totalBytes() / 1024));
-        add("FS", buf, POKO_CLR_DIM);
+        add("FS", buf, currentTheme().muted);
 
         // 9. Time & Uptime
         uint32_t sec = millis() / 1000;
@@ -207,7 +222,7 @@ private:
                  (unsigned long)(sec / 3600),
                  (unsigned long)((sec % 3600) / 60),
                  (unsigned long)(sec % 60));
-        add("Uptime", buf, POKO_CLR_TEXT);
+        add("Uptime", buf, currentTheme().text);
 
         time_t now;
         time(&now);
@@ -226,7 +241,7 @@ public:
         const auto& theme = currentTheme();
 
         // Header (y=0..13)
-        _canvas->fillRect(0, 0, 128, 13, theme.headerBg);
+        _canvas->fillRect(0, 0, 128, TOP_Y, theme.headerBg);
         _canvas->setFont(u8g2_font_profont10_mf);
         _canvas->setTextColor(theme.headerText, theme.headerBg);
         _canvas->setCursor(3, 10);
@@ -253,6 +268,8 @@ public:
             if (ri >= _rowCount) break;
             int16_t rowY = TOP_Y + i * ROW_H;
             int16_t textY = rowY + ROW_H - 3;
+            bool compact = strcmp(_rows[ri].label, "MAC") == 0;
+            if (compact) _canvas->setFont(u8g2_font_5x7_tf);
 
             if (i % 2 == 0) {
                 _canvas->fillRect(0, rowY, 124, ROW_H, theme.surface);
@@ -275,6 +292,7 @@ public:
             _canvas->setTextColor(_rows[ri].valColor, i % 2 == 0 ? theme.surface : theme.bg);
             _canvas->setCursor(valX, textY);
             _canvas->print(_rows[ri].value);
+            if (compact) _canvas->setFont(u8g2_font_profont10_mf);
         }
 
         // Scroll indicator bar
@@ -330,6 +348,13 @@ public:
     }
 
     bool isLoaded() const { return _active; }
+
+    void refreshTheme() {
+        if (!_active) return;
+        buildRows();
+        _dirty = false;
+        renderToCanvas();
+    }
 
     void onLeft() {
         if (_rowCount <= ROWS_VISIBLE) return;
@@ -414,3 +439,4 @@ public:
         return j;
     }
 };
+

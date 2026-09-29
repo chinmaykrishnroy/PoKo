@@ -120,7 +120,7 @@ public:
             server->sendHeader("Connection", "close");
             bool ok = (!Update.hasError() && Update.isFinished());
             if (!ok) {
-                if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
+                if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY, LOCK_OWNER_OTA);
                 pixelEngine.showOtaError();
                 server->send(500, "text/plain", "FAIL: firmware update failed");
                 if (gfx) {
@@ -142,7 +142,7 @@ public:
                 gfx->setCursor(20, 68);
                 gfx->print("SUCCESS!");
             }
-            if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
+            if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY, LOCK_OWNER_OTA);
             {
                 Preferences p;
                 p.begin("poko", false);
@@ -157,7 +157,7 @@ public:
                 // Wake display to full brightness and hold power lock during OTA
                 if (powerManager) {
                     powerManager->wakeDisplay();
-                    powerManager->acquireLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
+                    powerManager->acquireLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY, LOCK_OWNER_OTA);
                 }
                 if (audioManager) audioManager->stopAll();
                 if (snapService && snapService->isLoaded()) {
@@ -176,7 +176,7 @@ public:
                 if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
                     Update.printError(Serial);
                     pixelEngine.showOtaError();
-                    if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
+                    if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY, LOCK_OWNER_OTA);
                 }
             } else if (upload.status == UPLOAD_FILE_WRITE) {
                 esp_task_wdt_reset(); // Keep watchdog alive during large file writes
@@ -194,7 +194,7 @@ public:
                 }
             } else if (upload.status == UPLOAD_FILE_ABORTED) {
                 Update.abort();
-                if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
+                if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY, LOCK_OWNER_OTA);
                 pixelEngine.showOtaError();
                 if (gfx) {
                     gfx->fillScreen(0xF800);
@@ -210,9 +210,10 @@ public:
                 } else {
                     Update.printError(Serial);
                     pixelEngine.showOtaError();
-                    if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY);
+                    if (powerManager) powerManager->releaseLock(POWER_LOCK_OTA | POWER_LOCK_DISPLAY, LOCK_OWNER_OTA);
                 }
             }
         });
     }
 };
+

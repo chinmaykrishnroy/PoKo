@@ -7,3 +7,4 @@ PyYAML>=6.0.2
 # pillow>=11.0
 # mutagen>=1.47
 # pytest>=8.0
+

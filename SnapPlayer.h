@@ -16,7 +16,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#include <SPIFFS.h>
 #include <ESP8266Audio.h>
+#include <atomic>
 
 extern "C" {
 #include "libflac/FLAC/stream_decoder.h"
@@ -28,16 +30,19 @@ extern String getNetworkStatusMsg();
 // Lock-free Single-Producer / Single-Consumer ring buffer.
 // snapNet task is the SOLE writer (updates _head).
 // snapAudio task is the SOLE reader (updates _tail).
-// No mutex needed — volatile + memory fences give correct ordering on Xtensa SMP.
+// Synchronized using std::atomic with acquire-release memory order.
 class SnapAudioRingBuffer {
 private:
-    uint8_t* _buffer;
-    size_t _capacity;
-    volatile size_t _head;  // written only by producer
-    volatile size_t _tail;  // written only by consumer
+    uint8_t*            _buffer;
+    size_t              _capacity;
+    std::atomic<size_t> _head{0};  // written only by producer
+    std::atomic<size_t> _tail{0};  // written only by consumer
 
 public:
-    SnapAudioRingBuffer() : _buffer(nullptr), _capacity(0), _head(0), _tail(0) {}
+    SnapAudioRingBuffer() : _buffer(nullptr), _capacity(0) {
+        _head.store(0, std::memory_order_relaxed);
+        _tail.store(0, std::memory_order_relaxed);
+    }
 
     ~SnapAudioRingBuffer() {
         freeBuffer();
@@ -54,8 +59,8 @@ public:
         }
         if (!_buffer) return false;
         _capacity = size;
-        _head = 0;
-        _tail = 0;
+        _head.store(0, std::memory_order_relaxed);
+        _tail.store(0, std::memory_order_relaxed);
         return true;
     }
 
@@ -65,22 +70,20 @@ public:
             _buffer = nullptr;
         }
         _capacity = 0;
-        _head = 0;
-        _tail = 0;
+        _head.store(0, std::memory_order_relaxed);
+        _tail.store(0, std::memory_order_relaxed);
     }
 
     // Reset — call only when both producer and consumer tasks are stopped.
     void reset() {
-        _head = 0;
-        _tail = 0;
+        _head.store(0, std::memory_order_relaxed);
+        _tail.store(0, std::memory_order_relaxed);
     }
 
     // Thread-safe drain for consumer task — discards buffered audio without racing producer
     void drain() {
-        size_t h = _head;
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
-        _tail = h;
-        __atomic_thread_fence(__ATOMIC_RELEASE);
+        size_t h = _head.load(std::memory_order_acquire);
+        _tail.store(h, std::memory_order_release);
     }
 
     bool isAllocated() const {
@@ -93,9 +96,8 @@ public:
 
     // Bytes available to read (always 4-byte frame aligned).
     size_t available() const {
-        size_t h = _head;
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
-        size_t t = _tail;
+        size_t h = _head.load(std::memory_order_acquire);
+        size_t t = _tail.load(std::memory_order_relaxed);
         size_t rawAvail = (h >= t) ? (h - t) : (_capacity - (t - h));
         return rawAvail & ~3;
     }
@@ -103,9 +105,8 @@ public:
     // Free bytes available to write (always 4-byte frame aligned, leaving 4-byte gap).
     size_t freeSpace() const {
         if (_capacity == 0) return 0;
-        size_t t = _tail;
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
-        size_t h = _head;
+        size_t t = _tail.load(std::memory_order_acquire);
+        size_t h = _head.load(std::memory_order_relaxed);
         size_t used = (h >= t) ? (h - t) : (_capacity - (t - h));
         if (_capacity <= used + 4) return 0;
         return (_capacity - used - 4) & ~3;
@@ -117,15 +118,14 @@ public:
         size_t toWrite = min(len, freeSpace()) & ~3;
         if (toWrite == 0) return 0;
 
-        size_t h = _head;
+        size_t h = _head.load(std::memory_order_relaxed);
         size_t firstChunk = min(toWrite, _capacity - h);
         memcpy(_buffer + h, data, firstChunk);
         if (toWrite > firstChunk) {
             memcpy(_buffer, data + firstChunk, toWrite - firstChunk);
         }
 
-        __atomic_thread_fence(__ATOMIC_RELEASE);
-        _head = (h + toWrite) % _capacity;
+        _head.store((h + toWrite) % _capacity, std::memory_order_release);
         return toWrite;
     }
 
@@ -135,15 +135,14 @@ public:
         size_t toRead = min(len, available()) & ~3;
         if (toRead == 0) return 0;
 
-        size_t t = _tail;
+        size_t t = _tail.load(std::memory_order_relaxed);
         size_t firstChunk = min(toRead, _capacity - t);
         memcpy(dest, _buffer + t, firstChunk);
         if (toRead > firstChunk) {
             memcpy(dest + firstChunk, _buffer, toRead - firstChunk);
         }
 
-        __atomic_thread_fence(__ATOMIC_RELEASE);
-        _tail = (t + toRead) % _capacity;
+        _tail.store((t + toRead) % _capacity, std::memory_order_release);
         return toRead;
     }
 };
@@ -1705,7 +1704,7 @@ private:
 
 public:
     SnapPlayer(void* display = nullptr, Preferences* prefs = nullptr, float initialVolume = 0.8f)
-        : _tft(display), _prefs(prefs), _serverHost("192.168.0.20"), _serverPort(1704), _customLatencyMs(0),
+        : _tft(display), _prefs(prefs), _serverHost(""), _serverPort(1704), _customLatencyMs(0),
           _volume(initialVolume), _isRunning(false), _isLoaded(false), _connected(false),
           _syncing(false), _playStarted(false), _playReleased(false), _isSuspended(false), _netTaskHandle(NULL),
           _audioTaskHandle(NULL), _netTaskDone(nullptr), _audioTaskDone(nullptr),
@@ -1748,7 +1747,7 @@ public:
         }
 
         if (_prefs) {
-            _serverHost = _prefs->getString("snap_host", "192.168.0.20");
+            _serverHost = _prefs->getString("snap_host", "");
             _serverPort = (uint16_t)_prefs->getInt("snap_port", 1704);
             _customLatencyMs = _prefs->getInt("snap_lat", 0);
             _volume = constrain(_prefs->getInt("volume", 75) / 100.0f, 0.0f, 1.0f);
@@ -1833,16 +1832,14 @@ public:
 
         if (!_netTaskStarted || !_audioTaskStarted) {
             Serial.println("[snap] Startup incomplete; shutting SnapPlayer down");
-            _isLoaded = false;
-            unload();
+            shutdownWorkersAndResources();
             return;
         }
 
         _isLoaded = true;
     }
 
-    void unload() {
-        if (!_isLoaded) return;
+    void shutdownWorkersAndResources() {
         Serial.println("[snap] unload: stopping");
 
         // Tell workers to exit.
@@ -1865,9 +1862,17 @@ public:
         Serial.printf("[snap] unload workers: net=%d audio=%d\n", netStopped, audioStopped);
 
         if (!netStopped || !audioStopped) {
-            Serial.println("[snap] ERROR: worker failed to stop cleanly, skipping dealloc");
-            return;
+            Serial.println("[snap] ERROR: worker failed to stop cleanly, force terminating tasks");
+            if (!netStopped && _netTaskHandle != nullptr) {
+                vTaskDelete(_netTaskHandle);
+            }
+            if (!audioStopped && _audioTaskHandle != nullptr) {
+                vTaskDelete(_audioTaskHandle);
+            }
         }
+
+        _netTaskHandle = nullptr;
+        _audioTaskHandle = nullptr;
 
         cleanupFlacDecoder();
         cleanupOpusDecoder();
@@ -1897,6 +1902,11 @@ public:
         _audioFault = false;
 
         Serial.println("[snap] unload complete");
+    }
+
+    void unload() {
+        if (!_isLoaded && !_netTaskStarted && !_audioTaskStarted && !_pcmBuf.isAllocated()) return;
+        shutdownWorkersAndResources();
     }
 
     bool isLoaded() const { return _isLoaded; }
@@ -2005,7 +2015,7 @@ public:
     }
 
     void recover() {
-        if (!_isLoaded) return;
+        if (!_isLoaded && !_netTaskStarted && !_audioTaskStarted) return;
 
         unload();
         if (!_isLoaded) {
@@ -2148,3 +2158,4 @@ public:
         }
     }
 };
+

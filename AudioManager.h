@@ -3,6 +3,8 @@
 #include <U8g2lib.h>
 #include <Arduino_GFX_Library.h>
 #include <Preferences.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include "PokoAppState.h"
 #include "PokoDrivers.h"
 #include "PokoTheme.h"
@@ -28,6 +30,16 @@ typedef const char* (*AudioStrFn)();
 
 class AudioManager {
 private:
+    struct MutexLock {
+        SemaphoreHandle_t m;
+        MutexLock(SemaphoreHandle_t mutex) : m(mutex) {
+            if (m) xSemaphoreTakeRecursive(m, portMAX_DELAY);
+        }
+        ~MutexLock() {
+            if (m) xSemaphoreGiveRecursive(m);
+        }
+    };
+
     static inline AudioManager* _instance = nullptr;
     AudioSource   _activeSource       = AUDIO_NONE;
     AudioSource   _suspendedSource    = AUDIO_NONE;
@@ -45,76 +57,70 @@ private:
     AudioStrFn    _musicGetTitleFn    = nullptr;
     AudioQueryFn  _musicErrorFn       = nullptr;
     AudioActionFn _videoStopFn        = nullptr;
+    AudioQueryFn  _videoStoppedFn     = nullptr;
 
-    void deactivateSource(AudioSource src, bool suspend = false) {
-        if (src == AUDIO_NONE) return;
-        Serial.printf("[audioMgr] deactivating source %d (suspend=%d)\n", (int)src, (int)suspend);
-        if (src == AUDIO_SSYNC) {
-            if (_snapPlayer && _snapPlayer->isLoaded()) {
-                if (suspend) {
-                    _snapPlayer->suspendAudio();
-                    if (!_snapPlayer->waitForSuspend(200)) {
-                        Serial.println("[audioMgr] WARNING: suspend timed out waiting for snapAudio to release I2S");
-                    }
-                } else {
-                    _snapPlayer->stop();
-                    _snapPlayer->unload();
+    // External producer operations may call back from another task. Never hold
+    // _mutex while waiting for them; _transitioning serializes session changes.
+    bool deactivateSource(AudioSource src, bool suspend = false) {
+        if (src == AUDIO_SSYNC && _snapPlayer && _snapPlayer->isLoaded()) {
+            if (suspend) {
+                _snapPlayer->suspendAudio();
+                if (!_snapPlayer->waitForSuspend(1000)) {
+                    Serial.println("[audioMgr] suspend timed out; refusing I2S handoff");
+                    return false;
                 }
+            } else {
+                _snapPlayer->stop();
+                _snapPlayer->unload();
+                if (_snapPlayer->isLoaded()) return false;
             }
         } else if (src == AUDIO_MUSIC) {
             if (_musicStopFn) _musicStopFn();
         } else if (src == AUDIO_VIDEO) {
             if (_videoStopFn) _videoStopFn();
+            if (_videoStoppedFn && !_videoStoppedFn()) return false;
         }
+        return true;
     }
 
     bool activateSource(AudioSource src) {
-        if (src == AUDIO_NONE) return true;
-        Serial.printf("[audioMgr] activating source %d\n", (int)src);
         if (src == AUDIO_SSYNC) {
-            if (_snapPlayer) {
-                if (!_snapPlayer->isLoaded()) {
-                    _snapPlayer->load(true); // Always load suspended first
-                    if (!_snapPlayer->isLoaded()) {
-                        Serial.println("[audioMgr] snapPlayer failed to load suspended");
-                        return false;
-                    }
-                }
-                // Publish ownership BEFORE snapAudio attempts initI2S
-                _activeSource = AUDIO_SSYNC;
-                _snapPlayer->resumeAudio();
-                bool ok = _snapPlayer->waitForAudioReady(1000);
-                if (!ok) {
-                    Serial.println("[audioMgr] SSync audio failed to ready");
-                    _snapPlayer->suspendAudio();
-                    _activeSource = AUDIO_NONE;
-                    return false;
-                }
-                _physicalOwner = AUDIO_SSYNC;
-                return true;
+            if (!_snapPlayer) return false;
+            if (!_snapPlayer->isLoaded()) {
+                _snapPlayer->load(true);
+                if (!_snapPlayer->isLoaded()) return false;
             }
-            return false;
-        } else if (src == AUDIO_MUSIC) {
-            _activeSource = AUDIO_MUSIC;
-            _physicalOwner = AUDIO_MUSIC;
-            return true;
-        } else if (src == AUDIO_VIDEO) {
-            _activeSource = AUDIO_VIDEO;
-            _physicalOwner = AUDIO_VIDEO;
+            {
+                MutexLock lock(_mutex);
+                // Publish before snapAudio's ownership query / initI2S.
+                _activeSource = _physicalOwner = AUDIO_SSYNC;
+            }
+            _snapPlayer->resumeAudio();
+            if (!_snapPlayer->waitForAudioReady(1000)) {
+                _snapPlayer->suspendAudio();
+                bool stopped = _snapPlayer->waitForSuspend(1000);
+                MutexLock lock(_mutex);
+                // Keep ownership attributed to SSync if its worker hasn't
+                // acknowledged stopping. A later request must retry suspension.
+                if (stopped) _activeSource = _physicalOwner = AUDIO_NONE;
+                return false;
+            }
             return true;
         }
+        MutexLock lock(_mutex);
+        _activeSource = _physicalOwner = src;
         return true;
     }
 
 public:
     AudioManager() {
         _instance = this;
-        _mutex = xSemaphoreCreateMutex();
+        _mutex = xSemaphoreCreateRecursiveMutex();
         _volume = getCurrentAppVolume();
     }
 
     static bool isSsyncActiveStatic() {
-        return _instance ? _instance->_activeSource == AUDIO_SSYNC : true;
+        return _instance ? _instance->activeSource() == AUDIO_SSYNC : true;
     }
 
     static void releaseOutputSsyncStatic() {
@@ -126,7 +132,7 @@ public:
     }
 
     void onSourceVolumeChanged(AudioSource src, int vol, bool muted = false) {
-        if (_mutex) xSemaphoreTake(_mutex, portMAX_DELAY);
+        MutexLock lock(_mutex);
         if (_activeSource == src) {
             _volume = constrain(vol, 0, 100);
             _isMuted = muted;
@@ -135,7 +141,6 @@ public:
             _volumeDirty = true;
             _lastVolumeChangeMs = millis();
         }
-        if (_mutex) xSemaphoreGive(_mutex);
     }
 
     void setSnapPlayer(SnapPlayer* p) {
@@ -151,98 +156,85 @@ public:
         _musicGetTitleFn = getTitleFn;
         _musicErrorFn = errorFn;
     }
-    void setVideoHandlers(AudioActionFn stopFn) {
+    void setVideoHandlers(AudioActionFn stopFn, AudioQueryFn stoppedFn = nullptr) {
         _videoStopFn = stopFn;
+        _videoStoppedFn = stoppedFn;
     }
 
-    AudioSource activeSource() const { return _activeSource; }
-    AudioSource suspendedSource() const { return _suspendedSource; }
-    void setSuspendedSource(AudioSource src) { _suspendedSource = src; }
+    AudioSource activeSource() const { MutexLock lock(_mutex); return _activeSource; }
+    AudioSource suspendedSource() const { MutexLock lock(_mutex); return _suspendedSource; }
+    void setSuspendedSource(AudioSource src) { MutexLock lock(_mutex); _suspendedSource = src; }
 
-    AudioSource getPhysicalOwner() const { return _physicalOwner; }
-    void setPhysicalOwner(AudioSource src) { _physicalOwner = src; }
+    AudioSource getPhysicalOwner() const { MutexLock lock(_mutex); return _physicalOwner; }
+    void setPhysicalOwner(AudioSource src) { MutexLock lock(_mutex); _physicalOwner = src; }
 
     bool request(AudioSource requested) {
-        if (_transitioning) {
-            Serial.println("[audioMgr] request rejected: transition in progress");
-            return false;
-        }
-        _transitioning = true;
-
-        if (requested == _activeSource) {
-            if (requested == AUDIO_SSYNC && _snapPlayer && _snapPlayer->isSuspended()) {
-                _snapPlayer->resumeAudio();
-            }
-            _transitioning = false;
-            return true;
-        }
-
         if (requested == AUDIO_NONE) {
             stopAll();
-            _transitioning = false;
-            return true;
+            MutexLock lock(_mutex);
+            return !_transitioning && _activeSource == AUDIO_NONE && _physicalOwner == AUDIO_NONE;
         }
-
-        Serial.printf("[audioMgr] request transition %d -> %d (suspended=%d)\n",
-                      (int)_activeSource, (int)requested, (int)_suspendedSource);
-
-        AudioSource previous = _activeSource;
-
-        if (previous != AUDIO_NONE) {
-            bool canSuspend = (previous == AUDIO_SSYNC && (requested == AUDIO_MUSIC || requested == AUDIO_VIDEO));
-            if (canSuspend) {
-                deactivateSource(previous, true);
-                _suspendedSource = AUDIO_SSYNC;
-            } else {
-                deactivateSource(previous, false);
-                if (requested == AUDIO_SSYNC) {
-                    _suspendedSource = AUDIO_NONE;
-                }
+        AudioSource previous;
+        {
+            MutexLock lock(_mutex);
+            if (_transitioning) return false;
+            previous = _activeSource;
+            if (requested == previous &&
+                !(requested == AUDIO_SSYNC && _snapPlayer && _snapPlayer->isSuspended())) return true;
+            _transitioning = true;
+        }
+        bool canSuspend = previous == AUDIO_SSYNC &&
+                          (requested == AUDIO_MUSIC || requested == AUDIO_VIDEO);
+        if (previous != AUDIO_NONE && previous != requested) {
+            if (!deactivateSource(previous, canSuspend)) {
+                MutexLock lock(_mutex);
+                _transitioning = false;
+                return false;
             }
-        }
-
-        if (!activateSource(requested)) {
-            Serial.printf("[audioMgr] failed to activate %d, rolling back\n", (int)requested);
+            releaseOutput(previous);
+            MutexLock lock(_mutex);
             _activeSource = AUDIO_NONE;
-            if (_suspendedSource != AUDIO_NONE) {
-                AudioSource susp = _suspendedSource;
-                _suspendedSource = AUDIO_NONE;
-                if (!activateSource(susp)) {
-                    _activeSource = AUDIO_NONE;
-                }
-            }
-            _transitioning = false;
-            return false;
+            if (canSuspend) _suspendedSource = AUDIO_SSYNC;
+            else if (requested == AUDIO_SSYNC) _suspendedSource = AUDIO_NONE;
         }
-
-        _transitioning = false;
-        return true;
+        bool ok = activateSource(requested);
+        if (!ok) {
+            AudioSource restore;
+            {
+                MutexLock lock(_mutex);
+                restore = _suspendedSource;
+                _suspendedSource = AUDIO_NONE;
+            }
+            if (restore != AUDIO_NONE) activateSource(restore);
+        }
+        {
+            MutexLock lock(_mutex);
+            _transitioning = false;
+        }
+        return ok;
     }
 
     void release(AudioSource source) {
-        if (_transitioning) {
-            Serial.printf("[audioMgr] release ignored during active transition (%d)\n", (int)source);
-            return;
-        }
-        if (_activeSource != source) return;
-
-        Serial.printf("[audioMgr] release source %d (suspended=%d)\n", (int)source, (int)_suspendedSource);
-        _activeSource = AUDIO_NONE;
-
-        if (_suspendedSource != AUDIO_NONE) {
-            AudioSource toRestore = _suspendedSource;
+        AudioSource restore;
+        {
+            MutexLock lock(_mutex);
+            if (_transitioning || _activeSource != source) return;
+            _transitioning = true;
+            restore = _suspendedSource;
             _suspendedSource = AUDIO_NONE;
-            Serial.printf("[audioMgr] restoring suspended source %d\n", (int)toRestore);
-            if (!activateSource(toRestore)) {
-                _activeSource = AUDIO_NONE;
-                releaseOutput(source);
-            }
-        } else {
-            releaseOutput(source);
+            _activeSource = AUDIO_NONE;
         }
+        // The foreground producer has stopped. Release its output before
+        // letting the resumed Snap worker reconfigure the shared I2S channel.
+        releaseOutput(source);
+        if (restore != AUDIO_NONE) activateSource(restore);
+        MutexLock lock(_mutex);
+        _transitioning = false;
     }
 
     void releaseOutput(AudioSource src) {
+        if (src == AUDIO_NONE) return;
+        MutexLock lock(_mutex);
         Serial.printf("[audioMgr] releaseOutput called by %d (owner=%d, active=%d, susp=%d)\n",
                       (int)src, (int)_physicalOwner, (int)_activeSource, (int)_suspendedSource);
         if (_physicalOwner == src || (_physicalOwner == AUDIO_NONE && _activeSource == src)) {
@@ -252,25 +244,29 @@ public:
     }
 
     bool hasActiveSession() const {
+        MutexLock lock(_mutex);
         return (_activeSource != AUDIO_NONE) || (_snapPlayer && _snapPlayer->isLoaded());
     }
 
     void stopAll() {
-        Serial.printf("[audioMgr] stopAll (active=%d, suspended=%d)\n", (int)_activeSource, (int)_suspendedSource);
+        AudioSource current, suspended;
+        {
+            MutexLock lock(_mutex);
+            if (_transitioning) return;
+            _transitioning = true;
+            current = _activeSource;
+            suspended = _suspendedSource;
+        }
         flushVolume();
-        AudioSource cur = _activeSource;
-        AudioSource susp = _suspendedSource;
-        _activeSource = AUDIO_NONE;
-        _suspendedSource = AUDIO_NONE;
-
-        // 1. Stop active foreground producer first
-        if (cur != AUDIO_NONE) {
-            deactivateSource(cur, false);
-        }
-        // 2. Stop suspended background producer second
-        if (susp != AUDIO_NONE && susp != cur) {
-            deactivateSource(susp, false);
-        }
+        bool stopped = deactivateSource(current, false);
+        if (stopped) releaseOutput(current);
+        bool backgroundStopped = suspended == AUDIO_NONE || suspended == current ||
+                                 deactivateSource(suspended, false);
+        if (backgroundStopped && suspended != AUDIO_NONE) releaseOutput(suspended);
+        MutexLock lock(_mutex);
+        if (stopped) _activeSource = AUDIO_NONE;
+        if (backgroundStopped) _suspendedSource = AUDIO_NONE;
+        _transitioning = false;
     }
 
     void stopActiveSession() {
@@ -278,7 +274,7 @@ public:
     }
 
     void setVolume(int vol, bool persist = true) {
-        if (_mutex) xSemaphoreTake(_mutex, portMAX_DELAY);
+        MutexLock lock(_mutex);
         int v = constrain(vol, 0, 100);
         _volume = v;
         setScaledVolume(v);
@@ -291,55 +287,59 @@ public:
             _volumeDirty = true;
             _lastVolumeChangeMs = millis();
         }
-        if (_mutex) xSemaphoreGive(_mutex);
     }
 
     void setMute(bool muted) {
-        if (_mutex) xSemaphoreTake(_mutex, portMAX_DELAY);
+        MutexLock lock(_mutex);
         _isMuted = muted;
         es8311Mute(muted);
         if (_activeSource == AUDIO_SSYNC && _snapPlayer) {
             _snapPlayer->setMute(muted);
         }
-        if (_mutex) xSemaphoreGive(_mutex);
     }
 
     bool isMuted() const {
+        MutexLock lock(_mutex);
         return _isMuted;
     }
 
     int getVolume() const {
+        MutexLock lock(_mutex);
         return _volume;
     }
 
     void rampVolume(int delta) {
-        setVolume(_volume + delta, true);
+        setVolume(getVolume() + delta, true);
     }
 
     void update() {
-        if (_volumeDirty && (millis() - _lastVolumeChangeMs > 1500)) {
-            if (_mutex) xSemaphoreTake(_mutex, portMAX_DELAY);
+        int v = -1;
+        {
+            MutexLock lock(_mutex);
             if (_volumeDirty && (millis() - _lastVolumeChangeMs > 1500)) {
                 _volumeDirty = false;
-                int v = _volume;
-                if (_mutex) xSemaphoreGive(_mutex);
-                Preferences p;
-                p.begin("poko", false);
-                p.putInt("volume", v);
-                p.end();
-                Serial.printf("[audioMgr] debounced volume saved: %d\n", v);
-                return;
+                v = _volume;
             }
-            if (_mutex) xSemaphoreGive(_mutex);
+        }
+        if (v >= 0) {
+            Preferences p;
+            p.begin("poko", false);
+            p.putInt("volume", v);
+            p.end();
+            Serial.printf("[audioMgr] debounced volume saved: %d\n", v);
         }
     }
 
     void flushVolume() {
-        if (_volumeDirty) {
-            if (_mutex) xSemaphoreTake(_mutex, portMAX_DELAY);
-            _volumeDirty = false;
-            int v = _volume;
-            if (_mutex) xSemaphoreGive(_mutex);
+        int v = -1;
+        {
+            MutexLock lock(_mutex);
+            if (_volumeDirty) {
+                _volumeDirty = false;
+                v = _volume;
+            }
+        }
+        if (v >= 0) {
             Preferences p;
             p.begin("poko", false);
             p.putInt("volume", v);
@@ -461,3 +461,4 @@ public:
 };
 
 extern AudioManager* audioManager;
+

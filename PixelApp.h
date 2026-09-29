@@ -31,6 +31,8 @@ private:
     uint8_t  _selected  = 0;
     uint8_t  _scroll    = 0;
     uint32_t _lastDrawMs = 0;
+    uint32_t _lastEditMs = 0;
+    bool _savePending = false;
 
     static constexpr uint8_t ITEM_COUNT   = 11;
     static constexpr uint8_t ROW_H        = 14;
@@ -368,7 +370,8 @@ public:
             }
         }
         if (changed) {
-            pixelEngine.saveToPreferences(prefs);
+            _savePending = true;
+            _lastEditMs = millis();
             _dirty = true;
         }
     }
@@ -395,6 +398,10 @@ public:
 
     void unload() {
         _active = false;
+        if (_savePending) {
+            pixelEngine.saveToPreferences(prefs);
+            _savePending = false;
+        }
         if (_canvas) {
             delete _canvas;
             _canvas = nullptr;
@@ -402,6 +409,8 @@ public:
     }
 
     bool isLoaded() const { return _active; }
+
+    void refreshTheme() { if (_active) renderToCanvas(); }
 
     void onLeft() {
         _selected = (_selected == 0) ? (ITEM_COUNT - 1) : (_selected - 1);
@@ -434,6 +443,10 @@ public:
     void update() {
         if (!_active) return;
         uint32_t now = millis();
+        if (_savePending && now - _lastEditMs >= 500) {
+            pixelEngine.saveToPreferences(prefs);
+            _savePending = false;
+        }
         // Redraw preview every 80ms for lively LED visualizer
         if (now - _lastDrawMs >= 80) {
             _lastDrawMs = now;
@@ -445,3 +458,4 @@ public:
         }
     }
 };
+

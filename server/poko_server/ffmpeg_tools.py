@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -28,6 +29,9 @@ def default_ffmpeg_executable(configured: str = "auto") -> str:
     local = repo_root() / "tools" / "ffmpeg" / "ffmpeg-8.1.1-essentials_build" / "bin" / "ffmpeg.exe"
     if local.exists():
         return str(local)
+    winget = Path(os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Links\ffmpeg.exe"))
+    if winget.exists():
+        return str(winget)
     return shutil.which("ffmpeg") or "ffmpeg"
 
 
@@ -38,6 +42,9 @@ def default_ffprobe_executable(ffmpeg_executable: str, configured: str = "auto")
     sibling = ffmpeg_path.with_name("ffprobe.exe" if ffmpeg_path.suffix.lower() == ".exe" else "ffprobe")
     if sibling.exists():
         return str(sibling)
+    winget = Path(os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Links\ffprobe.exe"))
+    if winget.exists():
+        return str(winget)
     return shutil.which("ffprobe") or "ffprobe"
 
 
@@ -431,3 +438,4 @@ def thumbnail_raw_jpeg(path: Path, kind: str, config: AppConfig, timeout: float 
 
 def command_preview(cmd: list[str]) -> str:
     return " ".join(f'"{part}"' if " " in part else part for part in cmd)
+

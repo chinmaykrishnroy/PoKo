@@ -41,7 +41,8 @@ private:
         uint32_t duration_s;
     };
 
-    static constexpr int MAX_SONGS = 32;
+    static constexpr int MAX_CATALOG_ITEMS = 999;
+    static constexpr int PAGE_SIZE = 8;
 
     Arduino_GFX*    _gfx;
     AppSwitchFn     _exit;
@@ -52,9 +53,12 @@ private:
     bool      _paused       = false;
     MusicMode _mode         = MODE_BROWSE;
 
-    SongItem  _songs[MAX_SONGS];
+    SongItem  _songs[PAGE_SIZE];
     int       _songCount    = 0;
     int       _selectedIdx  = 0;
+    int       _pageStart    = -1;
+    int       _catalogIndex = 0;
+    int       _catalogTotal = 0;
     bool      _loadingList  = false;
     bool      _serverError  = false;
 
@@ -63,9 +67,14 @@ private:
     char      _loadedId[36] = {0};
     uint16_t* _artBitmap    = nullptr;
     bool      _artBitmapValid = false;
+    char      _artRequestedId[36] = {0};
+    uint8_t   _artFailures = 0;
+    uint32_t  _lastArtAttemptMs = 0;
 
     uint32_t  _trackPos     = 0;
     uint32_t  _playStartMs  = 0;
+    uint32_t  _streamRequestMs = 0;
+    bool      _streamStarted = false;
     uint32_t  _lastSecondMs = 0;
     uint32_t  _lastDrawMs   = 0;
     int       _scrollOffset = 0;
@@ -122,11 +131,11 @@ private:
         TJpgDec.setJpgScale(1);
         TJpgDec.setSwapBytes(false);
         TJpgDec.setCallback(tftDecodeBitmap);
-        TJpgDec.drawJpg(0, 0, _artBuf, _artSize);
+        JRESULT decoded = TJpgDec.drawJpg(0, 0, _artBuf, _artSize);
         pixelEngine.finishColorExtraction();
         _needsColorExtract = false;
         _decodeTarget = nullptr;
-        _artBitmapValid = true;
+        _artBitmapValid = (decoded == JDR_OK);
     }
 
     String getServerHost() {
@@ -137,65 +146,88 @@ private:
         return prefs.getInt("server_port", 8765);
     }
 
-    void fetchSongList() {
-        if (WiFi.status() != WL_CONNECTED) {
+    bool fetchSongList(int index = 0, bool loadArt = true) {
+        if (WiFi.status() != WL_CONNECTED || index < 0 || index >= MAX_CATALOG_ITEMS) {
             _serverError = true;
             _dirty = true;
-            return;
+            return false;
+        }
+        if (_songCount > 0 && index >= _pageStart && index < _pageStart + _songCount) {
+            _catalogIndex = index;
+            _selectedIdx = index - _pageStart;
+            if (loadArt) fetchArtwork(_selectedIdx);
+            _serverError = false;
+            _dirty = true;
+            return true;
         }
 
         _loadingList = true;
-        _serverError = false;
-
+        int start = (index / PAGE_SIZE) * PAGE_SIZE;
         HTTPClient http;
-        String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/library/audio?page=1&page_size=" + String(MAX_SONGS) + "&icons=false";
+        String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
+                     "/api/library/audio?page=" + String(start / PAGE_SIZE + 1) +
+                     "&page_size=" + String(PAGE_SIZE) + "&icons=false";
         http.begin(url);
-        http.setTimeout(1000);
-
+        http.setTimeout(5000);
         int httpCode = http.GET();
+        bool parsed = false;
+        int total = 0, count = 0;
+        SongItem pending[PAGE_SIZE] = {};
         if (httpCode == HTTP_CODE_OK) {
             JsonDocument doc;
-            DeserializationError err = deserializeJson(doc, http.getStream());
-            if (!err) {
+            if (!deserializeJson(doc, http.getStream())) {
+                parsed = true;
+                total = min((int)(doc["total"] | 0), MAX_CATALOG_ITEMS);
                 JsonArray items = doc["items"].as<JsonArray>();
-                _songCount = 0;
                 for (JsonObject item : items) {
-                    if (_songCount >= MAX_SONGS) break;
-                    const char* id = item["id"] | "";
-                    const char* title = item["title"] | "Untitled";
-                    const char* artist = item["artist"] | "Unknown Artist";
-                    float durF = item["duration_s"].as<float>();
-                    if (durF <= 0.0f && item.containsKey("duration")) {
-                        durF = item["duration"].as<float>();
-                    }
-                    uint32_t dur = (durF > 0.0f) ? (uint32_t)(durF + 0.5f) : 0;
-
-                    strncpy(_songs[_songCount].id, id, sizeof(_songs[_songCount].id) - 1);
-                    strncpy(_songs[_songCount].title, title, sizeof(_songs[_songCount].title) - 1);
-                    strncpy(_songs[_songCount].artist, artist, sizeof(_songs[_songCount].artist) - 1);
-                    _songs[_songCount].duration_s = dur;
-                    _songCount++;
+                    if (count >= PAGE_SIZE || start + count >= total) break;
+                    SongItem& song = pending[count];
+                    strlcpy(song.id, item["id"] | "", sizeof(song.id));
+                    strlcpy(song.title, item["title"] | "Untitled", sizeof(song.title));
+                    strlcpy(song.artist, item["artist"] | "Unknown Artist", sizeof(song.artist));
+                    float duration = item["duration_s"].as<float>();
+                    if (duration <= 0 && item.containsKey("duration")) duration = item["duration"].as<float>();
+                    song.duration_s = duration > 0 ? (uint32_t)(duration + 0.5f) : 0;
+                    if (!song.id[0]) break;
+                    count++;
                 }
-                _serverError = (_songCount == 0);
-            } else {
-                _serverError = true;
             }
-        } else {
-            _serverError = true;
         }
         http.end();
         _loadingList = false;
-
-        if (_songCount > 0) {
-            if (_selectedIdx >= _songCount) _selectedIdx = 0;
-            fetchArtwork(_selectedIdx);
+        if (parsed && total == 0) {
+            _songCount = 0;
+            _catalogTotal = 0;
+            _catalogIndex = 0;
+            _pageStart = -1;
         }
+        bool loaded = index >= start && index < start + count;
+        if (loaded) {
+            memcpy(_songs, pending, count * sizeof(SongItem));
+            _songCount = count;
+            _pageStart = start;
+            _selectedIdx = index - start;
+            _catalogIndex = index;
+            _catalogTotal = total;
+            if (loadArt) fetchArtwork(_selectedIdx);
+        }
+        _serverError = !loaded;
         _dirty = true;
+        return loaded;
     }
 
     void fetchArtwork(int idx) {
         if (idx < 0 || idx >= _songCount) return;
-        if (strncmp(_loadedId, _songs[idx].id, sizeof(_loadedId)) == 0 && _artSize > 0) return;
+        if (strncmp(_artRequestedId, _songs[idx].id, sizeof(_artRequestedId)) != 0) {
+            strlcpy(_artRequestedId, _songs[idx].id, sizeof(_artRequestedId));
+            _artFailures = 0;
+        }
+        if (strncmp(_loadedId, _songs[idx].id, sizeof(_loadedId)) == 0 && _artSize > 0 && _artBitmapValid) return;
+        _lastArtAttemptMs = millis();
+        _artBitmapValid = false;
+        _loadedId[0] = '\0';
+        _artSize = 0;
+        _dirty = true;
 
         if (!_artBuf) {
             if (psramFound()) {
@@ -217,12 +249,16 @@ private:
         int code = http.GET();
         if (code == HTTP_CODE_OK) {
             WiFiClient* stream = http.getStreamPtr();
+            int expected = http.getSize();
             size_t total = 0;
             uint32_t startWait = millis();
-            while (http.connected() && (total < 16384) && (millis() - startWait < 1000)) {
+            while (http.connected() && (total < 16384) &&
+                   (expected < 0 || total < (size_t)expected) && (millis() - startWait < 3000)) {
                 int avail = stream->available();
                 if (avail > 0) {
-                    int r = stream->read(_artBuf + total, min(avail, (int)(16384 - total)));
+                    int limit = min(avail, (int)(16384 - total));
+                    if (expected > 0) limit = min(limit, expected - (int)total);
+                    int r = stream->read(_artBuf + total, limit);
                     if (r > 0) {
                         total += r;
                         startWait = millis();
@@ -231,27 +267,36 @@ private:
                     vTaskDelay(pdMS_TO_TICKS(2));
                 }
             }
-            if (total > 100) {
+            if (total > 100 && (expected < 0 || total == (size_t)expected) &&
+                _artBuf[0] == 0xFF && _artBuf[1] == 0xD8 &&
+                _artBuf[total - 2] == 0xFF && _artBuf[total - 1] == 0xD9) {
                 _artSize = total;
-                strncpy(_loadedId, _songs[idx].id, sizeof(_loadedId) - 1);
                 decodeArtworkToBitmap();
+                if (_artBitmapValid) strlcpy(_loadedId, _songs[idx].id, sizeof(_loadedId));
             }
         }
         http.end();
+        if (!_artBitmapValid) _artFailures++;
     }
 
-    void requestPlay(int idx, uint32_t startSec = 0) {
-        if (idx < 0 || idx >= _songCount) return;
+    bool requestPlay(int idx, uint32_t startSec = 0) {
+        if (idx < 0 || idx >= _songCount) return false;
+        bool wasMusicActive = audioManager && audioManager->activeSource() == AUDIO_MUSIC;
 
         if (!audioManager || !audioManager->request(AUDIO_MUSIC)) {
+            if (!wasMusicActive) _mode = MODE_BROWSE;
             _serverError = true;
-            return;
+            _dirty = true;
+            return false;
         }
 
         if (!ensureAudioOutput(44100)) {
-            audioManager->release(AUDIO_MUSIC);
+            if (wasMusicActive) requestStop();
+            else audioManager->release(AUDIO_MUSIC);
+            _mode = MODE_BROWSE;
             _serverError = true;
-            return;
+            _dirty = true;
+            return false;
         }
 
         if (audioPlugin) {
@@ -261,21 +306,35 @@ private:
                 delay(50);
             }
         }
+        if (!audioPlugin || !audioPlugin->isLoaded()) {
+            if (wasMusicActive) requestStop();
+            else audioManager->release(AUDIO_MUSIC);
+            _mode = MODE_BROWSE;
+            _serverError = true;
+            _dirty = true;
+            return false;
+        }
 
         HTTPClient http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
                      "/api/audio/" + String(_songs[idx].id) + "/play?start=" + String(startSec) +
-                     "&switch=false&notify=false&async=true";
+                     "&switch=false&notify=false";
         http.begin(url);
-        http.setTimeout(1000);
+        http.setTimeout(5000);
         int httpCode = http.GET();
+        JsonDocument response;
+        bool started = httpCode == HTTP_CODE_OK &&
+                       !deserializeJson(response, http.getStream()) && response["ok"].as<bool>();
         http.end();
 
-        if (httpCode >= 200 && httpCode < 300) {
+        if (started) {
+            _selectedIdx = idx;
             _mode = MODE_PLAYING;
             _paused = false;
             _trackPos = startSec;
             _playStartMs = millis() - (startSec * 1000UL);
+            _streamRequestMs = millis();
+            _streamStarted = false;
             _lastSecondMs = millis();
             _scrollOffset = 0;
             _lastScrollMs = millis();
@@ -289,18 +348,18 @@ private:
             }
 
             fetchArtwork(idx);
-        } else {
-            Serial.printf("[music] requestPlay failed with code %d\n", httpCode);
-            _serverError = true;
-            _dirty = true;
-            if (audioPlugin) {
-                audioPlugin->stopStream();
-                audioPlugin->unload();
-            }
-            if (audioManager) {
-                audioManager->release(AUDIO_MUSIC);
-            }
+            return true;
         }
+        Serial.printf("[music] requestPlay failed with code %d\n", httpCode);
+        _mode = MODE_BROWSE;
+        _paused = false;
+        _trackPos = 0;
+        _serverError = true;
+        _dirty = true;
+        audioPlugin->stopStream();
+        audioPlugin->unload();
+        if (!wasMusicActive) audioManager->release(AUDIO_MUSIC);
+        return false;
     }
 
     void requestStop() {
@@ -309,14 +368,37 @@ private:
         }
 
         HTTPClient http;
-        String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false&async=true";
+        String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false";
         http.begin(url);
-        http.setTimeout(400);
+        http.setTimeout(4000);
         http.GET();
         http.end();
 
         pixelEngine.setSongProgress(0.0f);
         _dirty = true;
+    }
+
+    bool selectSong(int index) {
+        SongItem previous = _songs[_selectedIdx];
+        int previousIndex = _catalogIndex;
+        int previousTotal = _catalogTotal;
+        if (!fetchSongList(index, false)) return false;
+        if (_mode == MODE_PLAYING) {
+            if (requestPlay(_selectedIdx)) return true;
+            _songs[0] = previous;
+            _songCount = 1;
+            _pageStart = previousIndex;
+            _catalogIndex = previousIndex;
+            _catalogTotal = previousTotal;
+            _selectedIdx = 0;
+            _dirty = true;
+            return false;
+        }
+        _trackPos = 0;
+        _scrollOffset = 0;
+        _paused = false;
+        fetchArtwork(_selectedIdx);
+        return true;
     }
 
     void renderToCanvas() {
@@ -344,8 +426,8 @@ private:
             _canvas->setCursor(125 - w, 11);
             _canvas->print(statusStr);
         } else if (_songCount > 0) {
-            char badge[16];
-            snprintf(badge, sizeof(badge), "%d/%d", _selectedIdx + 1, _songCount);
+            char badge[24];
+            snprintf(badge, sizeof(badge), "%d/%d", _catalogIndex + 1, _catalogTotal);
             _canvas->setTextColor(theme.muted, theme.headerBg);
             _canvas->getTextBounds(badge, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(125 - w, 11);
@@ -543,9 +625,9 @@ public:
                 audioPlugin->stopStream();
             }
             HTTPClient http;
-            String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false&async=true";
+            String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false";
             http.begin(url);
-            http.setTimeout(800);
+            http.setTimeout(4000);
             http.GET();
             http.end();
             _paused = true;
@@ -587,6 +669,23 @@ public:
         }
     }
 
+    bool prepareRemoteStream() {
+        if (!audioPlugin || !audioManager || !audioManager->request(AUDIO_MUSIC)) return false;
+        if (!ensureAudioOutput(44100)) {
+            audioManager->release(AUDIO_MUSIC);
+            return false;
+        }
+        audioPlugin->stopStream();
+        if (!audioPlugin->isLoaded()) audioPlugin->load();
+        if (!audioPlugin->isLoaded()) {
+            audioManager->release(AUDIO_MUSIC);
+            return false;
+        }
+        _streamRequestMs = millis();
+        _streamStarted = false;
+        return true;
+    }
+
     void load() {
         _active = true;
         _dirty  = true;
@@ -603,11 +702,8 @@ public:
 
         _mode = MODE_BROWSE;
 
-        if (_songCount == 0) {
-            fetchSongList();
-        } else {
-            fetchArtwork(_selectedIdx);
-        }
+        _pageStart = -1;
+        if (!fetchSongList(_catalogIndex) && _catalogIndex > 0) fetchSongList(0);
         renderToCanvas();
     }
 
@@ -629,48 +725,32 @@ public:
 
     bool isLoaded() const { return _active; }
 
+    void refreshTheme() { if (_active) renderToCanvas(); }
+
     void onLeft() {
-        if (_songCount <= 0) return;
-        _selectedIdx = (_selectedIdx == 0) ? (_songCount - 1) : (_selectedIdx - 1);
-        _trackPos = 0;
-        _scrollOffset = 0;
-        _paused = false;
-        _dirty = true;
-        if (_mode == MODE_PLAYING) {
-            requestPlay(_selectedIdx, 0);
-        } else {
-            fetchArtwork(_selectedIdx);
-        }
+        if (_catalogTotal <= 0) return;
+        selectSong((_catalogIndex == 0) ? (_catalogTotal - 1) : (_catalogIndex - 1));
     }
 
     void onRight() {
-        if (_songCount <= 0) return;
-        _selectedIdx = (_selectedIdx + 1) % _songCount;
-        _trackPos = 0;
-        _scrollOffset = 0;
-        _paused = false;
-        _dirty = true;
-        if (_mode == MODE_PLAYING) {
-            requestPlay(_selectedIdx, 0);
-        } else {
-            fetchArtwork(_selectedIdx);
-        }
+        if (_catalogTotal <= 0) return;
+        selectSong((_catalogIndex + 1) % _catalogTotal);
     }
 
-    void volumeRampDown() {
-        if (audioManager) audioManager->rampVolume(-2);
+    void volumeRampDown(int step = 2) {
+        if (audioManager) audioManager->rampVolume(-step);
         else {
             int v = getCurrentAppVolume();
-            if (v > 0) setScaledVolume(max(0, v - 2));
+            if (v > 0) setScaledVolume(max(0, v - step));
         }
         _dirty = true;
     }
 
-    void volumeRampUp() {
-        if (audioManager) audioManager->rampVolume(2);
+    void volumeRampUp(int step = 2) {
+        if (audioManager) audioManager->rampVolume(step);
         else {
             int v = getCurrentAppVolume();
-            if (v < 100) setScaledVolume(min(100, v + 2));
+            if (v < 100) setScaledVolume(min(100, v + step));
         }
         _dirty = true;
     }
@@ -693,13 +773,25 @@ public:
     }
 
     void onPlaybackEnded() {
-        if (_mode == MODE_PLAYING && !_paused) {
-            onRight();
+        if (_mode == MODE_PLAYING && !_paused && _catalogTotal > 0 &&
+            !selectSong((_catalogIndex + 1) % _catalogTotal)) {
+            requestStop();
+            _mode = MODE_BROWSE;
+            _dirty = true;
         }
     }
 
     void update() {
         if (_mode == MODE_PLAYING && !_paused) {
+            if (!_streamStarted && audioPlugin && audioPlugin->isConnected()) _streamStarted = true;
+            if (!_streamStarted && millis() - _streamRequestMs > 10000) {
+                requestStop();
+                if (audioPlugin) audioPlugin->unload();
+                _mode = MODE_BROWSE;
+                _serverError = true;
+                _dirty = true;
+                return;
+            }
             if (audioPlugin && audioPlugin->hasFinished()) {
                 onPlaybackEnded();
                 return;
@@ -726,6 +818,10 @@ public:
         if (!_active || !_canvas) return;
 
         uint32_t now = millis();
+        if (!_artBitmapValid && _songCount > 0 && _artFailures < 3 &&
+            WiFi.status() == WL_CONNECTED && now - _lastArtAttemptMs >= 5000) {
+            fetchArtwork(_selectedIdx);
+        }
         if (now - _lastScrollMs >= 40) {
             _lastScrollMs = now;
             _scrollOffset++;
@@ -758,3 +854,4 @@ inline uint16_t* MusicApp::_decodeTarget = nullptr;
 inline int16_t   MusicApp::_decodeTargetW = 0;
 inline int16_t   MusicApp::_decodeTargetH = 0;
 inline bool      MusicApp::_needsColorExtract = false;
+

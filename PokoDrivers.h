@@ -436,3 +436,4 @@ inline void driverReset(Arduino_GFX* gfx) {
     gfx->fillScreen(RGB565_BLACK);
     initBacklight();
 }
+

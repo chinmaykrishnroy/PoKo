@@ -66,3 +66,4 @@ class MediaItem:
         if icon is not None:
             data["icon"] = icon.to_json()
         return data
+

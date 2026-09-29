@@ -109,6 +109,10 @@ class ProcessHandle:
                 self.process.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 self.process.kill()
+                try:
+                    self.process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    pass
         self.process = None
 
 
@@ -136,6 +140,7 @@ class SyncedAVStreamer:
         self.stop_event = threading.Event()
         self.threads: list[threading.Thread] = []
         self.processes: list[subprocess.Popen] = []
+        self.sockets: list[socket.socket] = []
         self.lock = threading.Lock()
         self.wall_start = 0.0
         self.audio_ready = threading.Event()
@@ -157,26 +162,23 @@ class SyncedAVStreamer:
 
     @property
     def commands(self) -> list[list[str]]:
-        return [
-            synced_audio_pipe_command(self.item.path, self.config, self.start_s),
-            synced_video_pipe_command(
-                self.item.path,
-                self.config,
-                start_s=self.start_s,
-                aspect=self.aspect,
-                fps=self.video_fps,
-                quality=self.video_quality,
-            ),
-        ]
+        commands = [synced_video_pipe_command(
+            self.item.path, self.config, start_s=self.start_s, aspect=self.aspect,
+            fps=self.video_fps, quality=self.video_quality,
+        )]
+        if self.item.has_audio:
+            commands.insert(0, synced_audio_pipe_command(self.item.path, self.config, self.start_s))
+        return commands
 
     def start(self, timeout_s: float = 3.5) -> bool:
         if self.dry_run:
             self.counters["startup_ready"] = True
             return True
-        self.threads = [
-            threading.Thread(target=self._audio_sender, name="poko-sync-audio", daemon=True),
-            threading.Thread(target=self._video_sender, name="poko-sync-video", daemon=True),
-        ]
+        self.threads = [threading.Thread(target=self._video_sender, name="poko-sync-video", daemon=True)]
+        if self.item.has_audio:
+            self.threads.insert(0, threading.Thread(target=self._audio_sender, name="poko-sync-audio", daemon=True))
+        else:
+            self.audio_ready.set()
         for thread in self.threads:
             thread.start()
 
@@ -188,7 +190,7 @@ class SyncedAVStreamer:
 
         with self.lock:
             ready = bool(
-                self.counters["audio_connected"]
+                (self.counters["audio_connected"] or not self.item.has_audio)
                 and self.counters["video_connected"]
                 and not self.counters["audio_error"]
                 and not self.counters["video_error"]
@@ -204,20 +206,37 @@ class SyncedAVStreamer:
         return False
 
     def stop(self) -> None:
-        self.stop_event.set()
-        self.release_senders.set()
-        for proc in list(self.processes):
+        with self.lock:
+            self.stop_event.set()
+            self.release_senders.set()
+            sockets = list(self.sockets)
+            processes = list(self.processes)
+        # A sender may be blocked in sendall while the device changes videos.
+        # Wake it before joining; stopping FFmpeg alone cannot unblock a socket.
+        for sock in sockets:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            sock.close()
+        for proc in processes:
             if proc.poll() is None:
                 proc.terminate()
         for thread in self.threads:
             thread.join(timeout=1.5)
-        for proc in list(self.processes):
+        for proc in processes:
             if proc.poll() is None:
                 proc.kill()
+            try:
+                proc.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                pass
 
     def _popen(self, command: list[str]) -> subprocess.Popen:
-        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         with self.lock:
+            if self.stop_event.is_set():
+                raise subprocess.SubprocessError("stream stopped before FFmpeg startup")
+            proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             self.processes.append(proc)
         return proc
 
@@ -236,10 +255,16 @@ class SyncedAVStreamer:
                 sock = socket.create_connection((self.config.nexus.ip, port), timeout=1.0)
                 sock.settimeout(None)
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                with self.lock:
+                    if self.stop_event.is_set():
+                        sock.close()
+                        raise ConnectionAbortedError("stream stopped during connect")
+                    self.sockets.append(sock)
                 return sock
             except OSError as exc:
                 last_error = exc
-                time.sleep(0.08)
+                if self.stop_event.wait(0.08):
+                    break
         raise ConnectionError(f"cannot connect to {self.config.nexus.ip}:{port}: {last_error}")
 
     @staticmethod
@@ -272,8 +297,10 @@ class SyncedAVStreamer:
                     timestamp_ms = int(round((samples_sent * 1000.0) / rate))
                     samples_sent += len(data) // 2
                     delay = self.wall_start + timestamp_ms / 1000.0 - time.monotonic()
-                    if delay > 0:
-                        time.sleep(delay)
+                    if delay > 0 and self.stop_event.wait(delay):
+                        break
+                    if self.stop_event.is_set():
+                        break
                     self._send_packet(sock, PACKET_AUDIO, timestamp_ms, data)
                     with self.lock:
                         self.counters["audio_packets"] += 1
@@ -283,8 +310,17 @@ class SyncedAVStreamer:
             self.audio_ready.set()
             with self.lock:
                 self.counters["audio_connected"] = False
-            if proc is not None and proc.poll() is None:
-                proc.terminate()
+            if proc is not None:
+                if proc.poll() is None:
+                    proc.terminate()
+                try:
+                    proc.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    try:
+                        proc.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        pass
 
     def _video_sender(self) -> None:
         fps = self.video_fps
@@ -343,8 +379,10 @@ class SyncedAVStreamer:
                                 self.counters["video_dropped_sender"] += 1
                             continue
                         delay = target_time - now
-                        if delay > 0:
-                            time.sleep(delay)
+                        if delay > 0 and self.stop_event.wait(delay):
+                            return
+                        if self.stop_event.is_set():
+                            return
                         self._send_packet(sock, PACKET_VIDEO, timestamp_ms, jpg)
                         with self.lock:
                             self.counters["video_frames"] += 1
@@ -354,8 +392,17 @@ class SyncedAVStreamer:
             self.video_ready.set()
             with self.lock:
                 self.counters["video_connected"] = False
-            if proc is not None and proc.poll() is None:
-                proc.terminate()
+            if proc is not None:
+                if proc.poll() is None:
+                    proc.terminate()
+                try:
+                    proc.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    try:
+                        proc.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        pass
 
 
 class PlaybackManager:
@@ -373,6 +420,7 @@ class PlaybackManager:
         self._operations: dict[int, dict[str, Any]] = {}
         self._operation_keys: dict[str, int] = {}
         self._next_operation_id = 1
+        self._closing = False
         self._operation_worker = threading.Thread(
             target=self._run_operations,
             name="poko-playback-worker",
@@ -383,11 +431,16 @@ class PlaybackManager:
     def _run_operations(self) -> None:
         while True:
             operation_id, action = self._operation_queue.get()
+            if operation_id == -1:
+                self._operation_queue.task_done()
+                break
             with self._operation_lock:
                 operation = self._operations.get(operation_id)
-                if operation is not None:
-                    operation["status"] = "running"
-                    operation["started_at"] = time.time()
+                if operation is None or operation["status"] != "queued" or self._closing:
+                    self._operation_queue.task_done()
+                    continue
+                operation["status"] = "running"
+                operation["started_at"] = time.time()
             try:
                 result = action()
             except Exception as exc:  # Keep the worker alive and expose the failure to the device.
@@ -403,13 +456,24 @@ class PlaybackManager:
                 self._prune_operations_locked()
             self._operation_queue.task_done()
 
+    def _cancel_queued_locked(self) -> None:
+        for operation in self._operations.values():
+            if operation["status"] == "queued":
+                operation.update(status="cancelled", ok=False, finished_at=time.time(), result={"ok": False, "error": "superseded"})
+        while True:
+            try:
+                self._operation_queue.get_nowait()
+            except queue.Empty:
+                break
+            self._operation_queue.task_done()
+
     def _prune_operations_locked(self) -> None:
         if len(self._operations) <= 64:
             return
         for operation_id in sorted(self._operations):
             if len(self._operations) <= 48:
                 break
-            if self._operations[operation_id]["status"] in {"succeeded", "failed"}:
+            if self._operations[operation_id]["status"] in {"succeeded", "failed", "cancelled"}:
                 operation = self._operations.pop(operation_id)
                 request_id = operation.get("request_id")
                 if request_id and self._operation_keys.get(request_id) == operation_id:
@@ -425,6 +489,8 @@ class PlaybackManager:
     ) -> dict[str, Any]:
         selected_request_id = str(request_id or "").strip()[:96]
         with self._operation_lock:
+            if self._closing:
+                return {"ok": False, "accepted": False, "error": "playback manager is closing"}
             if selected_request_id:
                 existing_id = self._operation_keys.get(selected_request_id)
                 existing = self._operations.get(existing_id) if existing_id is not None else None
@@ -434,6 +500,7 @@ class PlaybackManager:
                     return response
                 self._operation_keys.pop(selected_request_id, None)
 
+            self._cancel_queued_locked()
             operation_id = self._next_operation_id
             self._next_operation_id += 1
             operation = {
@@ -452,7 +519,7 @@ class PlaybackManager:
             if selected_request_id:
                 self._operation_keys[selected_request_id] = operation_id
             response = dict(operation)
-        self._operation_queue.put((operation_id, action))
+            self._operation_queue.put((operation_id, action))
         return response
 
     def operation_status(self, operation_id: int) -> dict[str, Any] | None:
@@ -473,8 +540,7 @@ class PlaybackManager:
         jpeg_quality: int | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
-        use_sync = bool(self._resolve_audio_request(audio) and item.has_audio)
-        mode = "video_player" if use_sync else "graphics_player"
+        mode = "video_player"
         return self._submit_operation(
             "play_video",
             lambda: self.play_video(
@@ -510,9 +576,21 @@ class PlaybackManager:
 
     def status(self) -> dict[str, Any]:
         with self._lock:
+            if self._process and self._process.process is not None:
+                exit_code = self._process.process.poll()
+                if exit_code is not None:
+                    self._process = None
+                    self._state.active = False
+                    self._state.mode = "idle"
+                    self._state.counters["ffmpeg_exit_code"] = exit_code
             if self._streamer:
                 with self._streamer.lock:
                     self._state.counters = dict(self._streamer.counters)
+                if not self.dry_run and self._streamer.threads and not any(thread.is_alive() for thread in self._streamer.threads):
+                    self._streamer.stop()
+                    self._streamer = None
+                    self._state.active = False
+                    self._state.mode = "idle"
             return self._state.to_json()
 
     def stop(self, *, notify_device: bool = False) -> dict[str, Any]:
@@ -530,18 +608,46 @@ class PlaybackManager:
             result["device"] = self.device.notify_playback_stopped().__dict__
         return result
 
+    def close(self) -> None:
+        with self._operation_lock:
+            if not self._closing:
+                self._closing = True
+                self._cancel_queued_locked()
+                self._operation_queue.put((-1, lambda: {"ok": True}))
+        if self._operation_worker.is_alive():
+            self._operation_worker.join(timeout=5.0)
+        if self._operation_worker.is_alive():
+            raise RuntimeError("playback worker did not stop")
+        self.stop(notify_device=False)
+
+    def _process_start_failure(self, item: MediaItem, exc: BaseException) -> dict[str, Any]:
+        self._process = None
+        self._state = PlaybackState()
+        message = str(exc).strip() or type(exc).__name__
+        return {
+            "ok": False,
+            "error": f"failed to start FFmpeg: {message}",
+            "playback": self._state.to_json(),
+        }
+
     def play_audio(self, item: MediaItem, start_s: float = 0, *, switch_device: bool = True) -> dict[str, Any]:
         if item.kind != "audio":
             return {"ok": False, "error": "item is not audio"}
         with self._lock:
             self.stop()
             time.sleep(0.05)
+            start_s = max(0.0, float(start_s))
             device = self.device.switch("audio") if switch_device else None
+            if device is not None and not device.ok:
+                return self._device_switch_failure(device)
             command = audio_tcp_command(item.path, self.config, start_s)
-            self._process = ProcessHandle(command, dry_run=self.dry_run)
+            try:
+                self._process = ProcessHandle(command, dry_run=self.dry_run)
+            except (OSError, subprocess.SubprocessError) as exc:
+                return self._process_start_failure(item, exc)
             self._state = self._make_state("audio_player", item, start_s, command=command)
             return {
-                "ok": True if device is None else device.ok,
+                "ok": True,
                 "device": {"ok": True, "app": "audio", "body": "not-switched"} if device is None else device.__dict__,
                 "playback": self._state.to_json(),
             }
@@ -563,66 +669,46 @@ class PlaybackManager:
         with self._lock:
             self.stop()
             time.sleep(0.05)
-            wants_audio = self._resolve_audio_request(audio)
-            use_sync = bool(wants_audio and item.has_audio)
+            start_s = max(0.0, float(start_s))
+            # Embedded VideoApp keeps its NAV1 listeners when switching clips.
+            # A silent clip still needs NAV1 video, not the raw graphics port.
             selected_aspect = aspect or self.config.defaults.video_aspect
             selected_profile, selected_fps, selected_quality = resolve_video_tuning(
-                self.config,
-                synced=use_sync,
-                profile=profile,
-                fps=fps,
-                jpeg_quality=jpeg_quality,
+                self.config, synced=True, profile=profile, fps=fps, jpeg_quality=jpeg_quality,
             )
-            if use_sync:
-                device = self.device.switch("sync") if switch_device else None
-                streamer = SyncedAVStreamer(
-                    item,
-                    self.config,
-                    start_s=start_s,
-                    aspect=selected_aspect,
-                    profile=selected_profile,
-                    fps=selected_fps,
-                    jpeg_quality=selected_quality,
-                    dry_run=self.dry_run,
+            device = self.device.switch("sync") if switch_device else None
+            if device is not None and not device.ok:
+                return self._device_switch_failure(device)
+            streamer = SyncedAVStreamer(
+                item, self.config, start_s=start_s, aspect=selected_aspect,
+                profile=selected_profile, fps=selected_fps, jpeg_quality=selected_quality, dry_run=self.dry_run,
+            )
+            commands = [part for cmd in streamer.commands for part in ["&&", *cmd]][1:]
+            if not streamer.start():
+                with streamer.lock:
+                    startup = dict(streamer.counters)
+                streamer.stop()
+                errors = [startup.get("audio_error"), startup.get("video_error")]
+                detail = "; ".join(str(error) for error in errors if error) or "AV listeners did not become ready"
+                self._state = self._make_state(
+                    "video_error", item, start_s, aspect=selected_aspect, with_audio=bool(item.has_audio), command=commands
                 )
-                commands = [part for cmd in streamer.commands for part in ["&&", *cmd]][1:]
-                if not streamer.start():
-                    with streamer.lock:
-                        startup = dict(streamer.counters)
-                    streamer.stop()
-                    errors = [startup.get("audio_error"), startup.get("video_error")]
-                    detail = "; ".join(str(error) for error in errors if error) or "AV listeners did not become ready"
-                    self._state = self._make_state(
-                        "video_error", item, start_s, aspect=selected_aspect, with_audio=True, command=commands
-                    )
-                    self._state.active = False
-                    self._state.counters = startup
-                    return {
-                        "ok": False,
-                        "error": f"synchronized playback startup failed: {detail}",
-                        "device": {"ok": True, "app": "video", "body": "not-switched"}
-                        if device is None else device.__dict__,
-                        "playback": self._state.to_json(),
-                    }
-                self._streamer = streamer
-                self._state = self._make_state("video_player", item, start_s, aspect=selected_aspect, with_audio=True, command=commands)
-            else:
-                device = self.device.switch("stream") if switch_device else None
-                command = graphics_video_tcp_command(
-                    item.path,
-                    self.config,
-                    start_s=start_s,
-                    aspect=selected_aspect,
-                    fps=selected_fps,
-                    quality=selected_quality,
-                )
-                self._process = ProcessHandle(command, dry_run=self.dry_run)
-                self._state = self._make_state("graphics_player", item, start_s, aspect=selected_aspect, with_audio=False, command=command)
+                self._state.active = False
+                self._state.counters = startup
+                return {
+                    "ok": False,
+                    "error": f"synchronized playback startup failed: {detail}",
+                    "device": {"ok": True, "app": "video", "body": "not-switched"}
+                    if device is None else device.__dict__,
+                    "playback": self._state.to_json(),
+                }
+            self._streamer = streamer
+            self._state = self._make_state("video_player", item, start_s, aspect=selected_aspect, with_audio=bool(item.has_audio), command=commands)
             self._state.counters.update(
                 {"profile": selected_profile, "fps": selected_fps, "jpeg_quality": selected_quality}
             )
             device_json = {"ok": True, "app": "video", "body": "not-switched"} if device is None else device.__dict__
-            return {"ok": True if device is None else device.ok, "device": device_json, "playback": self._state.to_json()}
+            return {"ok": True, "device": device_json, "playback": self._state.to_json()}
 
     def play_image(
         self,
@@ -638,11 +724,16 @@ class PlaybackManager:
     ) -> dict[str, Any]:
         if item.kind != "image":
             return {"ok": False, "error": "item is not image"}
+        if switch_device:
+            return {"ok": False, "error": "remote image streaming is not supported by PoKo firmware"}
         with self._lock:
             self.stop()
             device = self.device.switch("stream") if switch_device else None
+            if device is not None and not device.ok:
+                return self._device_switch_failure(device)
             selected_aspect = aspect or self.config.defaults.image_aspect
-            hold_seconds = seconds or self.config.defaults.image_hold_seconds
+            requested_seconds = None if seconds is None or float(seconds) <= 0 else float(seconds)
+            hold_seconds = requested_seconds if requested_seconds is not None else self.config.defaults.image_hold_seconds
             selected_mode = mode.lower() if mode.lower() in {"static", "oneshot", "loop"} else "oneshot"
             animated = bool(item.metadata.get("animated"))
             selected_profile, selected_fps, selected_quality = resolve_video_tuning(
@@ -650,9 +741,9 @@ class PlaybackManager:
             )
             stream_loop = animated and selected_mode == "loop"
             image_loop = not animated
-            motion_seconds = seconds or item.duration_s or self.config.defaults.motion_image_seconds
+            motion_seconds = requested_seconds if requested_seconds is not None else (item.duration_s or self.config.defaults.motion_image_seconds)
             if selected_mode == "loop":
-                duration = seconds
+                duration = requested_seconds
             elif animated and selected_mode == "oneshot":
                 duration = motion_seconds
             else:
@@ -667,7 +758,10 @@ class PlaybackManager:
                 fps=selected_fps,
                 quality=selected_quality,
             )
-            self._process = ProcessHandle(command, dry_run=self.dry_run)
+            try:
+                self._process = ProcessHandle(command, dry_run=self.dry_run)
+            except (OSError, subprocess.SubprocessError) as exc:
+                return self._process_start_failure(item, exc)
             self._state = self._make_state("image_viewer", item, 0, aspect=selected_aspect, command=command)
             self._state.counters["hold_seconds"] = hold_seconds
             self._state.counters.update(
@@ -681,7 +775,7 @@ class PlaybackManager:
                 }
             )
             device_json = {"ok": True, "app": "stream", "body": "not-switched"} if device is None else device.__dict__
-            return {"ok": True if device is None else device.ok, "device": device_json, "playback": self._state.to_json()}
+            return {"ok": True, "device": device_json, "playback": self._state.to_json()}
 
     def seek(
         self,
@@ -706,7 +800,7 @@ class PlaybackManager:
             if item.kind == "video":
                 return self.play_video(
                     item,
-                    audio=self._state.with_audio,
+                    audio=self._state.with_audio or self._state.mode == "video_player",
                     aspect=self._state.aspect,
                     start_s=new_start,
                     switch_device=switch_device,
@@ -731,7 +825,7 @@ class PlaybackManager:
             if target.kind == "video":
                 return self.play_video(
                     target,
-                    audio=self._state.with_audio,
+                    audio=self._state.with_audio or self._state.mode == "video_player",
                     aspect=self._state.aspect,
                     switch_device=switch_device,
                     profile=str(self._state.counters.get("profile", "balanced")),
@@ -740,12 +834,24 @@ class PlaybackManager:
                 )
             return {"ok": False, "error": "skip is only supported for audio and video"}
 
+    def _device_switch_failure(self, response: Any) -> dict[str, Any]:
+        self._state = PlaybackState()
+        return {
+            "ok": False,
+            "error": response.error or response.body or f"device refused app switch to {response.app}",
+            "device": response.__dict__,
+            "playback": self._state.to_json(),
+        }
+
     def _resolve_audio_request(self, audio: str | bool | None) -> bool:
         if isinstance(audio, bool):
             return audio
-        if audio is None or audio == "auto":
+        if audio is None:
             return self.config.defaults.video_with_audio
-        return str(audio).lower() in {"1", "true", "yes", "on", "audio"}
+        normalized = str(audio).strip().lower()
+        if normalized == "auto":
+            return self.config.defaults.video_with_audio
+        return normalized in {"1", "true", "yes", "on", "audio"}
 
     @staticmethod
     def _make_state(
@@ -770,3 +876,4 @@ class PlaybackManager:
             with_audio=with_audio,
             command=command,
         )
+

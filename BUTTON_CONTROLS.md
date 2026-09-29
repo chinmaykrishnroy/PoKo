@@ -16,6 +16,18 @@ The PoKo hardware features three tactile buttons:
 
 > **Footer Convention**: All application screen footers strictly display **`L`** and **`R`** labels to match the physical hardware buttons.
 
+L/R double-click recognition uses a **450 ms** window. Inputs are debounced for
+**25 ms** and sampled every **5 ms** independently of rendering and network work.
+Holds start at **700 ms**, repeating every **100 ms** only in Music, Video,
+SSync, Pixels and Settings. Holding R in Info refreshes metrics once; unrelated apps do
+not change volume. PWR uses a **2 second** hold and has no double-click action.
+
+When the screen sleeps, the first physical press of **L, R or PWR** wakes it.
+That entire gesture is consumed, including a held press or second tap. Release
+the buttons and wait 450 ms before the next action. All three buttons also wake
+USB-powered deep sleep. After battery power is fully disconnected by the hardware
+latch, powering on depends on the board's power circuit.
+
 ---
 
 ## 2. System-Wide Button Combinations & Power Controls
@@ -28,7 +40,7 @@ These controls are active across the entire system regardless of the open applic
 |:---|:---|:---|
 | **`L + R` Hold** | **2.5 seconds** | **Clean System Reboot** (`ESP.restart()` with on-screen "REBOOTING..." alert) |
 | **`L + R` Click** | Quick simultaneous press | **Audio Play/Pause / Mute** toggle |
-| **`L + R` Double-Click** | Double press within 600ms | **Jump to Device Info** (`InfoApp` telemetry screen) |
+| **`L + R` Double-Click** | Double press within 450ms | **Jump to Device Info** (`InfoApp` telemetry screen) |
 | **`L + R` Long Hold** | **5.0 seconds** | **Hardware Driver Reset** (re-initializes I²C, ES8311 codec, GC9107 display, and WS2812 LEDs) |
 | **`PWR` Click** | Single click | **Toggle Screen Sleep / Wake** (backlight + GC9107 low-power sleep) |
 | **`PWR` Long Press** | **$\ge 2.0$ seconds** | **Graceful Power-Off** (flushes audio volume and settings to NVS, mutes speaker PA, shuts down Wi-Fi, turns off display and LEDs, and releases battery latch / enters deep sleep) |
@@ -64,7 +76,7 @@ These controls are active across the entire system regardless of the open applic
 ### 3.4 Video Player (MPEG1 / AVI)
 - **`L`**: Previous video file.
 - **`R`**: Next video file.
-- **`2R`**: Play / Pause toggle.
+- **`2R`**: Start playback / stop and return to the video browser.
 - **`2L`**: Exit to Launcher.
 - **Hold `L` / Hold `R`**: Volume control during playback.
 
@@ -74,6 +86,9 @@ These controls are active across the entire system regardless of the open applic
 - **`L`**: Previous image.
 - **`R`**: Next image.
 - **`2L`**: Exit to Launcher.
+- **`2R`**: Toggle fullscreen; **`2L`** first leaves fullscreen when active.
+- Long names scroll continuously like Music and the Video browser. Automatic
+  fullscreen waits for one complete title pass; short names retain the 2 second delay.
 
 ---
 
@@ -104,7 +119,7 @@ These controls are active across the entire system regardless of the open applic
   1. **Theme**: Dark $\leftrightarrow$ Light
   2. **Master Vol**: 20% $\rightarrow$ 40% $\rightarrow$ 60% $\rightarrow$ 80% $\rightarrow$ 100%
   3. **Brightness**: 25% $\rightarrow$ 50% $\rightarrow$ 75% $\rightarrow$ 100%
-  4. **Amp Boost**: +0 dB $\rightarrow$ +3 dB $\rightarrow$ +6 dB $\rightarrow$ +9 dB
+  4. **Amp Boost**: +0 dB $\rightarrow$ +1 dB $\rightarrow$ +2 dB $\rightarrow$ +3 dB $\rightarrow$ +4 dB $\rightarrow$ +5 dB
   5. **Dim Timeout**: Off $\rightarrow$ 5s $\rightarrow$ 10s $\rightarrow$ 15s $\rightarrow$ 30s $\rightarrow$ 60s
   6. **Sleep Timeout**: Off $\rightarrow$ 15s $\rightarrow$ 30s $\rightarrow$ 1m $\rightarrow$ 2m $\rightarrow$ 5m
   7. **Auto-Off**: Never $\rightarrow$ 5m $\rightarrow$ 10m $\rightarrow$ 15m $\rightarrow$ 30m
@@ -150,3 +165,4 @@ Configurable in Settings $\rightarrow$ `USB Mode`:
   - Auto-off deep sleep is bypassed.
 - **`Managed`**:
   - Dynamically throttles radio into modem sleep when idle even when connected to USB to reduce thermal dissipation and power draw.
+

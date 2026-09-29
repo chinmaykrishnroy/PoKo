@@ -188,6 +188,8 @@ public:
 
     bool isLoaded() const { return _active; }
 
+    void refreshTheme() { if (_active) renderToCanvas(); }
+
     void onLeft() {
         _is24h = !_is24h;
         _dirty = true;
@@ -224,3 +226,4 @@ public:
         renderToCanvas();
     }
 };
+

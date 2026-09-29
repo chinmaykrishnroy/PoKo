@@ -11,13 +11,14 @@
 #include "PokoAppState.h"
 #include "PokoPins.h"
 #include "PokoTheme.h"
+#include "TitleMarquee.h"
 #include "PowerManager.h"
 
 // ─────────────────────────────────────────────────────────────
 //  GalleryApp — Photo viewer (128×128)
 //  Shows LittleFS uploaded images FIRST, then Server library images.
 //  In windowed mode: 64×64 thumbnail, title, counter & hints.
-//  After 2s of inactivity: switches to immersive 128×128 fullscreen.
+//  Auto-fullscreen after 2s, or after one complete long-title marquee pass.
 //  Controls:
 //    Single Left: Previous photo
 //    Single Right: Next photo
@@ -36,11 +37,11 @@ public:
     struct GalleryItem {
         PhotoSource source;
         char idOrPath[64];
-        char title[32];
+        char title[128];
         size_t fileSize;
     };
 
-    static constexpr int MAX_GALLERY_PHOTOS = 60;
+    static constexpr int MAX_GALLERY_PHOTOS = 999;
 
 private:
     Arduino_GFX*    _gfx;
@@ -52,11 +53,14 @@ private:
     bool     _fullscreen      = false;
     int      _photoIdx        = 0;
     int      _photoCount      = 0;
+    int      _localCount      = 0;
     uint32_t _lastActivityMs  = 0;
     uint32_t _lastSlideMs     = 0;
     uint32_t _lastBlinkMs     = 0;
+    TitleMarquee _marquee;
+    uint16_t _titleWidth = 0;
 
-    GalleryItem _photos[MAX_GALLERY_PHOTOS];
+    GalleryItem _photos[1] = {};
 
     uint8_t* _imgBuf      = nullptr;
     size_t   _imgSize     = 0;
@@ -77,6 +81,7 @@ private:
 
     void scanPhotos() {
         _photoCount = 0;
+        _localCount = 0;
         _loadedIdx = -1;
         _imgSize = 0;
 
@@ -87,66 +92,32 @@ private:
         File dir = LittleFS.open("/photos");
         if (dir && dir.isDirectory()) {
             File f = dir.openNextFile();
-            while (f && _photoCount < MAX_GALLERY_PHOTOS) {
+            while (f && _localCount < MAX_GALLERY_PHOTOS) {
                 if (!f.isDirectory()) {
-                    String fname = f.name();
-                    int slash = fname.lastIndexOf('/');
-                    if (slash >= 0) fname = fname.substring(slash + 1);
-                    int bslash = fname.lastIndexOf('\\');
-                    if (bslash >= 0) fname = fname.substring(bslash + 1);
-
-                    String lower = fname;
-                    lower.toLowerCase();
-                    if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
-                        GalleryItem& item = _photos[_photoCount++];
-                        item.source = PHOTO_LITTLEFS;
-                        snprintf(item.idOrPath, sizeof(item.idOrPath), "/photos/%s", fname.c_str());
-
-                        // Readable title: remove .jpg extension
-                        String t = fname;
-                        int dot = t.lastIndexOf('.');
-                        if (dot > 0) t = t.substring(0, dot);
-                        strncpy(item.title, t.c_str(), sizeof(item.title) - 1);
-                        item.title[sizeof(item.title) - 1] = '\0';
-                        item.fileSize = f.size();
-                    }
+                    String name = f.name();
+                    name.toLowerCase();
+                    if (name.endsWith(".jpg") || name.endsWith(".jpeg")) _localCount++;
                 }
                 f = dir.openNextFile();
             }
             dir.close();
         }
-
-        Serial.printf("[gallery] LittleFS photos found: %d\n", _photoCount);
+        _photoCount = _localCount;
+        Serial.printf("[gallery] LittleFS photos found: %d\n", _localCount);
 
         // 2. Fetch Server Images SECOND
         if (WiFi.status() == WL_CONNECTED && _photoCount < MAX_GALLERY_PHOTOS) {
             String host = prefs.getString("server_host", "192.168.0.15");
             int port = prefs.getInt("server_port", 8765);
-            int remaining = MAX_GALLERY_PHOTOS - _photoCount;
-            String url = "http://" + host + ":" + String(port) + "/api/library/image?page=1&page_size=" + String(remaining) + "&icons=false";
-
+            String url = "http://" + host + ":" + String(port) + "/api/library/image?page=1&page_size=1&icons=false&enrich=false";
             WiFiClient client;
             HTTPClient http;
             http.begin(client, url);
-            http.setTimeout(1000);
-            int code = http.GET();
-            if (code == 200) {
+            http.setTimeout(3000);
+            if (http.GET() == HTTP_CODE_OK) {
                 JsonDocument doc;
-                DeserializationError err = deserializeJson(doc, http.getStream());
-                if (!err) {
-                    JsonArray items = doc["items"].as<JsonArray>();
-                    for (JsonObject it : items) {
-                        if (_photoCount >= MAX_GALLERY_PHOTOS) break;
-                        GalleryItem& item = _photos[_photoCount++];
-                        item.source = PHOTO_SERVER;
-                        const char* id = it["id"] | "";
-                        const char* title = it["title"] | "Server Photo";
-                        strncpy(item.idOrPath, id, sizeof(item.idOrPath) - 1);
-                        item.idOrPath[sizeof(item.idOrPath) - 1] = '\0';
-                        strncpy(item.title, title, sizeof(item.title) - 1);
-                        item.title[sizeof(item.title) - 1] = '\0';
-                        item.fileSize = it["size_bytes"] | 0;
-                    }
+                if (!deserializeJson(doc, http.getStream())) {
+                    _photoCount += max(0, min((int)(doc["total"] | 0), MAX_GALLERY_PHOTOS - _localCount));
                 }
             }
             http.end();
@@ -158,7 +129,77 @@ private:
         }
     }
 
+    bool selectCurrentPhoto() {
+        GalleryItem selected = {};
+        if (_photoIdx < _localCount) {
+            File dir = LittleFS.open("/photos");
+            if (!dir || !dir.isDirectory()) return false;
+            File f = dir.openNextFile();
+            int position = 0;
+            bool found = false;
+            while (f) {
+                if (!f.isDirectory()) {
+                    String name = f.name();
+                    int slash = name.lastIndexOf('/');
+                    if (slash >= 0) name = name.substring(slash + 1);
+                    int bslash = name.lastIndexOf('\\');
+                    if (bslash >= 0) name = name.substring(bslash + 1);
+                    String lower = name;
+                    lower.toLowerCase();
+                    if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+                        if (position++ == _photoIdx) {
+                            selected.source = PHOTO_LITTLEFS;
+                            snprintf(selected.idOrPath, sizeof(selected.idOrPath), "/photos/%s", name.c_str());
+                            // Readable title: remove .jpg extension
+                            int dot = name.lastIndexOf('.');
+                            if (dot > 0) name = name.substring(0, dot);
+                            strlcpy(selected.title, name.c_str(), sizeof(selected.title));
+                            selected.fileSize = f.size();
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                f = dir.openNextFile();
+            }
+            dir.close();
+            if (!found) return false;
+        } else {
+            if (WiFi.status() != WL_CONNECTED) return false;
+            String host = prefs.getString("server_host", "192.168.0.15");
+            int port = prefs.getInt("server_port", 8765);
+            String url = "http://" + host + ":" + String(port) + "/api/library/image?page=" +
+                         String(_photoIdx - _localCount + 1) + "&page_size=1&icons=false&enrich=false";
+            WiFiClient client;
+            HTTPClient http;
+            http.begin(client, url);
+            http.setTimeout(3000);
+            bool found = false;
+            if (http.GET() == HTTP_CODE_OK) {
+                JsonDocument doc;
+                if (!deserializeJson(doc, http.getStream())) {
+                    JsonArray items = doc["items"].as<JsonArray>();
+                    if (!items.isNull() && items.size() > 0) {
+                        JsonObject item = items[0];
+                        selected.source = PHOTO_SERVER;
+                        strlcpy(selected.idOrPath, item["id"] | "", sizeof(selected.idOrPath));
+                        strlcpy(selected.title, item["title"] | "Server Photo", sizeof(selected.title));
+                        selected.fileSize = item["size_bytes"] | 0;
+                        found = selected.idOrPath[0] != '\0';
+                    }
+                }
+            }
+            http.end();
+            if (!found) return false;
+        }
+        _photos[0] = selected;
+        return true;
+    }
+
     void loadCurrentPhoto() {
+        _marquee.reset(millis());
+        _titleWidth = 0;
+        _lastActivityMs = millis();
         if (_photoCount == 0 || _photoIdx < 0 || _photoIdx >= _photoCount) {
             _imgSize = 0;
             _loadedIdx = -1;
@@ -184,18 +225,28 @@ private:
             return;
         }
 
-        GalleryItem& item = _photos[_photoIdx];
+        if (!selectCurrentPhoto()) {
+            _photos[0] = {};
+            strlcpy(_photos[0].title, "Unavailable", sizeof(_photos[0].title));
+            _loadFailed = true;
+            _loading = false;
+            return;
+        }
+        GalleryItem& item = _photos[0];
 
         if (item.source == PHOTO_LITTLEFS) {
             if (LittleFS.exists(item.idOrPath)) {
                 File f = LittleFS.open(item.idOrPath, "r");
                 if (f) {
                     size_t sz = f.size();
-                    if (sz > 0 && sz <= (64 * 1024)) {
+                    if (sz > 4 && sz <= (64 * 1024)) {
                         size_t rd = f.read(_imgBuf, sz);
-                        _imgSize = rd;
-                        item.fileSize = rd;
-                        _loadedIdx = _photoIdx;
+                        if (rd == sz && _imgBuf[0] == 0xFF && _imgBuf[1] == 0xD8 &&
+                            _imgBuf[rd - 2] == 0xFF && _imgBuf[rd - 1] == 0xD9) {
+                            _imgSize = rd;
+                            item.fileSize = rd;
+                            _loadedIdx = _photoIdx;
+                        }
                     }
                     f.close();
                 }
@@ -215,8 +266,9 @@ private:
                     int len = http.getSize();
                     WiFiClient* stream = http.getStreamPtr();
                     size_t totalRead = 0;
-                    uint32_t startMs = millis();
-                    while (http.connected() && (len < 0 || totalRead < (size_t)len) && (millis() - startMs < 1000)) {
+                    uint32_t lastProgressMs = millis();
+                    while (http.connected() && (len < 0 || totalRead < (size_t)len) &&
+                           totalRead < 64 * 1024 && millis() - lastProgressMs < 3000) {
                         size_t avail = stream->available();
                         if (avail) {
                             size_t toRead = avail;
@@ -226,11 +278,14 @@ private:
                             if (totalRead + toRead > 64 * 1024) break;
                             size_t r = stream->readBytes(_imgBuf + totalRead, toRead);
                             totalRead += r;
+                            if (r > 0) lastProgressMs = millis();
                         } else {
                             delay(2);
                         }
                     }
-                    if (totalRead > 50) {
+                    if (totalRead > 50 && (len < 0 || totalRead == (size_t)len) &&
+                        _imgBuf[0] == 0xFF && _imgBuf[1] == 0xD8 &&
+                        _imgBuf[totalRead - 2] == 0xFF && _imgBuf[totalRead - 1] == 0xD9) {
                         _imgSize = totalRead;
                         item.fileSize = totalRead;
                         _loadedIdx = _photoIdx;
@@ -242,6 +297,9 @@ private:
 
         _loadFailed = (_imgSize == 0);
         _loading = false;
+        // Network loading time is not time the user spent reading the title.
+        _marquee.reset(millis());
+        _lastActivityMs = millis();
     }
 
     void renderToCanvas() {
@@ -328,7 +386,7 @@ private:
             }
 
             // Source badge: [LFS] or [SRV]
-            bool isLfs = (_photos[_photoIdx].source == PHOTO_LITTLEFS);
+            bool isLfs = (_photos[0].source == PHOTO_LITTLEFS);
             _canvas->setFont(u8g2_font_5x7_tf);
             _canvas->setTextColor(isLfs ? pokoClrGreen() : pokoClrCyan(), theme.headerBg);
             _canvas->setCursor(52, 11);
@@ -366,24 +424,34 @@ private:
                 _canvas->print("Loading");
             }
 
-            // Subtitle / Filename (y=88..100)
-            _canvas->setFont(u8g2_font_5x7_tf);
+            // Filename ticker; the entire stored title remains readable.
+            _canvas->setTextWrap(false);
+            _canvas->setFont(u8g2_font_profont10_mf);
             _canvas->setTextColor(theme.text, theme.bg);
-            const char* title = _photos[_photoIdx].title;
+            const char* title = _photos[0].title;
             _canvas->getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
-            if (w <= 122) {
-                _canvas->setCursor(64 - w / 2, 98);
+            _titleWidth = w;
+            if (w <= 120) {
+                _canvas->setCursor(max(4, (128 - (int)w) / 2), 98);
+                _canvas->print(title);
             } else {
-                _canvas->setCursor(3, 98);
+                int dx = 4 - _marquee.offset();
+                _canvas->setCursor(dx, 98);
+                _canvas->print(title);
+                if (dx + (int)w < 124) {
+                    _canvas->setCursor(dx + w + TitleMarquee::GAP, 98);
+                    _canvas->print(title);
+                }
             }
-            _canvas->print(title);
+            _canvas->fillRect(0, 86, 4, 15, theme.bg);
+            _canvas->fillRect(124, 86, 4, 15, theme.bg);
 
             // Info line (y=102..110)
             _canvas->setFont(u8g2_font_4x6_tf);
             _canvas->setTextColor(theme.muted, theme.bg);
             char infoBuf[32];
             if (isLfs) {
-                snprintf(infoBuf, sizeof(infoBuf), "LittleFS (%.1f KB)", (float)_photos[_photoIdx].fileSize / 1024.0f);
+                snprintf(infoBuf, sizeof(infoBuf), "LittleFS (%.1f KB)", (float)_photos[0].fileSize / 1024.0f);
             } else {
                 snprintf(infoBuf, sizeof(infoBuf), "Media Server");
             }
@@ -436,7 +504,7 @@ public:
     void unload() {
         _active = false;
         if (powerManager) {
-            powerManager->releaseLock(POWER_LOCK_DISPLAY);
+            powerManager->releaseLock(POWER_LOCK_DISPLAY, LOCK_OWNER_GALLERY);
         }
         if (_canvas) {
             delete _canvas;
@@ -458,6 +526,8 @@ public:
     }
 
     bool isLoaded() const { return _active; }
+
+    void refreshTheme() { if (_active) renderToCanvas(); }
 
     void onLeft() {
         _lastActivityMs = millis();
@@ -483,6 +553,7 @@ public:
         if (_fullscreen) {
             // Exit fullscreen back to windowed mode
             _fullscreen = false;
+            _marquee.reset(millis());
             _lastActivityMs = millis();
             _dirty = true;
         } else {
@@ -494,6 +565,7 @@ public:
     void onEnter() {
         // Toggle fullscreen mode
         _fullscreen = !_fullscreen;
+        _marquee.reset(millis());
         _lastActivityMs = millis();
         _dirty = true;
     }
@@ -509,8 +581,11 @@ public:
             _dirty = true;
         }
 
-        // 2-Second Inactivity Fullscreen Transition
-        if (!_fullscreen && _photoCount > 0 && (now - _lastActivityMs >= 2000)) {
+        if (!_fullscreen && _marquee.update(now, _titleWidth)) _dirty = true;
+
+        // Preserve immersive viewing, but let a long title complete a pass first.
+        if (!_fullscreen && _photoCount > 0 &&
+            (now - _lastActivityMs >= TitleMarquee::readingTime(_titleWidth))) {
             _fullscreen = true;
             _dirty = true;
         }
@@ -518,7 +593,7 @@ public:
         // Slideshow Auto-advance Timer
         int slideInterval = prefs.getInt("gallery_timer", 0);
         if (slideInterval > 0 && _photoCount > 1) {
-            if (powerManager) powerManager->acquireLock(POWER_LOCK_DISPLAY);
+            if (powerManager) powerManager->acquireLock(POWER_LOCK_DISPLAY, LOCK_OWNER_GALLERY);
             if (now - _lastSlideMs >= (uint32_t)slideInterval * 1000) {
                 _lastSlideMs = now;
                 _photoIdx = (_photoIdx + 1) % _photoCount;
@@ -526,7 +601,7 @@ public:
                 _dirty = true;
             }
         } else {
-            if (powerManager) powerManager->releaseLock(POWER_LOCK_DISPLAY);
+            if (powerManager) powerManager->releaseLock(POWER_LOCK_DISPLAY, LOCK_OWNER_GALLERY);
         }
 
         if (!_dirty) return;
@@ -534,3 +609,4 @@ public:
         renderToCanvas();
     }
 };
+

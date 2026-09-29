@@ -56,7 +56,7 @@ PoKo is a **full-featured pocket media device** running on an ESP32-S3 microcont
 | 🎵 **Music** | Browse & stream MP3 audio from the media server with album art |
 | 🎬 **Video** | Stream MJPEG video with synchronized PCM audio |
 | 🖼️ **Gallery** | View LittleFS-stored photos + server-indexed images |
-| ⚙️ **Settings** | Brightness, volume, theme, Wi-Fi, encoder, and more |
+| ⚙️ **Settings** | Brightness, volume, theme, Wi-Fi, button controls, and more |
 
 ### Web Control Panel (`http://<device-ip>/`)
 
@@ -71,7 +71,9 @@ PoKo is a **full-featured pocket media device** running on an ESP32-S3 microcont
 
 - OTA firmware updates over Wi-Fi (`/ota`)
 - LittleFS filesystem for photos (1.5 MB partition)
-- Encoder-based navigation with configurable invert and timeout
+- Three-button navigation with single-, double-, hold-, and chord gestures
+- Wake from L, R, or PWR with the wake gesture consumed before normal input
+- Music-style scrolling titles in Music, Video, and Gallery
 - Persistent preferences (brightness, volume, Wi-Fi credentials, theme…)
 - PSRAM-backed decode buffers for smooth video
 
