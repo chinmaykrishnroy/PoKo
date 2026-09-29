@@ -199,11 +199,21 @@ are for USB provisioning and are not OTA images.
 
 ---
 
+## Documentation
+
+- [**Complete Device & Microcontroller Manual (DEVICE_MANUAL.md)**](DEVICE_MANUAL.md) — Comprehensive reference covering ESP32-S3 architecture, FreeRTOS tasks, dynamic resource/power management, on-screen dots (Wi-Fi, audio, carousel), detailed walkthrough of all 8 apps, all 28 telemetry metrics, all 16 system preferences, reboot/shutdown procedures, and REST API.
+- [**Button Controls & Navigation Guide (BUTTON_CONTROLS.md)**](BUTTON_CONTROLS.md) — Physical button layout, debounce timings, and quick gesture matrix.
+- [**Release Versioning & Git Tags (VERSIONING.md)**](VERSIONING.md) — Semantic versioning policy and automated release workflows.
+
+---
+
 ## Repository Layout
 
 ```
 Poko/
 ├── PoKo.ino               # Main sketch — setup(), loop(), app switching
+├── DEVICE_MANUAL.md       # Complete device & microcontroller manual
+├── BUTTON_CONTROLS.md     # Physical button controls guide
 ├── PokoUI.h               # Launcher carousel with GFX-drawn icons
 ├── PokoAPI.h              # HTTP REST API endpoints
 ├── PokoWebUI.h            # Embedded web control panel (single-file HTML/JS/CSS)
