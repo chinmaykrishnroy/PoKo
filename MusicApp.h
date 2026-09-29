@@ -61,6 +61,8 @@ private:
     int       _catalogTotal = 0;
     bool      _loadingList  = false;
     bool      _serverError  = false;
+    bool      _serverOffline = false;
+    bool      _contentMissing = false;
 
     uint8_t*  _artBuf       = nullptr;
     size_t    _artSize      = 0;
@@ -149,6 +151,8 @@ private:
     bool fetchSongList(int index = 0, bool loadArt = true) {
         if (WiFi.status() != WL_CONNECTED || index < 0 || index >= MAX_CATALOG_ITEMS) {
             _serverError = true;
+            _serverOffline = true;
+            _contentMissing = false;
             _dirty = true;
             return false;
         }
@@ -157,6 +161,8 @@ private:
             _selectedIdx = index - _pageStart;
             if (loadArt) fetchArtwork(_selectedIdx);
             _serverError = false;
+            _serverOffline = false;
+            _contentMissing = false;
             _dirty = true;
             return true;
         }
@@ -212,7 +218,9 @@ private:
             _catalogTotal = total;
             if (loadArt) fetchArtwork(_selectedIdx);
         }
-        _serverError = !loaded;
+        _serverError = !parsed;
+        _serverOffline = httpCode <= 0;
+        _contentMissing = parsed && total > 0 && !loaded;
         _dirty = true;
         return loaded;
     }
@@ -281,13 +289,15 @@ private:
         if (!_artBitmapValid) _artFailures++;
     }
 
-    bool requestPlay(int idx, uint32_t startSec = 0) {
+    bool requestPlay(int idx, uint32_t startSec = 0, bool retryMissing = true) {
         if (idx < 0 || idx >= _songCount) return false;
         bool wasMusicActive = audioManager && audioManager->activeSource() == AUDIO_MUSIC;
 
         if (!audioManager || !audioManager->request(AUDIO_MUSIC)) {
             if (!wasMusicActive) _mode = MODE_BROWSE;
             _serverError = true;
+            _serverOffline = false;
+            _contentMissing = false;
             _dirty = true;
             return false;
         }
@@ -297,6 +307,8 @@ private:
             else audioManager->release(AUDIO_MUSIC);
             _mode = MODE_BROWSE;
             _serverError = true;
+            _serverOffline = false;
+            _contentMissing = false;
             _dirty = true;
             return false;
         }
@@ -313,6 +325,8 @@ private:
             else audioManager->release(AUDIO_MUSIC);
             _mode = MODE_BROWSE;
             _serverError = true;
+            _serverOffline = false;
+            _contentMissing = false;
             _dirty = true;
             return false;
         }
@@ -343,6 +357,8 @@ private:
             _lastScrollMs = millis();
             _dirty = true;
             _serverError = false;
+            _serverOffline = false;
+            _contentMissing = false;
 
             if (_songs[idx].duration_s > 0) {
                 pixelEngine.setSongProgress((float)startSec / (float)_songs[idx].duration_s);
@@ -357,11 +373,26 @@ private:
         _mode = MODE_BROWSE;
         _paused = false;
         _trackPos = 0;
-        _serverError = true;
+        _serverError = httpCode != HTTP_CODE_NOT_FOUND;
+        _serverOffline = httpCode <= 0;
+        _contentMissing = httpCode == HTTP_CODE_NOT_FOUND;
         _dirty = true;
         audioPlugin->stopStream();
         audioPlugin->unload();
         if (!wasMusicActive) audioManager->release(AUDIO_MUSIC);
+        if (httpCode == HTTP_CODE_NOT_FOUND && retryMissing) {
+            int target = _catalogIndex;
+            _songCount = 0;
+            _pageStart = -1;
+            if (!fetchSongList(target, false) && target > 0) {
+                fetchSongList(0, false);
+            }
+            if (_songCount > 0) return requestPlay(_selectedIdx, 0, false);
+            _serverError = false;
+            _serverOffline = false;
+            _contentMissing = true;
+            _dirty = true;
+        }
         return false;
     }
 
@@ -429,10 +460,10 @@ private:
             _canvas->getTextBounds(statusStr, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(125 - w, 11);
             _canvas->print(statusStr);
-        } else if (_serverError) {
+        } else if (_serverError || _contentMissing) {
             _canvas->setTextColor(0xF800, theme.headerBg);
             _canvas->setCursor(76, 11);
-            _canvas->print("Offline");
+            _canvas->print(_contentMissing ? "Missing" : (_serverOffline ? "Offline" : "Error"));
         } else if (_songCount > 0) {
             char badge[24];
             snprintf(badge, sizeof(badge), "%d/%d", _catalogIndex + 1, _catalogTotal);
@@ -454,14 +485,15 @@ private:
             // Album Artwork Frame (y=16..78)
             _canvas->drawRoundRect(32, 16, 64, 64, 6, theme.surface2);
 
-            if (!_serverError && _artBitmapValid && _artBitmap) {
+            if (!_serverError && !_contentMissing && _artBitmapValid && _artBitmap) {
                 _canvas->draw16bitRGBBitmap(34, 18, _artBitmap, 60, 60);
             } else {
                 _canvas->fillRoundRect(34, 18, 60, 60, 4, theme.surface);
                 _canvas->setFont(u8g2_font_helvB14_tf);
-                _canvas->setTextColor(_serverError ? 0xF800 : theme.accent, theme.surface);
-                _canvas->setCursor(_serverError ? 61 : 58, 54);
-                _canvas->print(_serverError ? "!" : ">");
+                bool showError = _serverError || _contentMissing;
+                _canvas->setTextColor(showError ? 0xF800 : theme.accent, theme.surface);
+                _canvas->setCursor(showError ? 61 : 58, 54);
+                _canvas->print(showError ? "!" : ">");
             }
 
             // Single-line "Name - Artist" label (y=92) - scroll if long, else center
@@ -470,8 +502,10 @@ private:
             _canvas->setFont(u8g2_font_helvB08_tf);
             _canvas->setTextColor(theme.text, theme.bg);
             String label;
-            if (_serverError) {
-                label = "Start PoKo Server";
+            if (_contentMissing) {
+                label = "Media Not Found";
+            } else if (_serverError) {
+                label = _serverOffline ? "Start PoKo Server" : "Server Error";
             } else if (_songCount > 0) {
                 if (strlen(_songs[_selectedIdx].artist) > 0) {
                     label = String(_songs[_selectedIdx].title) + " - " + String(_songs[_selectedIdx].artist);
@@ -521,7 +555,7 @@ private:
             _canvas->drawFastHLine(0, 114, 128, theme.line);
             _canvas->setFont(u8g2_font_5x7_tf);
             _canvas->setTextColor(theme.footerText, theme.headerBg);
-            const char* hint = _serverError ? "2R:Retry  2L:Back" :
+            const char* hint = (_serverError || _contentMissing) ? "2R:Retry  2L:Back" :
                                ((_songCount > 0) ? "L:Prv  R:Nxt  2R:Play" : "2R:Retry  2L:Back");
             _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(64 - w / 2, 124);

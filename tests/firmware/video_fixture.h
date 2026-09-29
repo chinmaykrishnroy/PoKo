@@ -32,11 +32,12 @@ struct SyncedAVPlayer {
     bool isRunning() { return running; }
 } player;
 auto* syncPlugin = &player;
-int httpResult = 202, requests = 0, listRequests = 0;
+enum { HTTP_CODE_NOT_FOUND = 404 };
+int httpResult = 202, secondHttpResult = 202, requests = 0, listRequests = 0;
 bool listResult = true;
 struct HTTPClient {
     void begin(String) {} void setConnectTimeout(int) {} void setTimeout(int) {}
-    int GET() { ++requests; return httpResult; }
+    int GET() { ++requests; return requests == 1 ? httpResult : secondHttpResult; }
     void end() {}
 };
 class VideoApp {
@@ -47,7 +48,8 @@ public:
     using VideoItem = Item;
     int _videoCount = 2, _selectedIdx = 0, _pageStart = 0, _catalogIndex = 0, _catalogTotal = 2, thumbnails = 0;
     unsigned _lastScrollMs = 0, _playStartMs = 0;
-    bool _serverError = false, _dirty = false, _streamStarted = false;
+    bool _serverError = false, _serverOffline = false, _contentMissing = false;
+    bool _dirty = false, _streamStarted = false;
     TitleMarquee _marquee;
     uint16_t _titleWidth = 0;
     String getServerHost() { return "test"; }

@@ -7,6 +7,22 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v1.3.3] — 2026-09-30
+
+### Fixed
+- Music, Video, and Gallery now distinguish an unreachable server from missing
+  media and server-side failures instead of always showing `Start PoKo Server`.
+- A stale music, video, or image ID caused by a changed media path now refreshes
+  the catalog and selects the closest available item automatically.
+- When refreshed media is unavailable, the device reports `Media Not Found`;
+  it reserves the offline prompt for transport failures.
+
+### Tested
+- Added firmware regression cases for successful stale-video recovery and an
+  empty refreshed catalog.
+
+---
+
 ## [v1.3.2] — 2026-09-30
 
 ### Fixed

@@ -28,8 +28,20 @@ int main(int argc, char** argv) {
         httpResult = 500;
         app.onRight();
         CHECK(app._mode == VideoApp::MODE_BROWSE && app._serverError);
+        CHECK(!app._serverOffline && !app._contentMissing);
         CHECK(power.locks == 0 && audio.releases == 1);
         CHECK(!player.loaded);
+    } else if (!strcmp(argv[1], "missing-refresh")) {
+        httpResult = 404;
+        app.onRight();
+        CHECK(listRequests == 1 && requests == 2);
+        CHECK(app._mode == VideoApp::MODE_PLAYING && !app._serverError && !app._contentMissing);
+    } else if (!strcmp(argv[1], "missing-empty")) {
+        httpResult = 404;
+        listResult = false;
+        app.onRight();
+        CHECK(listRequests == 2 && requests == 1);
+        CHECK(app._mode == VideoApp::MODE_BROWSE && !app._serverError && app._contentMissing);
     } else if (!strcmp(argv[1], "stop-timeout")) {
         player.failUnload = true;
         app.requestStop();

@@ -68,6 +68,9 @@ private:
     int      _loadedIdx   = -1;
     bool     _loadFailed  = false;
     bool     _loading     = false;
+    bool     _serverOffline = false;
+    bool     _serverError = false;
+    bool     _contentMissing = false;
 
     inline static Arduino_Canvas* _activeCanvas = nullptr;
 
@@ -85,6 +88,9 @@ private:
         _localCount = 0;
         _loadedIdx = -1;
         _imgSize = 0;
+        _serverOffline = WiFi.status() != WL_CONNECTED;
+        _serverError = _serverOffline;
+        _contentMissing = false;
 
         // 1. Scan LittleFS FIRST (/photos/)
         if (!LittleFS.exists("/photos")) {
@@ -117,11 +123,17 @@ private:
             http.setConnectTimeout(1000);
             http.setTimeout(3000);
             esp_task_wdt_reset();
-            if (http.GET() == HTTP_CODE_OK) {
+            int code = http.GET();
+            if (code == HTTP_CODE_OK) {
                 JsonDocument doc;
                 if (!deserializeJson(doc, http.getStream())) {
                     _photoCount += max(0, min((int)(doc["total"] | 0), MAX_GALLERY_PHOTOS - _localCount));
+                    _serverOffline = false;
+                    _serverError = false;
                 }
+            } else {
+                _serverOffline = code <= 0;
+                _serverError = true;
             }
             http.end();
             esp_task_wdt_reset();
@@ -203,7 +215,7 @@ private:
         return true;
     }
 
-    void loadCurrentPhoto() {
+    void loadCurrentPhoto(bool retryMissing = true) {
         _marquee.reset(millis());
         _titleWidth = 0;
         _lastActivityMs = millis();
@@ -272,6 +284,9 @@ private:
                 esp_task_wdt_reset();
                 int code = http.GET();
                 if (code == 200) {
+                    _serverOffline = false;
+                    _serverError = false;
+                    _contentMissing = false;
                     int len = http.getSize();
                     WiFiClient* stream = http.getStreamPtr();
                     size_t totalRead = 0;
@@ -303,6 +318,26 @@ private:
                 }
                 http.end();
                 esp_task_wdt_reset();
+                if (code == HTTP_CODE_NOT_FOUND && retryMissing) {
+                    // A path/config change can invalidate the cached item ID.
+                    // Refresh the server count and load the closest available photo.
+                    scanPhotos();
+                    if (_photoCount > 0) {
+                        loadCurrentPhoto(false);
+                        return;
+                    }
+                    _serverOffline = false;
+                    _serverError = false;
+                    _contentMissing = true;
+                } else if (code == HTTP_CODE_NOT_FOUND) {
+                    _serverOffline = false;
+                    _serverError = false;
+                    _contentMissing = true;
+                } else if (code != HTTP_CODE_OK) {
+                    _serverOffline = code <= 0;
+                    _serverError = true;
+                    _contentMissing = false;
+                }
             }
         }
 
@@ -343,15 +378,26 @@ private:
 
             _canvas->setFont(u8g2_font_helvB08_tf);
             _canvas->setTextColor(theme.accent, theme.surface);
-            _canvas->setCursor(34, 46);
-            _canvas->print("No Photos");
+            const char* emptyTitle = _contentMissing ? "Media Not Found" :
+                                     (_serverError ? (_serverOffline ? "Server Offline" : "Server Error") : "No Photos");
+            int16_t ex1, ey1; uint16_t ew, eh;
+            _canvas->getTextBounds(emptyTitle, 0, 0, &ex1, &ey1, &ew, &eh);
+            _canvas->setCursor(max(4, 64 - (int)ew / 2), 46);
+            _canvas->print(emptyTitle);
 
             _canvas->setFont(u8g2_font_5x7_tf);
             _canvas->setTextColor(theme.muted, theme.surface);
-            _canvas->setCursor(22, 64);
-            _canvas->print("Upload via Web UI");
-            _canvas->setCursor(20, 76);
-            _canvas->print("or connect server");
+            if (_serverOffline) {
+                _canvas->setCursor(20, 64);
+                _canvas->print("Start PoKo Server");
+                _canvas->setCursor(29, 76);
+                _canvas->print("then retry");
+            } else {
+                _canvas->setCursor(22, 64);
+                _canvas->print("Upload via Web UI");
+                _canvas->setCursor(30, 76);
+                _canvas->print("or fix path");
+            }
 
             // Footer
             _canvas->fillRect(0, 114, 128, 14, theme.headerBg);
@@ -426,8 +472,12 @@ private:
             } else if (_loadFailed) {
                 _canvas->setFont(u8g2_font_5x7_tf);
                 _canvas->setTextColor(0xF800, theme.surface);
-                _canvas->setCursor(47, 52);
-                _canvas->print("Error");
+                const char* loadLabel = _contentMissing ? "Not Found" :
+                                        (_serverOffline ? "Offline" : "Error");
+                int16_t lx1, ly1; uint16_t lw, lh;
+                _canvas->getTextBounds(loadLabel, 0, 0, &lx1, &ly1, &lw, &lh);
+                _canvas->setCursor(64 - (int)lw / 2, 52);
+                _canvas->print(loadLabel);
             } else {
                 _canvas->setFont(u8g2_font_5x7_tf);
                 _canvas->setTextColor(theme.muted, theme.surface);

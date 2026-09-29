@@ -126,10 +126,11 @@ git push origin main --tags
 
 | Version | Date | Highlights |
 |---------|------|-----------|
+| v1.3.3 | 2026-09-30 | Recover stale media IDs and distinguish missing media, server errors, and offline state |
+| v1.3.2 | 2026-09-30 | Reliable physical buttons and wake gestures, safe audio/video transitions, silent-video streaming, title marquees, and backend hardening |
 | v1.0.0 | 2026-09-20 | Initial release: launcher, all apps, dual-button combos, dark/light themes |
 | v1.1.0 | 2026-09-26 | Safe Mode, OTA, REST API, screen-wake on plug-in/OTA, TWDT, crash recovery |
 | v1.2.0 | 2026-09-28 | Themed loading screens, real-time InfoApp, high-contrast light theme, button bug fixes |
-| v1.3.2 | 2026-09-30 | Reliable physical buttons and wake gestures, safe audio/video transitions, silent-video streaming, title marquees, and backend hardening |
 
 ---
 
@@ -137,7 +138,7 @@ git push origin main --tags
 
 If a firmware update changes the NVS keys or value types, document it here and provide a migration note in the changelog. Users upgrading from an incompatible version may need to wipe NVS via the Settings app (hold L+R for 5 s).
 
-Current NVS keys (reviewed for v1.3.2):
+Current NVS keys (reviewed for v1.3.3):
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|

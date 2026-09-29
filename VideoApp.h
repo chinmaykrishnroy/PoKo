@@ -63,6 +63,8 @@ private:
     int       _catalogTotal = 0;
     bool      _loadingList  = false;
     bool      _serverError  = false;
+    bool      _serverOffline = false;
+    bool      _contentMissing = false;
 
     uint8_t*  _thumbBuf     = nullptr;
     size_t    _thumbSize    = 0;
@@ -97,6 +99,8 @@ private:
     bool fetchVideoList(int index = 0, bool loadThumb = true) {
         if (WiFi.status() != WL_CONNECTED || index < 0 || index >= MAX_CATALOG_ITEMS) {
             _serverError = true;
+            _serverOffline = true;
+            _contentMissing = false;
             _dirty = true;
             return false;
         }
@@ -105,6 +109,8 @@ private:
             _selectedIdx = index - _pageStart;
             if (loadThumb) fetchThumbnail(_selectedIdx);
             _serverError = false;
+            _serverOffline = false;
+            _contentMissing = false;
             _dirty = true;
             return true;
         }
@@ -159,7 +165,9 @@ private:
             _catalogTotal = total;
             if (loadThumb) fetchThumbnail(_selectedIdx);
         }
-        _serverError = !loaded;
+        _serverError = !parsed;
+        _serverOffline = httpCode <= 0;
+        _contentMissing = parsed && total > 0 && !loaded;
         _dirty = true;
         return loaded;
     }
@@ -212,7 +220,7 @@ private:
         _marquee.reset(millis());
     }
 
-    void failPlayback() {
+    void failPlayback(int httpCode = 0) {
         if (syncPlugin) syncPlugin->unload();
         // A timed-out worker retains its buffers and ownership until it exits.
         if (audioManager && (!syncPlugin || !syncPlugin->isLoaded())) {
@@ -223,11 +231,13 @@ private:
         }
         _mode = MODE_BROWSE;
         _serverError = true;
+        _serverOffline = httpCode <= 0;
+        _contentMissing = false;
         _streamStarted = false;
         _dirty = true;
     }
 
-    void requestPlay(int idx) {
+    void requestPlay(int idx, bool retryMissing = true) {
         if (idx < 0 || idx >= _videoCount) return;
         // Quiesce BOTH old transports and the audio consumer before clearing
         // their queues/clock. A live reset mixes old timestamps into the new clip.
@@ -261,6 +271,8 @@ private:
         if (httpCode >= 200 && httpCode < 300) {
             _mode = MODE_PLAYING;
             _serverError = false;
+            _serverOffline = false;
+            _contentMissing = false;
             _streamStarted = false;
             _playStartMs = millis();
             _dirty = true;
@@ -270,7 +282,31 @@ private:
             }
         } else {
             Serial.printf("[video] requestPlay failed with code %d\n", httpCode);
-            failPlayback();
+            failPlayback(httpCode);
+            if (httpCode == HTTP_CODE_NOT_FOUND && retryMissing) {
+                // The server is reachable, but this cached ID disappeared after a
+                // path/config change. Refresh the catalog and play the item now at
+                // the same position (or the first available item if it shrank).
+                int target = _catalogIndex;
+                _videoCount = 0;
+                _pageStart = -1;
+                if (!fetchVideoList(target, false) && target > 0) {
+                    fetchVideoList(0, false);
+                }
+                if (_videoCount > 0) {
+                    requestPlay(_selectedIdx, false);
+                    return;
+                }
+                _serverError = false;
+                _serverOffline = false;
+                _contentMissing = true;
+                _dirty = true;
+            } else if (httpCode == HTTP_CODE_NOT_FOUND) {
+                _serverError = false;
+                _serverOffline = false;
+                _contentMissing = true;
+                _dirty = true;
+            }
         }
     }
 
@@ -343,10 +379,10 @@ private:
         _canvas->setFont(u8g2_font_5x7_tf);
         int16_t x1, y1; uint16_t w, h;
 
-        if (_serverError) {
+        if (_serverError || _contentMissing) {
             _canvas->setTextColor(0xF800, theme.headerBg);
             _canvas->setCursor(76, 11);
-            _canvas->print("Offline");
+            _canvas->print(_contentMissing ? "Missing" : (_serverOffline ? "Offline" : "Error"));
         } else if (_videoCount > 0) {
             char badge[16];
             snprintf(badge, sizeof(badge), "%d/%d", _catalogIndex + 1, _catalogTotal);
@@ -367,7 +403,7 @@ private:
         // Single Video Card Frame (y=16..84)
         _canvas->drawRoundRect(14, 16, 100, 68, 6, theme.surface2);
 
-        if (!_serverError && _thumbSize > 100) {
+        if (!_serverError && !_contentMissing && _thumbSize > 100) {
             // Draw downloaded JPEG thumbnail centered inside the card
             _activeCanvas = _canvas;
             TJpgDec.setJpgScale(1);
@@ -379,9 +415,10 @@ private:
             // Placeholder video slate
             _canvas->fillRoundRect(16, 18, 96, 64, 4, theme.surface);
             _canvas->setFont(u8g2_font_helvB14_tf);
-            _canvas->setTextColor(_serverError ? 0xF800 : theme.accent, theme.surface);
-            _canvas->setCursor(_serverError ? 61 : 58, 56);
-            _canvas->print(_serverError ? "!" : ">");
+            bool showError = _serverError || _contentMissing;
+            _canvas->setTextColor(showError ? 0xF800 : theme.accent, theme.surface);
+            _canvas->setCursor(showError ? 61 : 58, 56);
+            _canvas->print(showError ? "!" : ">");
         }
 
         // Title (y=92..101) - scroll if long, else center
@@ -389,8 +426,9 @@ private:
         _canvas->setTextWrap(false);
         _canvas->setFont(u8g2_font_profont10_mf);
         _canvas->setTextColor(theme.text, theme.bg);
-        const char* title = _serverError ? "Start PoKo Server" :
-                            ((_videoCount > 0) ? _videos[_selectedIdx].title : "No Videos");
+        const char* title = _contentMissing ? "Media Not Found" :
+                            (_serverError ? (_serverOffline ? "Start PoKo Server" : "Server Error") :
+                            ((_videoCount > 0) ? _videos[_selectedIdx].title : "No Videos"));
         _canvas->getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
         _titleWidth = w;
         if (w <= 120) {
@@ -434,7 +472,7 @@ private:
         _canvas->drawFastHLine(0, 114, 128, theme.line);
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(theme.footerText, theme.headerBg);
-        const char* hint = _serverError ? "Failed  2R:Retry" : ((_videoCount > 0) ? "L:Prv  R:Nxt  2R:Play" : "2R:Retry  2L:Back");
+        const char* hint = (_serverError || _contentMissing) ? "Failed  2R:Retry" : ((_videoCount > 0) ? "L:Prv  R:Nxt  2R:Play" : "2R:Retry  2L:Back");
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
         _canvas->print(hint);
@@ -496,6 +534,8 @@ public:
         _streamStarted = false;
         _playStartMs = millis();
         _serverError = false;
+        _serverOffline = false;
+        _contentMissing = false;
         _dirty = true;
         if (powerManager) powerManager->acquireLock(POWER_LOCK_DISPLAY | POWER_LOCK_REALTIME_NET, LOCK_OWNER_VIDEO);
         return true;
