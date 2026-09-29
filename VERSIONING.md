@@ -49,7 +49,7 @@ git status
 arduino-cli compile -b "esp32:esp32:esp32s3:FlashSize=8M,PSRAM=opi,PartitionScheme=default_8MB" --output-dir ./build .
 
 # 3. OTA flash to the device and verify
-curl.exe -F "update=@./build/esp32.esp32.esp32s3/Poko.ino.bin" http://<device-ip>/ota/upload
+curl.exe -F "update=@./build/esp32.esp32.esp32s3/PoKo.ino.bin" http://<device-ip>/ota/upload
 curl.exe -s "http://<device-ip>/api/health"
 # Confirm uptime_ms is small (device rebooted with new firmware)
 ```
@@ -95,7 +95,7 @@ After pushing the tag, go to **GitHub → Releases → Draft a new release**:
 1. Select the tag you just pushed.
 2. Set the release title to `vX.Y.Z`.
 3. Paste the relevant `CHANGELOG.md` section as the description.
-4. Attach the compiled binary: `./build/Poko.ino.bin` (rename to `Poko-vX.Y.Z.bin` for clarity).
+4. Attach the compiled binary: `./build/PoKo.ino.bin` (rename to `PoKo-vX.Y.Z.bin` for clarity).
 5. Publish the release.
 
 ---

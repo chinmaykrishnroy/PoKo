@@ -61,7 +61,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Real-time InfoApp refresh** — All system rows (uptime, battery %, charging state, WiFi, time) now rebuild every 250 ms; charging state change triggers an immediate rebuild.
 - **Theme-aware accent colors** — New inline helpers `pokoClrGreen()`, `pokoClrWarn()`, `pokoClrCyan()`, `pokoClrErr()` return deep/dark variants on light theme and bright variants on dark theme. Applied across `SSyncApp`, `InfoApp`, `MusicApp`, `GalleryApp`, `PixelApp`, `AudioManager`.
 - **Per-app tile accent colors** — Launcher carousel icons use deep-contrast per-app colors in light mode (dark forest green for SSync, deep navy for Clock, etc.).
-- **`getAppName()` helper** in `Poko.ino` — maps `AppState` enum to a human-readable string used by the loading screen.
+- **`getAppName()` helper** in `PoKo.ino` — maps `AppState` enum to a human-readable string used by the loading screen.
 - **`BUTTON_CONTROLS.md`** — Comprehensive reference for all button gestures, combos, and per-app mappings.
 
 ### Fixed

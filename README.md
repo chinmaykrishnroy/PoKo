@@ -122,10 +122,10 @@ Grab the latest binary from this repo and flash via the web OTA page or `esptool
 ```bash
 # OTA (device must already be running PoKo and on Wi-Fi)
 curl -X POST http://<DEVICE_IP>/ota/upload \
-  -F "update=@build/esp32.esp32.esp32s3/Poko.ino.bin"
+  -F "update=@build/esp32.esp32.esp32s3/PoKo.ino.bin"
 
 # First flash via USB
-esptool.py --chip esp32s3 write_flash 0x0 build/esp32.esp32.esp32s3/Poko.ino.bin
+esptool.py --chip esp32s3 write_flash 0x0 build/esp32.esp32.esp32s3/PoKo.ino.bin
 ```
 
 On first boot the device creates a Wi-Fi AP named **PoKo-Setup** — connect to it and visit `http://192.168.4.1/` to set your Wi-Fi credentials.
@@ -203,7 +203,7 @@ are for USB provisioning and are not OTA images.
 
 ```
 Poko/
-├── Poko.ino               # Main sketch — setup(), loop(), app switching
+├── PoKo.ino               # Main sketch — setup(), loop(), app switching
 ├── PokoUI.h               # Launcher carousel with GFX-drawn icons
 ├── PokoAPI.h              # HTTP REST API endpoints
 ├── PokoWebUI.h            # Embedded web control panel (single-file HTML/JS/CSS)
@@ -234,7 +234,7 @@ Poko/
 │       └── config.py
 └── build/
     └── esp32.esp32.esp32s3/
-        └── Poko.ino.bin   # Pre-built release binary
+        └── PoKo.ino.bin   # Pre-built release binary
 ```
 
 ---

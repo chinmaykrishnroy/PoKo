@@ -10,7 +10,7 @@
 
 // ─────────────────────────────────────────────────────────────
 //  PokoDrivers — Centralised hardware initialisation helpers
-//  All hardware is init once at boot by Poko.ino.
+//  All hardware is init once at boot by PoKo.ino.
 //  Apps call the appropriate enable/disable helpers.
 // ─────────────────────────────────────────────────────────────
 

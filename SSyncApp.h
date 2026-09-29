@@ -252,7 +252,7 @@ public:
     }
 
     void onLongRight() {
-        // No-op: volume ramp on hold-R is handled by onBtnRightHolding() in Poko.ino.
+        // No-op: volume ramp on hold-R is handled by onBtnRightHolding() in PoKo.ino.
         // Mute/unmute is double-R click only (onEnter via onBtnRightDouble).
     }
 
