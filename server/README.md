@@ -17,8 +17,18 @@ Default server URL:
 http://127.0.0.1:8765
 ```
 
-Default config currently reads from `D:\Media` and reserves `D:\Trash` as the
-future upload/write folder.
+Create the local configuration from the tracked template:
+
+```powershell
+Copy-Item server\config.example.yml server\config.yml
+```
+
+Set `poko.ip` and `poko.base_url` to the device, list every media directory under
+`library.read_folders`, and choose a writable `library.write_folder`. Keep
+`display.width` and `display.height` at `128`. For maximum detail at that fixed
+resolution, use `video_quality: 4` and `graphics_quality: 4`; FFmpeg's MJPEG
+quality scale is inverse, and the server clamps it to 4–15. `server/config.yml`
+is ignored by Git so machine-specific paths and addresses are not committed.
 
 The backend starts instantly and indexes in the background into SQLite. Open the
 server UI here:

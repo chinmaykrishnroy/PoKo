@@ -35,7 +35,7 @@ auto* syncPlugin = &player;
 int httpResult = 202, requests = 0, listRequests = 0;
 bool listResult = true;
 struct HTTPClient {
-    void begin(String) {} void setTimeout(int) {}
+    void begin(String) {} void setConnectTimeout(int) {} void setTimeout(int) {}
     int GET() { ++requests; return httpResult; }
     void end() {}
 };

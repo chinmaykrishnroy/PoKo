@@ -30,6 +30,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Fixed camera JPEG validation/listing edge cases and configuration serialization duplication.
 - Hardened firmware audio ownership, TCP/SyncedAV worker shutdown, driver reset safety, brightness/volume state synchronization, and power-setting bounds.
 - Restored host-side OneButton test support and expanded regression coverage for the repaired failure modes.
+- Gallery, Music, and Video now bound failed server connections so a backend
+  shutdown cannot leave the device on a loading screen until the watchdog resets.
+- Music and Video reuse the existing offline/retry screen after a stream drops
+  and suppress stale cached artwork or thumbnails while the server is offline.
+
+### Added
+- GitHub Actions CI for backend tests, firmware host regressions, real FFmpeg
+  loopback streaming, and a pinned ESP32-S3 firmware build.
+- Semantic-version tags publish the OTA application binary and SHA-256 checksum
+  as GitHub Release assets after every validation gate passes.
+- A documented `server/config.example.yml` template with fixed 128×128 output
+  and high-detail MJPEG defaults.
 
 ### Validation
 - Passed 30 firmware host regressions and 56 backend tests; two case-sensitive

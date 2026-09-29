@@ -8,6 +8,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <TJpg_Decoder.h>
+#include <esp_task_wdt.h>
 #include "PokoAppState.h"
 #include "PokoPins.h"
 #include "PokoTheme.h"
@@ -113,7 +114,9 @@ private:
             WiFiClient client;
             HTTPClient http;
             http.begin(client, url);
+            http.setConnectTimeout(1000);
             http.setTimeout(3000);
+            esp_task_wdt_reset();
             if (http.GET() == HTTP_CODE_OK) {
                 JsonDocument doc;
                 if (!deserializeJson(doc, http.getStream())) {
@@ -121,6 +124,7 @@ private:
                 }
             }
             http.end();
+            esp_task_wdt_reset();
             Serial.printf("[gallery] Total photos after server query: %d\n", _photoCount);
         }
 
@@ -173,8 +177,10 @@ private:
             WiFiClient client;
             HTTPClient http;
             http.begin(client, url);
+            http.setConnectTimeout(1000);
             http.setTimeout(3000);
             bool found = false;
+            esp_task_wdt_reset();
             if (http.GET() == HTTP_CODE_OK) {
                 JsonDocument doc;
                 if (!deserializeJson(doc, http.getStream())) {
@@ -190,6 +196,7 @@ private:
                 }
             }
             http.end();
+            esp_task_wdt_reset();
             if (!found) return false;
         }
         _photos[0] = selected;
@@ -260,7 +267,9 @@ private:
                 WiFiClient client;
                 HTTPClient http;
                 http.begin(client, url);
+                http.setConnectTimeout(1000);
                 http.setTimeout(1000);
+                esp_task_wdt_reset();
                 int code = http.GET();
                 if (code == 200) {
                     int len = http.getSize();
@@ -282,6 +291,7 @@ private:
                         } else {
                             delay(2);
                         }
+                        esp_task_wdt_reset();
                     }
                     if (totalRead > 50 && (len < 0 || totalRead == (size_t)len) &&
                         _imgBuf[0] == 0xFF && _imgBuf[1] == 0xD8 &&
@@ -292,6 +302,7 @@ private:
                     }
                 }
                 http.end();
+                esp_task_wdt_reset();
             }
         }
 

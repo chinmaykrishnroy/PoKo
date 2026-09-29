@@ -135,8 +135,8 @@ On first boot the device creates a Wi-Fi AP named **PoKo-Setup** — connect to 
 **Dependencies (Arduino CLI):**
 
 ```bash
-arduino-cli core install esp32:esp32
-arduino-cli lib install "Arduino_GFX_Library" "U8g2" "TJpgDec" "ESP32Encoder"
+arduino-cli core install esp32:esp32@3.3.12 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+arduino-cli lib install "ArduinoJson@7.4.3" "TJpg_Decoder@1.1.0" "U8g2@2.35.30" "GFX Library for Arduino@1.6.8" "FastLED@3.10.1" "OneButton@2.6.1" "ESP8266Audio@2.4.1"
 ```
 
 **Compile:**
@@ -150,24 +150,52 @@ arduino-cli compile \
 ### 3 — Run the media server
 
 ```bash
-cd server
-pip install -r requirements.txt      # pyyaml, pillow, requests
-python -m poko_server --config config.yml
+python -m pip install -r server/requirements.txt
+copy server\config.example.yml server\config.yml  # Windows
+python -m server.poko_server --config server/config.yml
 ```
 
-Edit `server/config.yml` to point at your media folders:
+`server/config.yml` is deliberately ignored by Git because it contains local
+paths and device addresses. Copy [server/config.example.yml](server/config.example.yml)
+and edit at least the device address and media folders:
 
 ```yaml
 poko:
   ip: 192.168.0.4          # your device IP
+  base_url: http://192.168.0.4
 
 library:
   read_folders:
     - /mnt/media/music
     - /mnt/media/videos
+    - /mnt/media/pictures
+  write_folder: /mnt/media/videos
+  db_path: poko.db
+
+display:
+  width: 128
+  height: 128
+
+ffmpeg:
+  video_fps: 20
+  video_quality: 4         # 4 = highest supported JPEG detail
+  graphics_fps: 20
+  graphics_quality: 4
 ```
 
 The server runs on port **8765** by default. Set it in the PoKo web UI under **Controls → Media Server Address**.
+
+### Continuous integration and releases
+
+GitHub Actions runs backend tests, 30 firmware host regressions, the FFmpeg
+loopback smoke test, and a full ESP32-S3 compile for pull requests and pushes to
+`main`. Each successful run stores the application `.bin` as a workflow artifact.
+
+Pushing an annotated semantic-version tag such as `v1.3.2` runs the same gates,
+checks that `InfoApp.h` and `PokoAPI.h` contain that version, and publishes a
+GitHub Release with `PoKo-v1.3.2.bin` and its SHA-256 checksum. Upload the
+application `.bin` through `/ota`; the merged, bootloader, and partition images
+are for USB provisioning and are not OTA images.
 
 ---
 

@@ -1,0 +1,134 @@
+name: CI and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  verify-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg g++
+          python -m pip install --upgrade pip
+          python -m pip install -r server/requirements.txt
+
+      - name: Set up Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+        with:
+          version: '1.5.1'
+
+      - name: Install ESP32 core and firmware libraries
+        run: |
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.12 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli lib install \
+            'ArduinoJson@7.4.3' \
+            'TJpg_Decoder@1.1.0' \
+            'U8g2@2.35.30' \
+            'GFX Library for Arduino@1.6.8' \
+            'FastLED@3.10.1' \
+            'OneButton@2.6.1' \
+            'ESP8266Audio@2.4.1'
+
+      - name: Run backend tests
+        run: python server/run_tests.py
+
+      - name: Run firmware host regressions
+        run: python tests/firmware/run_tests.py --onebutton "$HOME/Arduino/libraries/OneButton/src"
+
+      - name: Run FFmpeg stream smoke test
+        run: python tests/firmware/stream_smoke.py
+
+      - name: Compile ESP32-S3 firmware
+        run: |
+          arduino-cli compile \
+            --fqbn 'esp32:esp32:esp32s3:FlashSize=8M,PSRAM=opi,PartitionScheme=default_8MB' \
+            --build-path build/ci \
+            --output-dir dist \
+            --jobs 2 \
+            .
+
+      - name: Prepare firmware artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            name="PoKo-${GITHUB_REF_NAME}.bin"
+          else
+            name="PoKo-firmware.bin"
+          fi
+          cp dist/PoKo.ino.bin "dist/${name}"
+          sha256sum "dist/${name}" > "dist/${name}.sha256"
+          printf 'FIRMWARE_NAME=%s\n' "$name" >> "$GITHUB_ENV"
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: poko-firmware-${{ github.sha }}
+          path: |
+            dist/${{ env.FIRMWARE_NAME }}
+            dist/${{ env.FIRMWARE_NAME }}.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: verify-and-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+
+      - name: Validate release tag and firmware version
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Tag must match vX.X.X" >&2
+            exit 1
+          }
+          grep -Fq "add(\"Ver\", \"${GITHUB_REF_NAME}\"" InfoApp.h
+          grep -Fq "\\\"firmware_version\\\":\\\"${GITHUB_REF_NAME}\\\"" PokoAPI.h
+
+      - name: Download firmware artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: poko-firmware-${{ github.sha }}
+          path: release
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: PoKo ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release/PoKo-${{ github.ref_name }}.bin
+            release/PoKo-${{ github.ref_name }}.bin.sha256

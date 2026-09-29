@@ -168,6 +168,7 @@ private:
                      "/api/library/audio?page=" + String(start / PAGE_SIZE + 1) +
                      "&page_size=" + String(PAGE_SIZE) + "&icons=false";
         http.begin(url);
+        http.setConnectTimeout(1000);
         http.setTimeout(5000);
         int httpCode = http.GET();
         bool parsed = false;
@@ -244,6 +245,7 @@ private:
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
                      "/api/library/audio/" + String(_songs[idx].id) + "/thumbnail.jpg?size=60";
         http.begin(url);
+        http.setConnectTimeout(1000);
         http.setTimeout(1000);
 
         int code = http.GET();
@@ -320,6 +322,7 @@ private:
                      "/api/audio/" + String(_songs[idx].id) + "/play?start=" + String(startSec) +
                      "&switch=false&notify=false";
         http.begin(url);
+        http.setConnectTimeout(1000);
         http.setTimeout(5000);
         int httpCode = http.GET();
         JsonDocument response;
@@ -370,6 +373,7 @@ private:
         HTTPClient http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false";
         http.begin(url);
+        http.setConnectTimeout(1000);
         http.setTimeout(4000);
         http.GET();
         http.end();
@@ -425,6 +429,10 @@ private:
             _canvas->getTextBounds(statusStr, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(125 - w, 11);
             _canvas->print(statusStr);
+        } else if (_serverError) {
+            _canvas->setTextColor(0xF800, theme.headerBg);
+            _canvas->setCursor(76, 11);
+            _canvas->print("Offline");
         } else if (_songCount > 0) {
             char badge[24];
             snprintf(badge, sizeof(badge), "%d/%d", _catalogIndex + 1, _catalogTotal);
@@ -446,14 +454,14 @@ private:
             // Album Artwork Frame (y=16..78)
             _canvas->drawRoundRect(32, 16, 64, 64, 6, theme.surface2);
 
-            if (_artBitmapValid && _artBitmap) {
+            if (!_serverError && _artBitmapValid && _artBitmap) {
                 _canvas->draw16bitRGBBitmap(34, 18, _artBitmap, 60, 60);
             } else {
                 _canvas->fillRoundRect(34, 18, 60, 60, 4, theme.surface);
                 _canvas->setFont(u8g2_font_helvB14_tf);
-                _canvas->setTextColor(theme.accent, theme.surface);
-                _canvas->setCursor(58, 54);
-                _canvas->print(">");
+                _canvas->setTextColor(_serverError ? 0xF800 : theme.accent, theme.surface);
+                _canvas->setCursor(_serverError ? 61 : 58, 54);
+                _canvas->print(_serverError ? "!" : ">");
             }
 
             // Single-line "Name - Artist" label (y=92) - scroll if long, else center
@@ -462,7 +470,9 @@ private:
             _canvas->setFont(u8g2_font_helvB08_tf);
             _canvas->setTextColor(theme.text, theme.bg);
             String label;
-            if (_songCount > 0) {
+            if (_serverError) {
+                label = "Start PoKo Server";
+            } else if (_songCount > 0) {
                 if (strlen(_songs[_selectedIdx].artist) > 0) {
                     label = String(_songs[_selectedIdx].title) + " - " + String(_songs[_selectedIdx].artist);
                 } else {
@@ -511,7 +521,8 @@ private:
             _canvas->drawFastHLine(0, 114, 128, theme.line);
             _canvas->setFont(u8g2_font_5x7_tf);
             _canvas->setTextColor(theme.footerText, theme.headerBg);
-            const char* hint = (_songCount > 0) ? "L:Prv  R:Nxt  2R:Play" : "2R:Retry  2L:Back";
+            const char* hint = _serverError ? "2R:Retry  2L:Back" :
+                               ((_songCount > 0) ? "L:Prv  R:Nxt  2R:Play" : "2R:Retry  2L:Back");
             _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
             _canvas->setCursor(64 - w / 2, 124);
             _canvas->print(hint);
@@ -519,14 +530,14 @@ private:
         } else {
             // Playing screen: Thumbnail in center, scrolling "Name - Artist", progress bar, time/vol, footer
             _canvas->drawRoundRect(32, 14, 64, 64, 4, theme.surface2);
-            if (_artBitmapValid && _artBitmap) {
+            if (!_serverError && _artBitmapValid && _artBitmap) {
                 _canvas->draw16bitRGBBitmap(34, 16, _artBitmap, 60, 60);
             } else {
                 _canvas->fillRoundRect(34, 16, 60, 60, 3, theme.surface);
                 _canvas->setFont(u8g2_font_helvB14_tf);
-                _canvas->setTextColor(theme.accent, theme.surface);
-                _canvas->setCursor(58, 52);
-                _canvas->print(">");
+                _canvas->setTextColor(_serverError ? 0xF800 : theme.accent, theme.surface);
+                _canvas->setCursor(_serverError ? 61 : 58, 52);
+                _canvas->print(_serverError ? "!" : ">");
             }
 
             // Scrolling "Name - Artist" ticker (y=80..93) - strictly ONE line, no wrapping
@@ -627,6 +638,7 @@ public:
             HTTPClient http;
             String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false";
             http.begin(url);
+            http.setConnectTimeout(1000);
             http.setTimeout(4000);
             http.GET();
             http.end();

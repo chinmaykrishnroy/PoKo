@@ -54,9 +54,10 @@ ffmpeg:
   sync_audio_rate: 22050
   sync_audio_chunk_ms: 20
   video_fps: 20
-  video_quality: 7
+  # FFmpeg MJPEG quality is inverse: 4 is highest detail, 15 is smallest.
+  video_quality: 4
   graphics_fps: 20
-  graphics_quality: 7
+  graphics_quality: 4
   start_delay_ms: 350
   video_drop_late_ms: 150
   audio_filters:

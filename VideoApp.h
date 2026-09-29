@@ -116,6 +116,7 @@ private:
                      "/api/library/video?page=" + String(start / PAGE_SIZE + 1) +
                      "&page_size=" + String(PAGE_SIZE) + "&icons=false";
         http.begin(url);
+        http.setConnectTimeout(1000);
         http.setTimeout(5000);
         int httpCode = http.GET();
         bool parsed = false;
@@ -182,6 +183,7 @@ private:
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
                      "/api/library/video/" + String(_videos[idx].id) + "/thumbnail.jpg?size=80";
         http.begin(url);
+        http.setConnectTimeout(1000);
         http.setTimeout(2500);
 
         int code = http.GET();
@@ -252,6 +254,7 @@ private:
                      "/api/video/" + String(_videos[idx].id) +
                      "/play?audio=true&aspect=square&profile=balanced&start=0&switch=false&notify=false&async=true";
         http.begin(url);
+        http.setConnectTimeout(1000);
         http.setTimeout(3000);
         int httpCode = http.GET();
         http.end();
@@ -275,6 +278,7 @@ private:
         HTTPClient http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false&async=true";
         http.begin(url);
+        http.setConnectTimeout(1000);
         http.setTimeout(1500);
         http.GET();
         http.end();
@@ -339,7 +343,11 @@ private:
         _canvas->setFont(u8g2_font_5x7_tf);
         int16_t x1, y1; uint16_t w, h;
 
-        if (_videoCount > 0) {
+        if (_serverError) {
+            _canvas->setTextColor(0xF800, theme.headerBg);
+            _canvas->setCursor(76, 11);
+            _canvas->print("Offline");
+        } else if (_videoCount > 0) {
             char badge[16];
             snprintf(badge, sizeof(badge), "%d/%d", _catalogIndex + 1, _catalogTotal);
             _canvas->setTextColor(theme.muted, theme.headerBg);
@@ -359,7 +367,7 @@ private:
         // Single Video Card Frame (y=16..84)
         _canvas->drawRoundRect(14, 16, 100, 68, 6, theme.surface2);
 
-        if (_thumbSize > 100) {
+        if (!_serverError && _thumbSize > 100) {
             // Draw downloaded JPEG thumbnail centered inside the card
             _activeCanvas = _canvas;
             TJpgDec.setJpgScale(1);
@@ -371,9 +379,9 @@ private:
             // Placeholder video slate
             _canvas->fillRoundRect(16, 18, 96, 64, 4, theme.surface);
             _canvas->setFont(u8g2_font_helvB14_tf);
-            _canvas->setTextColor(theme.accent, theme.surface);
-            _canvas->setCursor(58, 56);
-            _canvas->print(">");
+            _canvas->setTextColor(_serverError ? 0xF800 : theme.accent, theme.surface);
+            _canvas->setCursor(_serverError ? 61 : 58, 56);
+            _canvas->print(_serverError ? "!" : ">");
         }
 
         // Title (y=92..101) - scroll if long, else center
@@ -381,7 +389,8 @@ private:
         _canvas->setTextWrap(false);
         _canvas->setFont(u8g2_font_profont10_mf);
         _canvas->setTextColor(theme.text, theme.bg);
-        const char* title = (_videoCount > 0) ? _videos[_selectedIdx].title : (_serverError ? "Start PoKo Server" : "No Videos");
+        const char* title = _serverError ? "Start PoKo Server" :
+                            ((_videoCount > 0) ? _videos[_selectedIdx].title : "No Videos");
         _canvas->getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
         _titleWidth = w;
         if (w <= 120) {
