@@ -81,7 +81,7 @@ public:
             json += "\"psram_free\":" + String(ESP.getFreePsram()) + ",";
             json += "\"uptime_ms\":" + String(millis()) + ",";
             json += "\"cpu_mhz\":" + String(getCpuFrequencyMhz()) + ",";
-            json += "\"firmware_version\":\"v1.3.3\",";
+            json += "\"firmware_version\":\"v1.3.4\",";
             json += "\"app_state\":" + String((int)activeApp) + ",";
             json += "\"theme\":\"" + String(isDarkTheme() ? "dark" : "light") + "\",";
             json += "\"master_vol\":" + String(getMasterVolumeLimit()) + ",";

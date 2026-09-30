@@ -28,12 +28,14 @@ def main() -> int:
         "audio": ["suspend-transition", "suspend-timeout", "stop-all"],
     "video": ["next", "next-page", "page-failure", "http-failure", "missing-refresh", "missing-empty", "load-failure", "stop-timeout", "next-stop-timeout"],
         "marquee": ["scroll-and-wrap"],
+        "pixel-toggle": ["preserves-color", "forces-solid", "turns-off"],
     }
     sources = {
         "buttons": [HERE / "buttons.cpp", args.onebutton / "OneButton.cpp"],
         "audio": [ROOT / "build/audio-test.cpp"],
         "video": [ROOT / "build/video-test.cpp"],
         "marquee": [HERE / "marquee.cpp"],
+        "pixel-toggle": [HERE / "pixel_toggle.cpp"],
     }
     # Real OneButton must precede stubs/OneButton.h. Only Arduino hardware is mocked.
     includes = [args.onebutton, HERE / "stubs", HERE, ROOT]

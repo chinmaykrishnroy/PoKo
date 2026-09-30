@@ -560,7 +560,12 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                 if not item:
                     return
                 switch_device = str(_first(query, "switch", "true")).lower() not in {"0", "false", "no", "off"}
-                result = self.backend.playback.play_audio(item, _float_query(query, "start", 0), switch_device=switch_device)
+                result = self.backend.playback.play_audio(
+                    item,
+                    _float_query(query, "start", 0),
+                    switch_device=switch_device,
+                    target_host=None if switch_device else self.client_address[0],
+                )
                 self._json(result, HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_GATEWAY)
                 return
             if path.startswith("/api/video/") and path.endswith("/play"):
@@ -578,6 +583,7 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                     "profile": _first(query, "profile", "balanced"),
                     "fps": _float_query(query, "fps", 0) or None,
                     "jpeg_quality": _int_query(query, "jpeg_quality", 0) or None,
+                    "target_host": None if switch_device else self.client_address[0],
                 }
                 if async_request:
                     play_options["request_id"] = _first(query, "request_id", None)

@@ -115,6 +115,18 @@ class PlaybackTests(unittest.TestCase):
         self.assertIs(connected, fake_socket)
         self.assertIsNone(fake_socket.timeout)
 
+    def test_synced_stream_targets_observed_device_ip(self) -> None:
+        class FakeSocket:
+            def settimeout(self, value): pass
+            def setsockopt(self, *args): pass
+
+        config = load_config(_config_path)
+        item = MediaItem(id="v1", kind="video", path=Path("movie.mkv"), title="Movie", extension=".mkv", size_bytes=1)
+        streamer = SyncedAVStreamer(item, config, target_host="192.168.0.4")
+        with mock.patch("server.poko_server.playback.socket.create_connection", return_value=FakeSocket()) as connect:
+            streamer._connect(config.nexus.video_audio_port)
+        connect.assert_called_once_with(("192.168.0.4", config.nexus.video_audio_port), timeout=1.0)
+
     def test_exited_ffmpeg_is_not_reported_as_playing(self) -> None:
         for manager, _ in self._manager():
             item = MediaItem(id="a1", kind="audio", path=Path("song.mp3"), title="Song", extension=".mp3", size_bytes=1)

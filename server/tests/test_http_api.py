@@ -143,6 +143,34 @@ class HttpApiTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
 
+    def test_embedded_playback_targets_observed_device_address(self) -> None:
+        with workspace_tempdir() as root:
+            base = load_config(_config_path)
+            config = replace(base, host="127.0.0.1", port=0, library=LibraryConfig([root], root / "write", 5, db_path=root / "catalog.db"))
+            server = make_server(config, dry_run=True)
+            server.RequestHandlerClass.backend.index.join(timeout=2)
+            path = root / "song.mp3"
+            path.write_bytes(b"audio")
+            item = MediaItem(
+                id="song", kind="audio", path=path, title="Song", extension=".mp3",
+                size_bytes=5, duration_s=10, artist="Artist",
+            )
+            server.RequestHandlerClass.backend.index.db.upsert_item(item, "test", enriched=True)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                playback = server.RequestHandlerClass.backend.playback
+                with mock.patch.object(playback, "play_audio", return_value={"ok": True}) as play:
+                    with urllib.request.urlopen(
+                        f"http://127.0.0.1:{server.server_address[1]}/api/audio/song/play?switch=false",
+                        timeout=5,
+                    ) as response:
+                        self.assertEqual(response.status, 200)
+                play.assert_called_once_with(item, 0.0, switch_device=False, target_host="127.0.0.1")
+            finally:
+                server.shutdown()
+                server.server_close()
+
     def test_single_item_page_refills_after_invalid_media_is_removed(self) -> None:
         with workspace_tempdir() as root:
             base = load_config(_config_path)

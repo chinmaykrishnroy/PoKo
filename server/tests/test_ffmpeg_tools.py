@@ -40,6 +40,10 @@ class FFmpegCommandTests(unittest.TestCase):
         self.assertIn("libmp3lame", cmd)
         self.assertTrue(cmd[-1].endswith(":1235?tcp_nodelay=1"))
 
+    def test_audio_command_can_target_observed_device_ip(self) -> None:
+        cmd = audio_tcp_command(Path("song.mp3"), CONFIG, target_host="192.168.0.4")
+        self.assertTrue(cmd[-1].startswith("tcp://192.168.0.4:"))
+
     def test_audio_filter_chain_is_optional(self) -> None:
         self.assertIsNone(audio_filter(CONFIG))
         filtered = replace(

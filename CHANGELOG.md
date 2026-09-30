@@ -7,11 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## Unreleased
+## [v1.3.4] — 2026-09-30
 
 ### Fixed
 - Video and image catalog titles now use their filenames, preventing generic
   embedded audio-track labels such as `Stereo` from replacing media names.
+- Embedded Music and Video playback now targets the device address observed on
+  the playback request, so DHCP address changes no longer break server-pushed
+  audio or synchronized video while Gallery continues to work.
+- The L+R click now toggles the Pixel engine between Solid and Off while
+  preserving its saved RGB color, brightness, and LED target.
 
 ---
 

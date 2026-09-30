@@ -23,6 +23,7 @@ venv/
 server/config.yml
 uploads/
 .test-tmp/
+server/poko-server.*.log
 
 # ── IDE & OS ──────────────────────────────────────────────────────────────────
 .vscode/

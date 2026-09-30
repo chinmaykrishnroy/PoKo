@@ -172,7 +172,13 @@ def metadata_from_probe(path: Path, kind: str, probe: dict[str, Any]) -> dict[st
     }
 
 
-def audio_tcp_command(path: Path, config: AppConfig, start_s: float = 0) -> list[str]:
+def audio_tcp_command(
+    path: Path,
+    config: AppConfig,
+    start_s: float = 0,
+    *,
+    target_host: str | None = None,
+) -> list[str]:
     ffmpeg = default_ffmpeg_executable(config.ffmpeg.executable)
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "warning", "-re"]
     if start_s > 0:
@@ -196,7 +202,7 @@ def audio_tcp_command(path: Path, config: AppConfig, start_s: float = 0) -> list
         str(config.ffmpeg.audio_channels),
         "-f",
         "mp3",
-        f"tcp://{config.nexus.ip}:{config.nexus.audio_port}?tcp_nodelay=1",
+        f"tcp://{target_host or config.nexus.ip}:{config.nexus.audio_port}?tcp_nodelay=1",
     ]
     return cmd
 

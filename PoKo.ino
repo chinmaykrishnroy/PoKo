@@ -19,6 +19,7 @@
 #include "VideoApp.h"
 #include "GalleryApp.h"
 #include "PixelApp.h"
+#include "PixelToggle.h"
 #include "SettingsApp.h"
 #include "PokoOTA.h"
 #include "PokoAPI.h"
@@ -440,19 +441,8 @@ void onBtnLongRight() {
 // ── Dual Button Combos ────────────────────────────────────────
 void onComboBothClick() {
     if (!handleButtonWakeCheck(true)) return;
-    Serial.println("[combo] both click -> Toggle Audio Play/Pause or LED");
-    if (audioManager && audioManager->hasActiveSession()) {
-        audioManager->togglePlayPause();
-        if (pokoUI && activeApp == STATE_LAUNCHER) pokoUI->updateStatusBar();
-        return;
-    }
-    static bool ledOn = false;
-    ledOn = !ledOn;
-    if (ledOn) {
-        setAllLEDs(CRGB(0, 180, 255));
-    } else {
-        turnOffLEDs();
-    }
+    Serial.println("[combo] both click -> Toggle Pixel Solid/Off");
+    togglePixelSolidOff(pixelEngine, prefs, PIXEL_MODE_OFF, PIXEL_MODE_SOLID);
 }
 
 void onComboBothDouble() {

@@ -127,6 +127,7 @@ class SyncedAVStreamer:
         profile: str | None = None,
         fps: float | None = None,
         jpeg_quality: int | None = None,
+        target_host: str | None = None,
         dry_run: bool = False,
     ) -> None:
         self.item = item
@@ -136,6 +137,7 @@ class SyncedAVStreamer:
         self.profile, self.video_fps, self.video_quality = resolve_video_tuning(
             config, synced=True, profile=profile, fps=fps, jpeg_quality=jpeg_quality
         )
+        self.target_host = target_host or config.nexus.ip
         self.dry_run = dry_run
         self.stop_event = threading.Event()
         self.threads: list[threading.Thread] = []
@@ -158,6 +160,7 @@ class SyncedAVStreamer:
             "profile": self.profile,
             "fps": self.video_fps,
             "jpeg_quality": self.video_quality,
+            "target_host": self.target_host,
         }
 
     @property
@@ -252,7 +255,7 @@ class SyncedAVStreamer:
         last_error: OSError | None = None
         while not self.stop_event.is_set() and time.monotonic() < deadline:
             try:
-                sock = socket.create_connection((self.config.nexus.ip, port), timeout=1.0)
+                sock = socket.create_connection((self.target_host, port), timeout=1.0)
                 sock.settimeout(None)
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 with self.lock:
@@ -265,7 +268,7 @@ class SyncedAVStreamer:
                 last_error = exc
                 if self.stop_event.wait(0.08):
                     break
-        raise ConnectionError(f"cannot connect to {self.config.nexus.ip}:{port}: {last_error}")
+        raise ConnectionError(f"cannot connect to {self.target_host}:{port}: {last_error}")
 
     @staticmethod
     def _send_packet(sock: socket.socket, packet_type: int, timestamp_ms: int, payload: bytes) -> None:
@@ -539,6 +542,7 @@ class PlaybackManager:
         fps: float | None = None,
         jpeg_quality: int | None = None,
         request_id: str | None = None,
+        target_host: str | None = None,
     ) -> dict[str, Any]:
         mode = "video_player"
         return self._submit_operation(
@@ -552,6 +556,7 @@ class PlaybackManager:
                 profile=profile,
                 fps=fps,
                 jpeg_quality=jpeg_quality,
+                target_host=target_host,
             ),
             mode=mode,
             request_id=request_id,
@@ -630,7 +635,14 @@ class PlaybackManager:
             "playback": self._state.to_json(),
         }
 
-    def play_audio(self, item: MediaItem, start_s: float = 0, *, switch_device: bool = True) -> dict[str, Any]:
+    def play_audio(
+        self,
+        item: MediaItem,
+        start_s: float = 0,
+        *,
+        switch_device: bool = True,
+        target_host: str | None = None,
+    ) -> dict[str, Any]:
         if item.kind != "audio":
             return {"ok": False, "error": "item is not audio"}
         with self._lock:
@@ -640,12 +652,14 @@ class PlaybackManager:
             device = self.device.switch("audio") if switch_device else None
             if device is not None and not device.ok:
                 return self._device_switch_failure(device)
-            command = audio_tcp_command(item.path, self.config, start_s)
+            selected_host = target_host or self.config.nexus.ip
+            command = audio_tcp_command(item.path, self.config, start_s, target_host=selected_host)
             try:
                 self._process = ProcessHandle(command, dry_run=self.dry_run)
             except (OSError, subprocess.SubprocessError) as exc:
                 return self._process_start_failure(item, exc)
             self._state = self._make_state("audio_player", item, start_s, command=command)
+            self._state.counters["target_host"] = selected_host
             return {
                 "ok": True,
                 "device": {"ok": True, "app": "audio", "body": "not-switched"} if device is None else device.__dict__,
@@ -663,6 +677,7 @@ class PlaybackManager:
         profile: str | None = None,
         fps: float | None = None,
         jpeg_quality: int | None = None,
+        target_host: str | None = None,
     ) -> dict[str, Any]:
         if item.kind != "video":
             return {"ok": False, "error": "item is not video"}
@@ -681,7 +696,8 @@ class PlaybackManager:
                 return self._device_switch_failure(device)
             streamer = SyncedAVStreamer(
                 item, self.config, start_s=start_s, aspect=selected_aspect,
-                profile=selected_profile, fps=selected_fps, jpeg_quality=selected_quality, dry_run=self.dry_run,
+                profile=selected_profile, fps=selected_fps, jpeg_quality=selected_quality,
+                target_host=target_host, dry_run=self.dry_run,
             )
             commands = [part for cmd in streamer.commands for part in ["&&", *cmd]][1:]
             if not streamer.start():
@@ -705,7 +721,12 @@ class PlaybackManager:
             self._streamer = streamer
             self._state = self._make_state("video_player", item, start_s, aspect=selected_aspect, with_audio=bool(item.has_audio), command=commands)
             self._state.counters.update(
-                {"profile": selected_profile, "fps": selected_fps, "jpeg_quality": selected_quality}
+                {
+                    "profile": selected_profile,
+                    "fps": selected_fps,
+                    "jpeg_quality": selected_quality,
+                    "target_host": streamer.target_host,
+                }
             )
             device_json = {"ok": True, "app": "video", "body": "not-switched"} if device is None else device.__dict__
             return {"ok": True, "device": device_json, "playback": self._state.to_json()}

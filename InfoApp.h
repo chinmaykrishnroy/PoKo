@@ -108,7 +108,7 @@ private:
         }
 
         // 2. Firmware Version & Build
-        add("Ver", "v1.3.3", pokoClrCyan());
+        add("Ver", "v1.3.4", pokoClrCyan());
         add("Build", __DATE__, currentTheme().muted);
 
         // 3. Reset Reason
