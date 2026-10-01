@@ -98,9 +98,9 @@ class HttpApiTests(unittest.TestCase):
                     with urllib.request.urlopen(base_url + "/api/device/status", timeout=5) as response:
                         self.assertEqual(json.load(response)["app_state"], 6)
                     request_device.assert_called_with("/api/health")
-                    with urllib.request.urlopen(base_url + "/api/device/power?dim_timeout=30&wifi_sleep=0", timeout=5) as response:
+                    with urllib.request.urlopen(base_url + "/api/device/power?dim_timeout=30&auto_off_battery_pct=5&wifi_sleep=0", timeout=5) as response:
                         self.assertEqual(response.status, 200)
-                    request_device.assert_called_with("/api/power?dim_timeout=30&wifi_sleep=0")
+                    request_device.assert_called_with("/api/power?dim_timeout=30&auto_off_battery_pct=5&wifi_sleep=0")
                     with urllib.request.urlopen(base_url + "/api/device/sys?brightness=75", timeout=5) as response:
                         self.assertEqual(response.status, 200)
                     request_device.assert_called_with("/api/sys?brightness=75")

@@ -38,7 +38,7 @@ private:
     int8_t   _holdDirection = 0;
     int8_t   _pendingItem = -1;
 
-    static constexpr uint8_t ITEM_COUNT   = 16;
+    static constexpr uint8_t ITEM_COUNT   = 17;
     static constexpr uint8_t ROW_H        = 16;
     static constexpr uint8_t TOP_Y        = 14;
     static constexpr uint8_t ROWS_VISIBLE = 6;
@@ -52,6 +52,7 @@ private:
         "Dim Timeout",
         "Sleep Timeout",
         "Auto-Off",
+        "Off Battery %",
         "Ambient Clock",
         "WiFi Sleep",
         "USB Mode",
@@ -78,13 +79,14 @@ private:
             case 4: if (powerManager) prefs.putUInt("dim_timeout", powerManager->getDimTimeout()); break;
             case 5: if (powerManager) prefs.putUInt("sleep_timeout", powerManager->getSleepTimeout()); break;
             case 6: if (powerManager) prefs.putUInt("auto_off", powerManager->getAutoOffTimeout()); break;
+            case 7: if (powerManager) prefs.putUChar("auto_off_pct", powerManager->getAutoOffBatteryPercent()); break;
         }
         _pendingItem = -1;
     }
 
     void adjustHeldValue(int direction) {
         if (!powerManager || (_selected != 1 && _selected != 2 && _selected != 4 &&
-                              _selected != 5 && _selected != 6)) return;
+                              _selected != 5 && _selected != 6 && _selected != 7)) return;
         uint32_t now = millis();
         if (_holdDirection != direction || now - _lastHoldMs > 350) _holdStartMs = now;
         _holdDirection = direction;
@@ -106,8 +108,11 @@ private:
             powerManager->setDimTimeout(adjustSeconds(powerManager->getDimTimeout(), secondsStep), false);
         } else if (_selected == 5) {
             powerManager->setSleepTimeout(adjustSeconds(powerManager->getSleepTimeout(), secondsStep), false);
-        } else {
+        } else if (_selected == 6) {
             powerManager->setAutoOffTimeout(adjustSeconds(powerManager->getAutoOffTimeout(), autoOffStep), false);
+        } else {
+            powerManager->setAutoOffBatteryPercent((uint8_t)constrain(
+                (int)powerManager->getAutoOffBatteryPercent() + direction * percentStep, 0, 100), false);
         }
         _pendingItem = _selected;
         _dirty = true;
@@ -194,27 +199,33 @@ public:
                     break;
                 }
                 case 7: {
+                    uint8_t pct = powerManager ? powerManager->getAutoOffBatteryPercent() : prefs.getUChar("auto_off_pct", 5);
+                    if (pct == 0) snprintf(valBuf, sizeof(valBuf), "Off");
+                    else          snprintf(valBuf, sizeof(valBuf), "%u%%", pct);
+                    break;
+                }
+                case 8: {
                     bool ac = powerManager ? powerManager->isAmbientClockEnabled() : prefs.getBool("ambient_clock", false);
                     snprintf(valBuf, sizeof(valBuf), ac ? "On" : "Off");
                     break;
                 }
-                case 8: {
+                case 9: {
                     bool ws = prefs.getBool("wifi_sleep", true);
                     snprintf(valBuf, sizeof(valBuf), ws ? "Auto" : "Off");
                     break;
                 }
-                case 9: {
+                case 10: {
                     bool um = powerManager ? powerManager->isUsbPerfMax() : prefs.getBool("usb_perf", true);
                     snprintf(valBuf, sizeof(valBuf), um ? "MaxPerf" : "Managed");
                     break;
                 }
-                case 10: {
+                case 11: {
                     if (curSlide == 0) snprintf(valBuf, sizeof(valBuf), "Off");
                     else snprintf(valBuf, sizeof(valBuf), "%ds", curSlide);
                     break;
                 }
-                case 11: snprintf(valBuf, sizeof(valBuf), ssyncAuto ? "On" : "Off"); break;
-                case 12: {
+                case 12: snprintf(valBuf, sizeof(valBuf), ssyncAuto ? "On" : "Off"); break;
+                case 13: {
                     uint8_t br = pixelEngine.getBrightness();
                     if (br == 0)      snprintf(valBuf, sizeof(valBuf), "Off");
                     else if (br <= 3) snprintf(valBuf, sizeof(valBuf), "20%%");
@@ -222,9 +233,9 @@ public:
                     else              snprintf(valBuf, sizeof(valBuf), "100%%");
                     break;
                 }
-                case 13: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
-                case 14: snprintf(valBuf, sizeof(valBuf), "Shut"); valCol = POKO_CLR_ERR; break;
-                case 15: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
+                case 14: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
+                case 15: snprintf(valBuf, sizeof(valBuf), "Shut"); valCol = POKO_CLR_ERR; break;
+                case 16: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
             }
 
             _canvas->setTextColor(valCol, isSel ? theme.surface : theme.bg);
@@ -247,7 +258,7 @@ public:
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(theme.footerText, theme.headerBg);
         const char* hint = (_selected == 1 || _selected == 2 || _selected == 4 ||
-                            _selected == 5 || _selected == 6) ? "Hold L:- R:+  2R:Set" : "L:Prv  R:Nxt  2R:Set";
+                            _selected == 5 || _selected == 6 || _selected == 7) ? "Hold L:- R:+  2R:Set" : "L:Prv  R:Nxt  2R:Set";
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
         _canvas->print(hint);
@@ -320,28 +331,35 @@ public:
                 else              prefs.putUInt("auto_off", next);
                 break;
             }
-            case 7: { // Ambient Clock (On <-> Off)
+            case 7: { // Low-battery threshold: 3% -> 5% -> 10% -> Off -> 3%
+                uint8_t cur = powerManager ? powerManager->getAutoOffBatteryPercent() : prefs.getUChar("auto_off_pct", 5);
+                uint8_t next = cur == 3 ? 5 : (cur == 5 ? 10 : (cur == 10 ? 0 : 3));
+                if (powerManager) powerManager->setAutoOffBatteryPercent(next);
+                else              prefs.putUChar("auto_off_pct", next);
+                break;
+            }
+            case 8: { // Ambient Clock (On <-> Off)
                 bool cur = powerManager ? powerManager->isAmbientClockEnabled() : prefs.getBool("ambient_clock", false);
                 bool next = !cur;
                 if (powerManager) powerManager->setAmbientClock(next);
                 else              prefs.putBool("ambient_clock", next);
                 break;
             }
-            case 8: { // WiFi Sleep (Auto <-> Off)
+            case 9: { // WiFi Sleep (Auto <-> Off)
                 bool cur = prefs.getBool("wifi_sleep", true);
                 bool next = !cur;
                 prefs.putBool("wifi_sleep", next);
                 WiFi.setSleep(next);
                 break;
             }
-            case 9: { // USB Mode (MaxPerf <-> Managed)
+            case 10: { // USB Mode (MaxPerf <-> Managed)
                 bool cur = powerManager ? powerManager->isUsbPerfMax() : prefs.getBool("usb_perf", true);
                 bool next = !cur;
                 if (powerManager) powerManager->setUsbPerfMax(next);
                 else              prefs.putBool("usb_perf", next);
                 break;
             }
-            case 10: { // Cycle Slide Timer: 0 -> 3 -> 5 -> 10 -> 15 -> 30 -> 60 -> 0
+            case 11: { // Cycle Slide Timer: 0 -> 3 -> 5 -> 10 -> 15 -> 30 -> 60 -> 0
                 int cur = prefs.getInt("gallery_timer", 0);
                 int next = 0;
                 if (cur == 0)       next = 3;
@@ -354,7 +372,7 @@ public:
                 prefs.putInt("gallery_timer", next);
                 break;
             }
-            case 11: { // SSync Auto (On <-> Off)
+            case 12: { // SSync Auto (On <-> Off)
                 bool nextAuto = !prefs.getBool("snap_auto", true);
                 prefs.putBool("snap_auto", nextAuto);
                 if (nextAuto) {
@@ -381,7 +399,7 @@ public:
                 }
                 break;
             }
-            case 12: { // LED Bright (Off -> 20% -> 50% -> 100% -> Off)
+            case 13: { // LED Bright (Off -> 20% -> 50% -> 100% -> Off)
                 uint8_t curB = pixelEngine.getBrightness();
                 uint8_t nextB = 7;
                 if (curB == 0)      nextB = 3;
@@ -392,11 +410,11 @@ public:
                 pixelEngine.saveToPreferences(prefs);
                 break;
             }
-            case 13: { // Reset Drivers
+            case 14: { // Reset Drivers
                 handleDriverReset();
                 break;
             }
-            case 14: { // Power Off (Graceful Shutdown)
+            case 15: { // Power Off (Graceful Shutdown)
                 if (powerManager) {
                     _canvas->fillScreen(POKO_CLR_ERR);
                     _canvas->setFont(u8g2_font_helvB10_tf);
@@ -409,7 +427,7 @@ public:
                 }
                 break;
             }
-            case 15: { // Reboot
+            case 16: { // Reboot
                 prefs.putBool("clean_shutdown", true);
                 _canvas->fillScreen(POKO_CLR_ERR);
                 _canvas->setFont(u8g2_font_helvB10_tf);

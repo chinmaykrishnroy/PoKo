@@ -763,7 +763,13 @@ void loop() {
     // Process button input and combos
     btnInput.update();
     if (audioManager) audioManager->update();
-    if (powerManager) powerManager->update();
+    if (powerManager) {
+        bool mediaAppActive = activeApp == STATE_SSYNC || activeApp == STATE_MUSIC_UI ||
+                              activeApp == STATE_VIDEO_UI || activeApp == STATE_GALLERY_UI ||
+                              (audioManager && audioManager->activeSource() != AUDIO_NONE);
+        powerManager->setMediaAppActive(mediaAppActive);
+        powerManager->update();
+    }
 
     // WiFi STA/AP Non-blocking State Machine
     if (wifiState == STATE_WIFI_CONNECTING) {

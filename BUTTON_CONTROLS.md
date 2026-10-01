@@ -122,16 +122,17 @@ These controls are active across the entire system regardless of the open applic
   4. **Amp Boost**: +0 dB $\rightarrow$ +1 dB $\rightarrow$ +2 dB $\rightarrow$ +3 dB $\rightarrow$ +4 dB $\rightarrow$ +5 dB
   5. **Dim Timeout**: Off $\rightarrow$ 5s $\rightarrow$ 10s $\rightarrow$ 15s $\rightarrow$ 30s $\rightarrow$ 60s
   6. **Sleep Timeout**: Off $\rightarrow$ 15s $\rightarrow$ 30s $\rightarrow$ 1m $\rightarrow$ 2m $\rightarrow$ 5m
-  7. **Auto-Off**: Never $\rightarrow$ 5m $\rightarrow$ 10m $\rightarrow$ 15m $\rightarrow$ 30m
-  8. **Ambient Clock**: On $\leftrightarrow$ Off (keeps clock visible dimmed rather than sleeping screen)
-  9. **WiFi Sleep**: Auto $\leftrightarrow$ Off
-  10. **USB Mode**: `MaxPerf` $\leftrightarrow$ `Managed`
-  11. **Slide Timer**: Off $\rightarrow$ 3s $\rightarrow$ 5s $\rightarrow$ 10s $\rightarrow$ 15s $\rightarrow$ 30s $\rightarrow$ 60s
-  12. **SSync Auto**: On $\leftrightarrow$ Off (auto-connects Snapcast on boot/Wi-Fi)
-  13. **LED Bright**: Off $\rightarrow$ 20% $\rightarrow$ 50% $\rightarrow$ 100%
-  14. **Reset Drivers**: Execute emergency re-initialization of peripheral drivers
-  15. **Power Off**: Orderly shutdown sequence
-  16. **Reboot**: Clean device reboot
+  7. **Auto-Off**: Low-battery shutdown delay: 10m $\rightarrow$ 15m $\rightarrow$ 30m $\rightarrow$ Never
+  8. **Off Battery %**: 3% $\rightarrow$ 5% $\rightarrow$ 10% $\rightarrow$ Off. SSync, Music, Video, and Gallery inhibit this timer while open.
+  9. **Ambient Clock**: On $\leftrightarrow$ Off (keeps clock visible dimmed rather than sleeping screen)
+  10. **WiFi Sleep**: Auto $\leftrightarrow$ Off
+  11. **USB Mode**: `MaxPerf` $\leftrightarrow$ `Managed`
+  12. **Slide Timer**: Off $\rightarrow$ 3s $\rightarrow$ 5s $\rightarrow$ 10s $\rightarrow$ 15s $\rightarrow$ 30s $\rightarrow$ 60s
+  13. **SSync Auto**: On $\leftrightarrow$ Off (auto-connects Snapcast on boot/Wi-Fi)
+  14. **LED Bright**: Off $\rightarrow$ 20% $\rightarrow$ 50% $\rightarrow$ 100%
+  15. **Reset Drivers**: Execute emergency re-initialization of peripheral drivers
+  16. **Power Off**: Orderly shutdown sequence
+  17. **Reboot**: Clean device reboot
 
 ---
 

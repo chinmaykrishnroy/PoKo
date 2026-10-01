@@ -11,6 +11,7 @@
 #include "BatteryManager.h"
 #include "AudioManager.h"
 #include "PixelEngine.h"
+#include "PowerPolicy.h"
 
 // ─────────────────────────────────────────────────────────────
 //  PowerManager — Resource-aware embedded power management
@@ -78,6 +79,10 @@ private:
     uint32_t              _dimTimeoutSec       = 15;
     uint32_t              _sleepTimeoutSec     = 30;
     uint32_t              _autoOffSec          = 900; // 15 min default
+    uint8_t               _autoOffBatteryPct   = 5;
+    bool                  _mediaAppActive      = false;
+    bool                  _lowBatteryTiming    = false;
+    uint32_t              _lowBatterySinceMs   = 0;
     bool                  _ambientClockEnabled = false;
 
     // Backlight ramp
@@ -150,6 +155,7 @@ public:
             _dimTimeoutSec = _prefs->getUInt("dim_timeout", 15);
             _sleepTimeoutSec = _prefs->getUInt("sleep_timeout", 30);
             _autoOffSec = _prefs->getUInt("auto_off", 900);
+            _autoOffBatteryPct = constrain(_prefs->getUChar("auto_off_pct", 5), 0, 100);
             _ambientClockEnabled = _prefs->getBool("ambient_clock", false);
             _usbPerfMax = _prefs->getBool("usb_perf", true);
             _userBrightnessPercent = constrain(_prefs->getInt("brightness", 80), 1, 100);
@@ -160,8 +166,9 @@ public:
         _currentDuty = _targetDuty;
         setBacklight(_currentDuty);
 
-        Serial.printf("[power] PowerManager initialized (dim=%us, sleep=%us, auto_off=%us, usb_perf=%s)\n",
-                      _dimTimeoutSec, _sleepTimeoutSec, _autoOffSec, _usbPerfMax ? "MaxPerf" : "Managed");
+        Serial.printf("[power] PowerManager initialized (dim=%us, sleep=%us, auto_off=%us at <=%u%%, usb_perf=%s)\n",
+                      _dimTimeoutSec, _sleepTimeoutSec, _autoOffSec, _autoOffBatteryPct,
+                      _usbPerfMax ? "MaxPerf" : "Managed");
     }
 
     // ── Lock Management ──────────────────────────────────────────
@@ -444,15 +451,27 @@ public:
             }
         }
 
-        // 6. Auto Power-Off (when idle on battery with no audio playing)
-        if (_autoOffSec > 0 && !hasLock(POWER_LOCK_AUDIO) && !hasLock(POWER_LOCK_PREVENT_DEEP_SLEEP) && !hasLock(POWER_LOCK_OTA)) {
-            // Only auto power-off if battery is present and not charging
-            if (isBatteryPresent() && !_battery->isCharging()) {
-                uint32_t idleMs = now - _lastActivityMs;
-                if (idleMs >= (_autoOffSec * 1000)) {
-                    Serial.printf("[power] Inactivity timeout reached (%u sec on battery) -> Auto Power-Off\n", _autoOffSec);
-                    powerOff(false);
-                }
+        // 6. Low-battery Auto Power-Off. Media apps always inhibit this timer.
+        int batteryPct = (_battery && isBatteryPresent()) ? _battery->getPercentage() : -1;
+        bool shutdownLocked = hasLock(POWER_LOCK_PREVENT_DEEP_SLEEP) || hasLock(POWER_LOCK_OTA);
+        bool eligible = _autoOffSec > 0 && _autoOffBatteryPct > 0 && isBatteryPresent() &&
+                        !_battery->isCharging() && !_mediaAppActive && !shutdownLocked &&
+                        batteryPct >= 0 && batteryPct <= _autoOffBatteryPct;
+        if (!eligible) {
+            _lowBatteryTiming = false;
+        } else {
+            if (!_lowBatteryTiming) {
+                _lowBatteryTiming = true;
+                _lowBatterySinceMs = now;
+                Serial.printf("[power] Battery at %d%% (threshold %u%%); auto-off timer started\n",
+                              batteryPct, _autoOffBatteryPct);
+            }
+            uint32_t lowBatteryMs = now - _lowBatterySinceMs;
+            if (shouldAutoPowerOff(_autoOffSec, _autoOffBatteryPct, batteryPct,
+                                   true, false, _mediaAppActive, shutdownLocked, lowBatteryMs)) {
+                Serial.printf("[power] Battery <= %u%% for %u sec -> Auto Power-Off\n",
+                              _autoOffBatteryPct, _autoOffSec);
+                powerOff(false);
             }
         }
     }
@@ -489,6 +508,19 @@ public:
         if (persist && _prefs) _prefs->putUInt("auto_off", sec);
     }
     uint32_t getAutoOffTimeout() const { return _autoOffSec; }
+
+    void setAutoOffBatteryPercent(uint8_t percent, bool persist = true) {
+        _autoOffBatteryPct = constrain(percent, 0, 100);
+        _lowBatteryTiming = false;
+        if (persist && _prefs) _prefs->putUChar("auto_off_pct", _autoOffBatteryPct);
+    }
+    uint8_t getAutoOffBatteryPercent() const { return _autoOffBatteryPct; }
+
+    void setMediaAppActive(bool active) {
+        if (_mediaAppActive != active) _lowBatteryTiming = false;
+        _mediaAppActive = active;
+    }
+    bool isMediaAppActive() const { return _mediaAppActive; }
 
     void setAmbientClock(bool en) {
         _ambientClockEnabled = en;
@@ -548,6 +580,10 @@ public:
         json += String(_sleepTimeoutSec);
         json += ",\"auto_off\":";
         json += String(_autoOffSec);
+        json += ",\"auto_off_battery_pct\":";
+        json += String(_autoOffBatteryPct);
+        json += ",\"media_app_active\":";
+        json += _mediaAppActive ? "true" : "false";
         json += ",\"ambient_clock\":";
         json += _ambientClockEnabled ? "true" : "false";
         json += ",\"idle_sec\":";

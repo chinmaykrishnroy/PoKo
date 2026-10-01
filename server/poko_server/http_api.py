@@ -450,7 +450,7 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "error": "GET required"}, HTTPStatus.METHOD_NOT_ALLOWED)
                 return
             if path in {"/api/device/power", "/api/device/sys"}:
-                ranges = {"dim_timeout": (0, 604800), "sleep_timeout": (0, 604800), "auto_off": (0, 604800), "ambient_clock": (0, 1), "usb_perf": (0, 1), "wifi_sleep": (0, 1)} if path.endswith("power") else {"brightness": (1, 100), "volume": (0, 100), "master_vol": (1, 100), "amp_boost": (0, 5)}
+                ranges = {"dim_timeout": (0, 604800), "sleep_timeout": (0, 604800), "auto_off": (0, 604800), "auto_off_battery_pct": (0, 100), "ambient_clock": (0, 1), "usb_perf": (0, 1), "wifi_sleep": (0, 1)} if path.endswith("power") else {"brightness": (1, 100), "volume": (0, 100), "master_vol": (1, 100), "amp_boost": (0, 5)}
                 for key, values in query.items():
                     if len(values) != 1:
                         self._json({"ok": False, "error": "invalid control"}, HTTPStatus.BAD_REQUEST)

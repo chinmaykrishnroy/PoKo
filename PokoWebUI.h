@@ -949,7 +949,8 @@ async function renderSystem(){
           <form id="systemPowerForm" class="form-grid">
             <div class="field"><label>Dim after<small>Seconds without input</small></label><input type="number" name="dim_timeout" min="0" max="604800" value="${p.dim_timeout}" required></div>
             <div class="field"><label>Sleep after<small>Seconds without input</small></label><input type="number" name="sleep_timeout" min="0" max="604800" value="${p.sleep_timeout}" required></div>
-            <div class="field"><label>Battery auto-off<small>Seconds without input</small></label><input type="number" name="auto_off" min="0" max="604800" value="${p.auto_off}" required></div>
+            <div class="field"><label>Low-battery auto-off<small>Seconds continuously below threshold</small></label><input type="number" name="auto_off" min="0" max="604800" value="${p.auto_off}" required></div>
+            <div class="field"><label>Auto-off threshold<small>Battery percent; 0 disables</small></label><input type="number" name="auto_off_battery_pct" min="0" max="100" value="${p.auto_off_battery_pct}" required></div>
             <div class="field"><span class="label">Ambient clock</span><label class="switch"><input name="ambient_clock" type="checkbox" ${p.ambient_clock?'checked':''}><span></span></label></div>
             <div class="field"><span class="label">USB max performance<small>Only when power source can be detected</small></span><label class="switch"><input name="usb_perf" type="checkbox" ${p.usb_perf_max?'checked':''}><span></span></label></div>
             <div class="field"><span class="label">Allow Wi-Fi sleep<small>Lower idle power, except during realtime audio</small></span><label class="switch"><input name="wifi_sleep" type="checkbox" ${p.wifi_sleep_allowed?'checked':''}><span></span></label></div>
@@ -980,7 +981,7 @@ async function renderSystem(){
 async function savePowerPolicy(e){
   e.preventDefault();
   const form=e.currentTarget,values=new FormData(form),query=new URLSearchParams();
-  for(const key of ['dim_timeout','sleep_timeout','auto_off'])query.set(key,values.get(key));
+  for(const key of ['dim_timeout','sleep_timeout','auto_off','auto_off_battery_pct'])query.set(key,values.get(key));
   for(const key of ['ambient_clock','usb_perf','wifi_sleep'])query.set(key,values.has(key)?'1':'0');
   try{await api('/api/power?'+query);toast('Power policy saved');renderSystem()}catch(err){toast(err.message,true)}
 }

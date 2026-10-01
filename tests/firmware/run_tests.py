@@ -29,6 +29,7 @@ def main() -> int:
     "video": ["next", "next-page", "page-failure", "http-failure", "missing-refresh", "missing-empty", "load-failure", "stop-timeout", "next-stop-timeout"],
         "marquee": ["scroll-and-wrap"],
         "pixel-toggle": ["preserves-color", "forces-solid", "turns-off"],
+        "power-policy": ["media-inhibits", "threshold-delay", "above-threshold", "charging-inhibits", "disabled"],
     }
     sources = {
         "buttons": [HERE / "buttons.cpp", args.onebutton / "OneButton.cpp"],
@@ -36,6 +37,7 @@ def main() -> int:
         "video": [ROOT / "build/video-test.cpp"],
         "marquee": [HERE / "marquee.cpp"],
         "pixel-toggle": [HERE / "pixel_toggle.cpp"],
+        "power-policy": [HERE / "power_policy.cpp"],
     }
     # Real OneButton must precede stubs/OneButton.h. Only Arduino hardware is mocked.
     includes = [args.onebutton, HERE / "stubs", HERE, ROOT]

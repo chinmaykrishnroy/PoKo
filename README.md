@@ -187,7 +187,7 @@ The server runs on port **8765** by default. Set it in the PoKo web UI under **C
 
 ### Continuous integration and releases
 
-GitHub Actions runs backend tests, 30 firmware host regressions, the FFmpeg
+GitHub Actions runs backend tests, 40 firmware host regressions, the FFmpeg
 loopback smoke test, and a full ESP32-S3 compile for pull requests and pushes to
 `main`. Each successful run stores the application `.bin` as a workflow artifact.
 
@@ -201,7 +201,7 @@ are for USB provisioning and are not OTA images.
 
 ## Documentation
 
-- [**Complete Device & Microcontroller Manual (DEVICE_MANUAL.md)**](DEVICE_MANUAL.md) — Comprehensive reference covering ESP32-S3 architecture, FreeRTOS tasks, dynamic resource/power management, on-screen dots (Wi-Fi, audio, carousel), detailed walkthrough of all 8 apps, all 28 telemetry metrics, all 16 system preferences, reboot/shutdown procedures, and REST API.
+- [**Complete Device & Microcontroller Manual (DEVICE_MANUAL.md)**](DEVICE_MANUAL.md) — Comprehensive reference covering ESP32-S3 architecture, FreeRTOS tasks, dynamic resource/power management, on-screen dots (Wi-Fi, audio, carousel), detailed walkthrough of all 8 apps, power telemetry, all 17 system preferences, reboot/shutdown procedures, and REST API.
 - [**Button Controls & Navigation Guide (BUTTON_CONTROLS.md)**](BUTTON_CONTROLS.md) — Physical button layout, debounce timings, and quick gesture matrix.
 - [**Release Versioning & Git Tags (VERSIONING.md)**](VERSIONING.md) — Semantic versioning policy and automated release workflows.
 

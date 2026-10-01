@@ -176,6 +176,10 @@ public:
                 long value = _server->arg("auto_off").toInt();
                 powerManager->setAutoOffTimeout((uint32_t)constrain(value, 0L, 604800L));
             }
+            if (_server->hasArg("auto_off_battery_pct")) {
+                long value = _server->arg("auto_off_battery_pct").toInt();
+                powerManager->setAutoOffBatteryPercent((uint8_t)constrain(value, 0L, 100L));
+            }
             if (_server->hasArg("ambient_clock")) {
                 powerManager->setAmbientClock(_server->arg("ambient_clock").toInt() != 0);
             }
