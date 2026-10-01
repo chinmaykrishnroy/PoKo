@@ -38,7 +38,7 @@ class MediaIndexTests(unittest.TestCase):
             if not cfg_path.exists():
                 cfg_path = Path(__file__).resolve().parents[1] / "config.example.yml"
             base = load_config(cfg_path)
-            config = replace(base, library=LibraryConfig([root], root / "write", 5, probe_on_scan=True, db_path=root / "nexus.db"))
+            config = replace(base, library=LibraryConfig([root], root / "write", 5, probe_on_scan=True, db_path=root / "poko.db"))
             index = MediaIndex(config, probe_fn=fake_probe)
             index.rescan()
 
@@ -61,7 +61,7 @@ class MediaIndexTests(unittest.TestCase):
             if not cfg_path.exists():
                 cfg_path = Path(__file__).resolve().parents[1] / "config.example.yml"
             base = load_config(cfg_path)
-            config = replace(base, library=LibraryConfig([root], root / "write", 5, db_path=root / "nexus.db"))
+            config = replace(base, library=LibraryConfig([root], root / "write", 5, db_path=root / "poko.db"))
             index = MediaIndex(config, probe_fn=fake_probe)
             index.rescan()
             page = index.page("audio")
@@ -106,7 +106,7 @@ class MediaIndexTests(unittest.TestCase):
             if not cfg_path.exists():
                 cfg_path = Path(__file__).resolve().parents[1] / "config.example.yml"
             base = load_config(cfg_path)
-            config = replace(base, library=LibraryConfig([root], root / "write", 5, db_path=root / "nexus.db"))
+            config = replace(base, library=LibraryConfig([root], root / "write", 5, db_path=root / "poko.db"))
             index = MediaIndex(config, probe_fn=fake_probe)
             self.assertTrue(index.start_background_scan())
             index.stop()

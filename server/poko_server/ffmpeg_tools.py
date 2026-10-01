@@ -202,7 +202,7 @@ def audio_tcp_command(
         str(config.ffmpeg.audio_channels),
         "-f",
         "mp3",
-        f"tcp://{target_host or config.nexus.ip}:{config.nexus.audio_port}?tcp_nodelay=1",
+        f"tcp://{target_host or config.poko.ip}:{config.poko.audio_port}?tcp_nodelay=1",
     ]
     return cmd
 
@@ -248,7 +248,7 @@ def graphics_video_tcp_command(
         str(selected_quality),
         "-f",
         "mjpeg",
-        f"tcp://{config.nexus.ip}:{config.nexus.graphics_port}?tcp_nodelay=1",
+        f"tcp://{config.poko.ip}:{config.poko.graphics_port}?tcp_nodelay=1",
     ]
     return cmd
 

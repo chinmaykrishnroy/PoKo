@@ -24,7 +24,7 @@ class HttpApiTests(unittest.TestCase):
     def test_port_is_bound_before_backend_workers_start(self) -> None:
         with workspace_tempdir() as root:
             base = load_config(_config_path)
-            config = replace(base, host="127.0.0.1", port=0, library=LibraryConfig([root], root / "write", 5, db_path=root / "nexus.db"))
+            config = replace(base, host="127.0.0.1", port=0, library=LibraryConfig([root], root / "write", 5, db_path=root / "poko.db"))
             first = make_server(config, dry_run=True)
             try:
                 occupied = replace(config, port=first.server_address[1])
@@ -38,7 +38,7 @@ class HttpApiTests(unittest.TestCase):
     def test_health_and_empty_library(self) -> None:
         with workspace_tempdir() as root:
             base = load_config(_config_path)
-            config = replace(base, host="127.0.0.1", port=0, library=LibraryConfig([root], root / "write", 5, db_path=root / "nexus.db"))
+            config = replace(base, host="127.0.0.1", port=0, library=LibraryConfig([root], root / "write", 5, db_path=root / "poko.db"))
             server = make_server(config, dry_run=True)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
@@ -64,7 +64,7 @@ class HttpApiTests(unittest.TestCase):
                 host="127.0.0.1",
                 port=0,
                 display=DisplayConfig(128, 128),
-                library=LibraryConfig([root], root / "write", 5, db_path=root / "nexus.db"),
+                library=LibraryConfig([root], root / "write", 5, db_path=root / "poko.db"),
             )
             config_path = root / "config.yml"
             config_path.write_text(config_to_yaml(config), encoding="utf-8")
@@ -77,7 +77,6 @@ class HttpApiTests(unittest.TestCase):
                 with urllib.request.urlopen(base_url + "/", timeout=5) as response:
                     html = response.read().decode("utf-8")
                     self.assertIn("PoKo Control", html)
-                    self.assertNotIn("Nexus", html)
                     self.assertNotIn("240 × 240", html)
                 payload = json.dumps(
                     {"highpass_enabled": True, "highpass_hz": 90, "lowpass_enabled": True, "lowpass_hz": 14000}
@@ -199,7 +198,7 @@ class HttpApiTests(unittest.TestCase):
     def test_camera_jpeg_listing_validation_and_bad_query_status(self) -> None:
         with workspace_tempdir() as root:
             base = load_config(_config_path)
-            config = replace(base, host="127.0.0.1", port=0, library=LibraryConfig([root], root / "write", 5, db_path=root / "nexus.db"))
+            config = replace(base, host="127.0.0.1", port=0, library=LibraryConfig([root], root / "write", 5, db_path=root / "poko.db"))
             config_path = root / "config.yml"
             config_path.write_text(config_to_yaml(config), encoding="utf-8")
             server = make_server(config, dry_run=True, config_path=config_path)

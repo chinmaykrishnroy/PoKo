@@ -86,7 +86,7 @@ def main():
                 if not done.is_set():
                     errors.append(error)
 
-        config = replace(config, poko=replace(config.nexus, ip="127.0.0.1",
+        config = replace(config, poko=replace(config.poko, ip="127.0.0.1",
                          video_audio_port=listeners[0].getsockname()[1],
                          video_frames_port=listeners[1].getsockname()[1]),
                          ffmpeg=replace(config.ffmpeg, executable=ffmpeg))

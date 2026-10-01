@@ -137,7 +137,7 @@ class SyncedAVStreamer:
         self.profile, self.video_fps, self.video_quality = resolve_video_tuning(
             config, synced=True, profile=profile, fps=fps, jpeg_quality=jpeg_quality
         )
-        self.target_host = target_host or config.nexus.ip
+        self.target_host = target_host or config.poko.ip
         self.dry_run = dry_run
         self.stop_event = threading.Event()
         self.threads: list[threading.Thread] = []
@@ -284,7 +284,7 @@ class SyncedAVStreamer:
         samples_sent = 0
 
         try:
-            with self._connect(self.config.nexus.video_audio_port) as sock:
+            with self._connect(self.config.poko.video_audio_port) as sock:
                 proc = self._popen(synced_audio_pipe_command(self.item.path, self.config, self.start_s))
                 with self.lock:
                     self.counters["audio_connected"] = True
@@ -332,7 +332,7 @@ class SyncedAVStreamer:
         frame_index = 0
 
         try:
-            with self._connect(self.config.nexus.video_frames_port) as sock:
+            with self._connect(self.config.poko.video_frames_port) as sock:
                 proc = self._popen(
                     synced_video_pipe_command(
                         self.item.path,
@@ -652,7 +652,7 @@ class PlaybackManager:
             device = self.device.switch("audio") if switch_device else None
             if device is not None and not device.ok:
                 return self._device_switch_failure(device)
-            selected_host = target_host or self.config.nexus.ip
+            selected_host = target_host or self.config.poko.ip
             command = audio_tcp_command(item.path, self.config, start_s, target_host=selected_host)
             try:
                 self._process = ProcessHandle(command, dry_run=self.dry_run)

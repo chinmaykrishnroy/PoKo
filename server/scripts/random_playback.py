@@ -30,7 +30,7 @@ def random_item(server: str, kind: str) -> dict | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Exercise Nexus backend playback endpoints with random indexed files.")
+    parser = argparse.ArgumentParser(description="Exercise PoKo backend playback endpoints with random indexed files.")
     parser.add_argument("--server", default="http://127.0.0.1:8765")
     parser.add_argument("--all", action="store_true", help="Run audio, synced video, graphics video, and seek checks")
     parser.add_argument("--pause", type=float, default=3)

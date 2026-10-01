@@ -83,7 +83,7 @@ class PlaybackTests(unittest.TestCase):
         sender = StalledSocket()
         try:
             with mock.patch("server.poko_server.playback.socket.create_connection", return_value=sender):
-                streamer._connect(config.nexus.video_frames_port)
+                streamer._connect(config.poko.video_frames_port)
             thread = threading.Thread(target=streamer._send_packet, args=(sender, 2, 0, b"frame"), daemon=True)
             streamer.threads = [thread]
             thread.start()
@@ -111,7 +111,7 @@ class PlaybackTests(unittest.TestCase):
         streamer = SyncedAVStreamer(item, config)
         fake_socket = FakeSocket()
         with mock.patch("server.poko_server.playback.socket.create_connection", return_value=fake_socket):
-            connected = streamer._connect(config.nexus.video_audio_port)
+            connected = streamer._connect(config.poko.video_audio_port)
         self.assertIs(connected, fake_socket)
         self.assertIsNone(fake_socket.timeout)
 
@@ -124,8 +124,8 @@ class PlaybackTests(unittest.TestCase):
         item = MediaItem(id="v1", kind="video", path=Path("movie.mkv"), title="Movie", extension=".mkv", size_bytes=1)
         streamer = SyncedAVStreamer(item, config, target_host="192.168.0.4")
         with mock.patch("server.poko_server.playback.socket.create_connection", return_value=FakeSocket()) as connect:
-            streamer._connect(config.nexus.video_audio_port)
-        connect.assert_called_once_with(("192.168.0.4", config.nexus.video_audio_port), timeout=1.0)
+            streamer._connect(config.poko.video_audio_port)
+        connect.assert_called_once_with(("192.168.0.4", config.poko.video_audio_port), timeout=1.0)
 
     def test_exited_ffmpeg_is_not_reported_as_playing(self) -> None:
         for manager, _ in self._manager():
@@ -198,7 +198,7 @@ class PlaybackTests(unittest.TestCase):
     def _manager(self):
         with workspace_tempdir() as root:
             base = load_config(_config_path)
-            config = replace(base, library=LibraryConfig([root], root / "write", 5, db_path=root / "nexus.db"))
+            config = replace(base, library=LibraryConfig([root], root / "write", 5, db_path=root / "poko.db"))
             index = MediaIndex(config, probe_fn=lambda path, ffprobe: {})
             device = FakeDevice(config)
             manager = PlaybackManager(config, index, device, dry_run=True)
@@ -295,18 +295,18 @@ class PlaybackTests(unittest.TestCase):
                 item,
                 audio="true",
                 switch_device=False,
-                request_id="nexus-v1-launch-123",
+                request_id="poko-v1-launch-123",
             )
             retry = manager.submit_video(
                 item,
                 audio="true",
                 switch_device=False,
-                request_id="nexus-v1-launch-123",
+                request_id="poko-v1-launch-123",
             )
 
             self.assertEqual(retry["operation_id"], first["operation_id"])
             self.assertTrue(retry["duplicate"])
-            self.assertEqual(retry["request_id"], "nexus-v1-launch-123")
+            self.assertEqual(retry["request_id"], "poko-v1-launch-123")
 
     def test_remote_image_playback_reports_unsupported_transport(self) -> None:
         for manager, device in self._manager():
@@ -389,7 +389,7 @@ class PlaybackTests(unittest.TestCase):
     def test_failed_device_switch_does_not_start_playback(self) -> None:
         with workspace_tempdir() as root:
             base = load_config(_config_path)
-            config = replace(base, library=LibraryConfig([root], root / "write", 5, db_path=root / "nexus.db"))
+            config = replace(base, library=LibraryConfig([root], root / "write", 5, db_path=root / "poko.db"))
             index = MediaIndex(config, probe_fn=lambda path, ffprobe: {})
             device = FailingDevice(config)
             manager = PlaybackManager(config, index, device, dry_run=True)

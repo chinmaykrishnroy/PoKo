@@ -245,11 +245,6 @@ class AppConfig:
     ffmpeg: FFmpegConfig
     display: DisplayConfig = DisplayConfig()
 
-    @property
-    def nexus(self) -> PokoDeviceConfig:
-        return self.poko
-
-
 def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
     config_path = Path(path)
     raw = load_raw_config(config_path)
@@ -260,26 +255,18 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
     poko_sec = _get(raw, "poko", {})
     if not isinstance(poko_sec, dict):
         poko_sec = {}
-    nexus_sec = _get(raw, "nexus", {})
-    if not isinstance(nexus_sec, dict):
-        nexus_sec = {}
-
-    poko_ip = str(poko_sec.get("ip") or nexus_sec.get("ip") or "192.168.0.4")
-    poko_base_url = str(poko_sec.get("base_url") or nexus_sec.get("base_url") or f"http://{poko_ip}").rstrip("/")
+    poko_ip = str(poko_sec.get("ip") or "192.168.0.4")
+    poko_base_url = str(poko_sec.get("base_url") or f"http://{poko_ip}").rstrip("/")
     raw_delay = poko_sec.get("switch_delay_ms")
-    if raw_delay is None:
-        raw_delay = nexus_sec.get("switch_delay_ms")
     if raw_delay is None:
         raw_delay = 500
     poko_delay = max(0, int(raw_delay))
 
     poko_ports = poko_sec.get("ports") if isinstance(poko_sec.get("ports"), dict) else {}
-    nexus_ports = nexus_sec.get("ports") if isinstance(nexus_sec.get("ports"), dict) else {}
-
-    graphics_port = int(poko_ports.get("graphics") or nexus_ports.get("graphics") or 1234)
-    audio_port = int(poko_ports.get("audio") or nexus_ports.get("audio") or 1235)
-    video_audio_port = int(poko_ports.get("video_audio") or nexus_ports.get("video_audio") or 1236)
-    video_frames_port = int(poko_ports.get("video_frames") or nexus_ports.get("video_frames") or 1237)
+    graphics_port = int(poko_ports.get("graphics") or 1234)
+    audio_port = int(poko_ports.get("audio") or 1235)
+    video_audio_port = int(poko_ports.get("video_audio") or 1236)
+    video_frames_port = int(poko_ports.get("video_frames") or 1237)
 
     disp_w = int(_get(raw, "display.width", 128))
     disp_h = int(_get(raw, "display.height", 128))

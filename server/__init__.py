@@ -1,2 +1,2 @@
-"""Nexus backend package root."""
+"""PoKo backend package root."""
 

@@ -20,7 +20,7 @@ library:
     - E:\\Other
   write_folder: D:\\Trash
   page_size: 5
-nexus:
+poko:
   ip: 192.168.0.10
   ports:
     graphics: 1234
@@ -34,7 +34,7 @@ nexus:
             self.assertEqual(config.host, "127.0.0.1")
             self.assertEqual(config.port, 9999)
             self.assertEqual(config.library.page_size, 5)
-            self.assertEqual(config.nexus.graphics_port, 1234)
+            self.assertEqual(config.poko.graphics_port, 1234)
 
     def test_config_round_trip_preserves_display_empty_lists_and_special_strings(self) -> None:
         with workspace_tempdir() as tmp:

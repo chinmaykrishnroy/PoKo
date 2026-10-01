@@ -91,9 +91,9 @@ the config so camera/voice-recorder upload can be added cleanly later.
   a static poster, releases Graphics Player after one sequence, and resumes the
   normal gallery with that poster.
 
-The LittleFS page includes a 240 x 240 wallpaper cropper. Wallpaper is stored as
+The LittleFS page includes a 128 x 128 wallpaper cropper. Wallpaper is stored as
 `/wallpaper.jpg`, can be enabled or disabled from either system settings or the
-server UI, and is drawn only below the persistent Nexus title bar.
+server UI, and is drawn only below the persistent PoKo title bar.
 
 ## Test Scripts
 

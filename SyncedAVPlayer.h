@@ -12,7 +12,7 @@
 
 // ─────────────────────────────────────────────────────────────
 //  SyncedAVPlayer — 128×128 Dual-TCP Synchronized Video & Audio
-//  Follows the proven Nexus NAV1 packet protocol:
+//  Follows the proven PoKo NAV1 packet protocol:
 //    - Port 1236: 22,050 Hz 16-bit Mono PCM audio
 //    - Port 1237: MJPEG video frames synchronized to audio clock
 //  Decodes via TJpg_Decoder directly to GC9107 display via Arduino_GFX

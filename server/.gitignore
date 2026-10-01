@@ -2,6 +2,6 @@
 .test-tmp/
 __pycache__/
 *.pyc
-nexus.db*
+poko.db*
 .test-server.*
 

@@ -12,16 +12,6 @@ poko:
     video_audio: 1236
     video_frames: 1237
 
-nexus:
-  ip: 192.168.0.4
-  base_url: http://192.168.0.4
-  switch_delay_ms: 500
-  ports:
-    graphics: 1234
-    audio: 1235
-    video_audio: 1236
-    video_frames: 1237
-
 display:
   width: 128
   height: 128
