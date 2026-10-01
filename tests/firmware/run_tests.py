@@ -30,14 +30,16 @@ def main() -> int:
         "marquee": ["scroll-and-wrap"],
         "pixel-toggle": ["preserves-color", "forces-solid", "turns-off"],
         "power-policy": ["media-inhibits", "threshold-delay", "above-threshold", "charging-inhibits", "disabled"],
+        "battery": ["periodic-read-keeps-plug-event"],
     }
     sources = {
-        "buttons": [HERE / "buttons.cpp", args.onebutton / "OneButton.cpp"],
+        "buttons": [HERE / "buttons.cpp", ROOT / "ButtonInput.cpp", args.onebutton / "OneButton.cpp"],
         "audio": [ROOT / "build/audio-test.cpp"],
-        "video": [ROOT / "build/video-test.cpp"],
-        "marquee": [HERE / "marquee.cpp"],
+        "video": [ROOT / "build/video-test.cpp", ROOT / "TitleMarquee.cpp"],
+        "marquee": [HERE / "marquee.cpp", ROOT / "TitleMarquee.cpp"],
         "pixel-toggle": [HERE / "pixel_toggle.cpp"],
-        "power-policy": [HERE / "power_policy.cpp"],
+        "power-policy": [HERE / "power_policy.cpp", ROOT / "PowerPolicy.cpp"],
+        "battery": [HERE / "battery.cpp", ROOT / "BatteryManager.cpp"],
     }
     # Real OneButton must precede stubs/OneButton.h. Only Arduino hardware is mocked.
     includes = [args.onebutton, HERE / "stubs", HERE, ROOT]

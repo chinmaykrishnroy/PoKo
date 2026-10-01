@@ -81,6 +81,13 @@ PoKo is a **full-featured pocket media device** running on an ESP32-S3 microcont
 
 ## Architecture
 
+Firmware modules use declaration-only `.h` interfaces and matching `.cpp`
+implementations. Mutable hardware state must have exactly one owner in a `.cpp`
+file; headers may contain types, declarations, constants, and templates only.
+`tests/check_header_boundaries.py` enforces this boundary across every
+first-party firmware module. Template-only and third-party C headers are
+explicit exceptions.
+
 ```
 ┌──────────────────────────────────────────────┐
 │                 ESP32-S3 (PoKo)              │
@@ -187,7 +194,7 @@ The server runs on port **8765** by default. Set it in the PoKo web UI under **C
 
 ### Continuous integration and releases
 
-GitHub Actions runs backend tests, 40 firmware host regressions, the FFmpeg
+GitHub Actions runs backend tests, 41 firmware host regressions, the FFmpeg
 loopback smoke test, and a full ESP32-S3 compile for pull requests and pushes to
 `main`. Each successful run stores the application `.bin` as a workflow artifact.
 

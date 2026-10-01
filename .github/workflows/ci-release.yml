@@ -61,6 +61,9 @@ jobs:
       - name: Run firmware host regressions
         run: python tests/firmware/run_tests.py --onebutton "$HOME/Arduino/libraries/OneButton/src"
 
+      - name: Enforce firmware header boundaries
+        run: python tests/check_header_boundaries.py
+
       - name: Run FFmpeg stream smoke test
         run: python tests/firmware/stream_smoke.py
 
@@ -114,8 +117,8 @@ jobs:
             echo "Tag must match vX.X.X" >&2
             exit 1
           }
-          grep -Fq "add(\"Ver\", \"${GITHUB_REF_NAME}\"" InfoApp.h
-          grep -Fq "\\\"firmware_version\\\":\\\"${GITHUB_REF_NAME}\\\"" PokoAPI.h
+          grep -Fq "add(\"Ver\", \"${GITHUB_REF_NAME}\"" InfoApp.cpp
+          grep -Fq "\\\"firmware_version\\\":\\\"${GITHUB_REF_NAME}\\\"" PokoAPI.cpp
 
       - name: Download firmware artifact
         uses: actions/download-artifact@v8

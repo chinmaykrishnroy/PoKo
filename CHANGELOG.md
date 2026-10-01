@@ -7,6 +7,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v1.4.0] — 2026-10-01
+
+### Changed
+- Completed the declaration-only firmware header migration. Hardware drivers,
+  app controllers, media transports, input, power, themes, state helpers, and
+  embedded Web UIs now have matching `.cpp` implementations.
+- CI now prevents first-party modules from regaining header implementations and
+  rejects unclassified new header-only firmware modules.
+
+### Fixed
+- Periodic battery voltage sampling no longer bypasses charging-pin debounce or
+  swallows the USB plug-in event used to wake the display.
+- Display creation is idempotent, and display initialization/driver reset now
+  reject a null display instead of dereferencing it.
+
 ## [v1.3.4] — 2026-09-30
 
 ### Fixed
