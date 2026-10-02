@@ -1,4 +1,5 @@
 #include "SSyncApp.h"
+#include <new>
 
 void SSyncApp::renderToCanvas() {
         if (!_canvas) return;
@@ -109,12 +110,12 @@ void SSyncApp::setPlayer(SnapPlayer* p) { _player = p; }
 
 void SSyncApp::begin() {
         if (!_canvas) {
-            _canvas = new Arduino_Canvas(128, 128, _gfx, 0, 0);
-            _canvas->begin();
+            _canvas = new (std::nothrow) Arduino_Canvas(128, 128, _gfx, 0, 0);
+            if (_canvas) _canvas->begin();
         }
         if (!_player) {
-            _player = new SnapPlayer(nullptr, &prefs);
-            _player->begin();
+            _player = new (std::nothrow) SnapPlayer(nullptr, &prefs);
+            if (_player) _player->begin();
         }
     }
 

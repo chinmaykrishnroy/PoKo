@@ -1,4 +1,5 @@
 #include "GalleryApp.h"
+#include <new>
 
 Arduino_Canvas* GalleryApp::_activeCanvas = nullptr;
 
@@ -467,8 +468,8 @@ GalleryApp::GalleryApp(Arduino_GFX* gfx, AppSwitchFn exitFn)
 
 void GalleryApp::begin() {
         if (!_canvas) {
-            _canvas = new Arduino_Canvas(128, 128, _gfx, 0, 0);
-            _canvas->begin();
+            _canvas = new (std::nothrow) Arduino_Canvas(128, 128, _gfx, 0, 0);
+            if (_canvas) _canvas->begin();
         }
         if (!_imgBuf) {
             _imgBuf = (uint8_t*)ps_malloc(64 * 1024);

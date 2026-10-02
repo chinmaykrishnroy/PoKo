@@ -7,6 +7,28 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v1.5.0] — 2026-10-02
+
+### Changed
+- Replaced `volatile` inter-task state with atomics, mutex-protected metadata,
+  queues, and short critical-section snapshots appropriate to each data path.
+- Audio, video, and Snapcast worker task handles are now owned by the control
+  task, with confirmed shutdown required before shared resources are released.
+- CI now rejects first-party firmware code that reintroduces `volatile` as a
+  synchronization mechanism.
+
+### Fixed
+- Snapcast endpoint, codec, clock offset, playback anchor, and 64-bit sample
+  state can no longer be read while another core partially updates them.
+- Simultaneous synchronized audio/video disconnects no longer race while
+  publishing connection state.
+- Audio and synchronized-video shutdown timeouts preserve live buffers for a
+  safe retry instead of risking use-after-free.
+- Audio decoder and UI canvas allocation failures now degrade safely instead
+  of dereferencing null objects and rebooting the device.
+
+---
+
 ## [v1.4.0] — 2026-10-01
 
 ### Changed

@@ -1,4 +1,5 @@
 #include "TCPAudio.h"
+#include <new>
 
 void TCPAudio::networkTaskWrapper(void* pvParameters) {
         ((TCPAudio*)pvParameters)->networkTask();
@@ -14,16 +15,27 @@ void TCPAudio::networkTask() {
             if (client) {
                 Serial.println("[tcpaudio] Client connected, starting MP3 stream decode");
                 ensureAudioOutput(44100);
-                _activeClient = &client;
                 _clientConnected = true;
                 _playStarted = true;
                 _disconnectStartMs = 0;
                 _abortStream = false;
                 client.setNoDelay(true);
 
-                AudioGeneratorMP3* mp3 = new AudioGeneratorMP3();
-                AudioOutputPokoI2S* out = new AudioOutputPokoI2S(&_volume);
-                AudioStreamTCP* file   = new AudioStreamTCP(&client, &_isRunning, &_abortStream);
+                AudioGeneratorMP3* mp3 = new (std::nothrow) AudioGeneratorMP3();
+                AudioOutputPokoI2S* out = new (std::nothrow) AudioOutputPokoI2S(&_volume);
+                AudioStreamTCP* file   = new (std::nothrow) AudioStreamTCP(&client, &_isRunning, &_abortStream);
+
+                if (!mp3 || !out || !file || !file->isOpen()) {
+                    Serial.println("[tcpaudio] Insufficient memory for MP3 stream");
+                    delete mp3;
+                    delete out;
+                    delete file;
+                    client.stop();
+                    _clientConnected = false;
+                    _abortStream = false;
+                    vTaskDelay(pdMS_TO_TICKS(25));
+                    continue;
+                }
 
                 if (mp3->begin(file, out)) {
                     Serial.println("[tcpaudio] MP3 begin OK, streaming...");
@@ -51,7 +63,6 @@ void TCPAudio::networkTask() {
                 delete file;
 
                 client.stop();
-                _activeClient = nullptr;
                 _clientConnected = false;
                 _abortStream = false;
                 Serial.println("[tcpaudio] Client disconnected");
@@ -60,7 +71,6 @@ void TCPAudio::networkTask() {
         }
 
         _server.end();
-        _netTaskHandle = NULL;
         if (_netTaskDone) xSemaphoreGive(_netTaskDone);
         vTaskDelete(NULL);
     }
@@ -76,14 +86,11 @@ void TCPAudio::setVolume(float vol) {
 
 bool TCPAudio::isLoaded() const { return _isLoaded; }
 
-bool TCPAudio::isConnected() const { return _clientConnected; }
+bool TCPAudio::isConnected() const { return _clientConnected.load(std::memory_order_acquire); }
 
 void TCPAudio::stopStream() {
         if (_clientConnected) {
             _abortStream = true;
-            if (_activeClient && _activeClient->connected()) {
-                _activeClient->stop();
-            }
             uint32_t startWait = millis();
             while (_clientConnected && millis() - startWait < 300) {
                 vTaskDelay(pdMS_TO_TICKS(5));
@@ -133,7 +140,7 @@ void TCPAudio::load() {
             _isLoaded = true;
 
             BaseType_t ok = xTaskCreatePinnedToCore(
-                networkTaskWrapper, "PokoAudNet", 16384, this, 2, (TaskHandle_t*)&_netTaskHandle, 0
+                networkTaskWrapper, "PokoAudNet", 16384, this, 2, &_netTaskHandle, 0
             );
             if (ok != pdPASS) {
                 _isRunning = false;
@@ -160,7 +167,6 @@ void TCPAudio::unload() {
             }
             _netTaskHandle = NULL;
             _clientConnected = false;
-            _activeClient = nullptr;
             _isLoaded = false;
         }
     }
@@ -195,7 +201,7 @@ void TCPAudio::AudioStreamTCP::pump() {
             }
         }
 
-TCPAudio::AudioStreamTCP::AudioStreamTCP(WiFiClient* client, volatile bool* isRunning, volatile bool* abortFlag, size_t bufferBytes)
+TCPAudio::AudioStreamTCP::AudioStreamTCP(WiFiClient* client, std::atomic<bool>* isRunning, std::atomic<bool>* abortFlag, size_t bufferBytes)
             : _client(client), _isRunning(isRunning), _abort(abortFlag), _capacity(bufferBytes),
               _head(0), _tail(0), _count(0), _prebuffered(false), _ring(nullptr) {
             if (psramFound()) {
@@ -268,13 +274,15 @@ bool TCPAudio::AudioStreamTCP::close() {
             return true;
         }
 
-bool TCPAudio::AudioStreamTCP::isOpen() { return _client && (_client->connected() || _count > 0); }
+bool TCPAudio::AudioStreamTCP::isOpen() {
+            return _ring && _capacity > 0 && _client && (_client->connected() || _count > 0);
+        }
 
 uint32_t TCPAudio::AudioStreamTCP::getSize() { return 0; }
 
 uint32_t TCPAudio::AudioStreamTCP::getPos() { return 0; }
 
-TCPAudio::AudioOutputPokoI2S::AudioOutputPokoI2S(volatile float* vol) : _vol(vol) {}
+TCPAudio::AudioOutputPokoI2S::AudioOutputPokoI2S(std::atomic<float>* vol) : _vol(vol) {}
 
 bool TCPAudio::AudioOutputPokoI2S::begin() {
             _bufIndex = 0;
@@ -292,7 +300,7 @@ bool TCPAudio::AudioOutputPokoI2S::SetRate(int hz) {
 bool TCPAudio::AudioOutputPokoI2S::SetChannels(int channels) { return true; }
 
 bool TCPAudio::AudioOutputPokoI2S::ConsumeSample(int16_t sample[2]) {
-            float v = *_vol;
+            float v = _vol->load(std::memory_order_relaxed);
             // Downsample audio reactivity to 1-in-8 samples (~5.5 kHz) for 87% lower CPU load
             if ((_sampleCount++ & 0x07) == 0) {
                 pixelEngine.feedAudioSample(sample[0], sample[1]);

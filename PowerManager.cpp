@@ -6,7 +6,7 @@ void PowerManager::_recalcLocks() {
         for (uint8_t i = 0; i < LOCK_OWNER_COUNT; i++) {
             combined |= _ownerLocks[i];
         }
-        _locks = combined;
+        _locks.store(combined, std::memory_order_release);
     }
 
 void PowerManager::setWakeCallback(std::function<void()> cb) { _wakeCb = cb; }
@@ -97,11 +97,11 @@ void PowerManager::releaseLock(uint32_t mask, PowerLockOwner owner) {
     }
 
 bool PowerManager::hasLock(uint32_t mask) const {
-        return (_locks & mask) != 0;
+        return (_locks.load(std::memory_order_acquire) & mask) != 0;
     }
 
 uint32_t PowerManager::getLocks() const {
-        return _locks;
+        return _locks.load(std::memory_order_acquire);
     }
 
 bool PowerManager::notifyUserActivity(ActivitySource src) {
@@ -478,7 +478,7 @@ String PowerManager::getTelemetryJson() const {
         json += String(_currentDuty);
 
         json += ",\"locks\":";
-        json += String(_locks);
+        json += String(getLocks());
 
         json += ",\"dim_timeout\":";
         json += String(_dimTimeoutSec);

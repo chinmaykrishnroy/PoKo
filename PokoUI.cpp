@@ -1,4 +1,5 @@
 #include "PokoUI.h"
+#include <new>
 
 void PokoUI::drawStatusBar() {
         if (!_statusCanvas) return;
@@ -282,8 +283,8 @@ PokoUI::PokoUI(Arduino_GFX* gfx, AppSwitchFn switchFn)
         : _gfx(gfx), _switchApp(switchFn) {}
 
 void PokoUI::begin() {
-        _statusCanvas = new Arduino_Canvas(128, 13, _gfx, 0, 0);
-        _statusCanvas->begin();
+        _statusCanvas = new (std::nothrow) Arduino_Canvas(128, 13, _gfx, 0, 0);
+        if (_statusCanvas) _statusCanvas->begin();
         _dirty = true;
     }
 

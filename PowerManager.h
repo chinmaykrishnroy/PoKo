@@ -6,6 +6,7 @@
 #include <driver/rtc_io.h>
 #include <esp_wifi.h>
 #include <functional>
+#include <atomic>
 #include "PokoPins.h"
 #include "PokoDrivers.h"
 #include "BatteryManager.h"
@@ -67,7 +68,7 @@ private:
     Preferences*          _prefs;
     std::function<void()> _wakeCb = nullptr;
 
-    uint32_t              _locks               = POWER_LOCK_NONE;
+    std::atomic<uint32_t> _locks{POWER_LOCK_NONE};
     uint32_t              _ownerLocks[LOCK_OWNER_COUNT] = {0};
     DisplayPowerState     _displayState        = DISPLAY_POWER_ACTIVE;
 

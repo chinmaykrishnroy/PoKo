@@ -102,8 +102,76 @@ size_t SnapAudioRingBuffer::read(uint8_t* dest, size_t len) {
     }
 
 int32_t SnapPlayer::getEffectiveBufferMs() const {
-        int32_t eff = _serverBufferMs - _serverLatencyMs - _customLatencyMs;
+        int32_t eff = _serverBufferMs.load(std::memory_order_relaxed) -
+                      _serverLatencyMs.load(std::memory_order_relaxed) -
+                      _customLatencyMs.load(std::memory_order_relaxed);
         return max((int32_t)0, eff);
+    }
+
+void SnapPlayer::copyEndpoint(String& host, uint16_t& port) const {
+        if (_metadataMutex) xSemaphoreTake(_metadataMutex, portMAX_DELAY);
+        host = _serverHost;
+        port = _serverPort;
+        if (_metadataMutex) xSemaphoreGive(_metadataMutex);
+    }
+
+String SnapPlayer::copyCodec() const {
+        if (_metadataMutex) xSemaphoreTake(_metadataMutex, portMAX_DELAY);
+        String codec = _codec;
+        if (_metadataMutex) xSemaphoreGive(_metadataMutex);
+        return codec;
+    }
+
+void SnapPlayer::setCodecName(const String& codec) {
+        if (_metadataMutex) xSemaphoreTake(_metadataMutex, portMAX_DELAY);
+        _codec = codec;
+        if (_metadataMutex) xSemaphoreGive(_metadataMutex);
+    }
+
+int64_t SnapPlayer::loadServerClockOffsetUs() const {
+        portENTER_CRITICAL(&_timingMux);
+        int64_t value = _diffToServerUs;
+        portEXIT_CRITICAL(&_timingMux);
+        return value;
+    }
+
+void SnapPlayer::storeServerClockOffsetUs(int64_t value) {
+        portENTER_CRITICAL(&_timingMux);
+        _diffToServerUs = value;
+        portEXIT_CRITICAL(&_timingMux);
+    }
+
+void SnapPlayer::storePlaybackAnchor(int64_t firstChunkUs, int64_t targetPlayUs) {
+        portENTER_CRITICAL(&_timingMux);
+        _firstChunkServerTsUs = firstChunkUs;
+        _targetPlayLocalTimeUs = targetPlayUs;
+        portEXIT_CRITICAL(&_timingMux);
+    }
+
+void SnapPlayer::loadPlaybackAnchor(int64_t& firstChunkUs, int64_t& targetPlayUs) const {
+        portENTER_CRITICAL(&_timingMux);
+        firstChunkUs = _firstChunkServerTsUs;
+        targetPlayUs = _targetPlayLocalTimeUs;
+        portEXIT_CRITICAL(&_timingMux);
+    }
+
+uint64_t SnapPlayer::loadSamplesPlayed() const {
+        portENTER_CRITICAL(&_timingMux);
+        uint64_t value = _samplesPlayed;
+        portEXIT_CRITICAL(&_timingMux);
+        return value;
+    }
+
+void SnapPlayer::resetSamplesPlayed() {
+        portENTER_CRITICAL(&_timingMux);
+        _samplesPlayed = 0;
+        portEXIT_CRITICAL(&_timingMux);
+    }
+
+void SnapPlayer::addSamplesPlayed(uint32_t frames) {
+        portENTER_CRITICAL(&_timingMux);
+        _samplesPlayed += frames;
+        portEXIT_CRITICAL(&_timingMux);
     }
 
 void SnapPlayer::addTimeDiffSample(int64_t diff) {
@@ -122,11 +190,11 @@ void SnapPlayer::addTimeDiffSample(int64_t diff) {
             }
             temp[j + 1] = key;
         }
-        _diffToServerUs = temp[_diffCount / 2];
+        storeServerClockOffsetUs(temp[_diffCount / 2]);
     }
 
 void SnapPlayer::resetTimeSyncState() {
-        _diffToServerUs = 0;
+        storeServerClockOffsetUs(0);
         _diffCount = 0;
         _diffIdx = 0;
         _timeSyncCount = 0;
@@ -139,6 +207,8 @@ void SnapPlayer::resetPllState() {
         _correctionAccumulator = 0.0;
         _pllIntegralPpm = 0.0;
         _lastCorrectionPpm = 0.0;
+        _publishedCorrectionCentiPpm = 0;
+        _publishedIntegralCentiPpm = 0;
         _ageCount = 0;
         _ageIdx = 0;
         _consecutiveEmptyReads = 0;
@@ -212,7 +282,7 @@ bool SnapPlayer::writeRingExact(const uint8_t* data, size_t bytes) {
 
         if (sent == bytes) return true;
 
-        _bytesDropped += (uint32_t)(bytes - sent);
+        _bytesDropped.fetch_add((uint32_t)(bytes - sent), std::memory_order_relaxed);
         _decodeWriteFailed = true;
         requestProducerResync("PCM ring full / partial write");
         return false;
@@ -309,7 +379,7 @@ void SnapPlayer::muteI2SPins() {
     }
 
 bool SnapPlayer::primeI2SPath(uint32_t sampleRate) {
-        if (!_i2sInstalled || sampleRate == 0 || !poko_tx_handle) return false;
+        if (!_i2sInstalled.load(std::memory_order_acquire) || sampleRate == 0 || !poko_tx_handle) return false;
         int16_t silence[DMA_BUF_LEN * 2] = {0};
         uint32_t framesRemaining = max((uint32_t)DMA_BUF_LEN,
             (uint32_t)(((uint64_t)sampleRate * I2S_PRIME_MS) / 1000ULL));
@@ -345,8 +415,8 @@ bool SnapPlayer::initI2S(uint32_t sampleRate) {
         }
 
         if (isAudioActive()) {
-            es8311Mute(_serverMuted);
-            setScaledVolume(_serverVolume);
+            es8311Mute(_serverMuted.load(std::memory_order_relaxed));
+            setScaledVolume(_serverVolume.load(std::memory_order_relaxed));
         }
         _i2sInstalled = true;
         primeI2SPath(sampleRate);
@@ -354,7 +424,7 @@ bool SnapPlayer::initI2S(uint32_t sampleRate) {
     }
 
 void SnapPlayer::deinitI2S() {
-        if (!_i2sInstalled) return;
+        if (!_i2sInstalled.load(std::memory_order_acquire)) return;
         _i2sInstalled = false;
         if (_releaseAudioFn) {
             _releaseAudioFn();
@@ -366,7 +436,7 @@ void SnapPlayer::deinitI2S() {
 bool SnapPlayer::readExact(WiFiClient& client, uint8_t* dest, size_t len, uint32_t timeoutMs) {
         size_t readBytes = 0;
         uint32_t startWait = millis();
-        while (readBytes < len && _isRunning && client.connected()) {
+        while (readBytes < len && _isRunning && !_reconnectRequested && client.connected()) {
             int avail = client.available();
             if (avail > 0) {
                 int toRead = min((size_t)avail, len - readBytes);
@@ -385,7 +455,7 @@ bool SnapPlayer::readExact(WiFiClient& client, uint8_t* dest, size_t len, uint32
 
 bool SnapPlayer::discardBytes(WiFiClient& client, size_t len, uint32_t timeoutMs) {
         uint8_t dummy[256];
-        while (len > 0 && _isRunning && client.connected()) {
+        while (len > 0 && _isRunning && !_reconnectRequested && client.connected()) {
             size_t chunk = min(sizeof(dummy), len);
             if (!readExact(client, dummy, chunk, timeoutMs)) return false;
             len -= chunk;
@@ -443,8 +513,8 @@ bool SnapPlayer::processPcmPayload(WiFiClient& client, uint32_t payloadBytes, ui
         }
         if (!readExact(client, _encodedChunkBuf, payloadBytes, 3000)) return false;
 
-        uint16_t channels = _channels;
-        uint16_t bits = _bitsPerSample;
+        uint16_t channels = _channels.load(std::memory_order_relaxed);
+        uint16_t bits = _bitsPerSample.load(std::memory_order_relaxed);
         if ((channels != 1 && channels != 2) ||
             (bits != 8 && bits != 16 && bits != 24 && bits != 32)) {
             Serial.printf("[snap] Unsupported PCM format: %u ch / %u bit\n", channels, bits);
@@ -483,7 +553,7 @@ bool SnapPlayer::writeAll(WiFiClient& client, const uint8_t* data, size_t len, u
         size_t sent = 0;
         uint32_t lastProgress = millis();
 
-        while (sent < len && _isRunning && client.connected()) {
+        while (sent < len && _isRunning && !_reconnectRequested && client.connected()) {
             size_t n = client.write(data + sent, len - sent);
             if (n > 0) {
                 sent += n;
@@ -559,9 +629,10 @@ bool SnapPlayer::sendTimeSync(WiFiClient& client) {
 
 bool SnapPlayer::sendClientInfo(WiFiClient& client) {
         StaticJsonDocument<128> doc;
-        int volumePercent = constrain((int)lroundf(_volume * 100.0f), 0, 100);
+        int volumePercent = constrain((int)lroundf(_volume.load(std::memory_order_relaxed) * 100.0f), 0, 100);
         doc["volume"] = volumePercent;
-        doc["muted"] = _serverMuted;
+        bool muted = _serverMuted.load(std::memory_order_relaxed);
+        doc["muted"] = muted;
 
         String json;
         serializeJson(doc, json);
@@ -583,7 +654,7 @@ bool SnapPlayer::sendClientInfo(WiFiClient& client) {
         if (ok) {
             _serverVolume = volumePercent;
             _volumePublishPending = false;
-            Serial.printf("[snap] Published client volume: %d%% mute=%d\n", volumePercent, _serverMuted);
+            Serial.printf("[snap] Published client volume: %d%% mute=%d\n", volumePercent, muted);
         }
         return ok;
     }
@@ -599,7 +670,7 @@ void SnapPlayer::parseServerSettings(const char* jsonStr) {
         if (doc.containsKey("bufferMs")) _serverBufferMs = doc["bufferMs"].as<int32_t>();
         if (doc.containsKey("latency")) _serverLatencyMs = doc["latency"].as<int32_t>();
 
-        int32_t reportedVolume = _serverVolume;
+        int32_t reportedVolume = _serverVolume.load(std::memory_order_relaxed);
         if (doc.containsKey("volume")) {
             reportedVolume = constrain(doc["volume"].as<int32_t>(), 0, 100);
             _serverVolume = reportedVolume;
@@ -616,13 +687,15 @@ void SnapPlayer::parseServerSettings(const char* jsonStr) {
             _receivedInitialServerSettings = true;
             _volumePublishPending = true;
             Serial.printf("[snap] Initial server volume=%d%% (mute=%d); keeping local=%d%% and advertising it\n",
-                          reportedVolume, (int)_serverMuted, constrain((int)lroundf(_volume * 100.0f), 0, 100));
+                          reportedVolume, (int)_serverMuted.load(std::memory_order_relaxed),
+                          constrain((int)lroundf(_volume.load(std::memory_order_relaxed) * 100.0f), 0, 100));
         } else {
             if (doc.containsKey("volume")) {
                 _volume = constrain(reportedVolume / 100.0f, 0.0f, 1.0f);
             }
             if (_onVolumeChangeFn) {
-                _onVolumeChangeFn(_serverVolume, _serverMuted);
+                _onVolumeChangeFn(_serverVolume.load(std::memory_order_relaxed),
+                                  _serverMuted.load(std::memory_order_relaxed));
             }
         }
     }
@@ -645,11 +718,13 @@ void SnapPlayer::parseCodecHeader(const String& codec, const uint8_t* payload, s
                 _sampleRate = readU32LE(payload + 4);
                 _bitsPerSample = readU16LE(payload + 8);
                 _channels = readU16LE(payload + 10);
-                if (_sampleRate != 8000 && _sampleRate != 12000 && _sampleRate != 16000 &&
-                    _sampleRate != 24000 && _sampleRate != 48000) {
+                uint32_t parsedRate = _sampleRate.load(std::memory_order_relaxed);
+                if (parsedRate != 8000 && parsedRate != 12000 && parsedRate != 16000 &&
+                    parsedRate != 24000 && parsedRate != 48000) {
                     _sampleRate = 48000;
                 }
-                initOpusDecoder(_sampleRate, _channels);
+                initOpusDecoder(_sampleRate.load(std::memory_order_relaxed),
+                                _channels.load(std::memory_order_relaxed));
             }
         }
     }
@@ -833,7 +908,9 @@ void SnapPlayer::audioTaskWrapper(void* param) {
     }
 
 void SnapPlayer::networkTask() {
+        String activeCodec = copyCodec();
         while (_isRunning) {
+            _reconnectRequested = false;
             WiFiClient& client = _client;
             _connected = false;
             _syncing = false;
@@ -847,13 +924,16 @@ void SnapPlayer::networkTask() {
             _decodeWriteFailed = false;
             resetTimeSyncState();
 
-            if (_serverHost.length() == 0) {
+            String serverHost;
+            uint16_t serverPort = 0;
+            copyEndpoint(serverHost, serverPort);
+            if (serverHost.length() == 0) {
                 for (int i = 0; i < 5 && _isRunning; i++) vTaskDelay(pdMS_TO_TICKS(100));
                 continue;
             }
 
-            Serial.printf("[snap] Connecting to %s:%u...\n", _serverHost.c_str(), _serverPort);
-            if (!client.connect(_serverHost.c_str(), _serverPort, 3000)) {
+            Serial.printf("[snap] Connecting to %s:%u...\n", serverHost.c_str(), serverPort);
+            if (!client.connect(serverHost.c_str(), serverPort, 3000)) {
                 Serial.println("[snap] Connection failed. Retrying in 2s...");
                 for (int i = 0; i < 20 && _isRunning; i++) vTaskDelay(pdMS_TO_TICKS(100));
                 continue;
@@ -888,7 +968,7 @@ void SnapPlayer::networkTask() {
             _lastTimeSyncMs = millis();
             uint32_t lastRxMs = millis();
 
-            while (_isRunning && client.connected()) {
+            while (_isRunning && !_reconnectRequested && client.connected()) {
                 uint32_t nowMs = millis();
 
                 // Only the network task writes to the Snapcast socket.
@@ -899,7 +979,8 @@ void SnapPlayer::networkTask() {
                     }
                 }
 
-                uint32_t syncInterval = (_timeSyncCount < 10) ? 50 : TIME_SYNC_INTERVAL_MS;
+                uint32_t syncInterval =
+                    (_timeSyncCount.load(std::memory_order_relaxed) < 10) ? 50 : TIME_SYNC_INTERVAL_MS;
                 if (nowMs - _lastTimeSyncMs >= syncInterval) {
                     if (!sendTimeSync(client)) {
                         Serial.println("[snap] Failed to send time sync");
@@ -952,20 +1033,20 @@ void SnapPlayer::networkTask() {
                     int64_t newDiff = (latency - tdif) / 2LL;
 
                     if (!matched) {
-                        _timeSyncUnmatched++;
+                        _timeSyncUnmatched.fetch_add(1, std::memory_order_relaxed);
                     } else {
                         int64_t rttUs = t4 - requestSentUs;
                         if (rttUs >= 0 && rttUs <= 25000) {
                             _measuredLatencyMs = (int32_t)((rttUs + 500LL) / 1000LL);
                             addTimeDiffSample(newDiff);
-                            _timeSyncCount++;
-                            _syncing = true;
-                            if (_timeSyncCount == 10) {
+                            uint32_t syncCount = _timeSyncCount.fetch_add(1, std::memory_order_relaxed) + 1;
+                            _syncing.store(true, std::memory_order_release);
+                            if (syncCount == 10) {
                                 Serial.printf("[snap] Time sync calibrated: diff=%lld us rtt=%lld us\n",
-                                              _diffToServerUs, rttUs);
+                                              loadServerClockOffsetUs(), rttUs);
                             }
                         } else {
-                            _timeSyncRejects++;
+                            _timeSyncRejects.fetch_add(1, std::memory_order_relaxed);
                         }
                     }
 
@@ -1019,8 +1100,9 @@ void SnapPlayer::networkTask() {
                     char cStr[33];
                     if (!readExact(client, (uint8_t*)cStr, cLen, 2000)) break;
                     cStr[cLen] = '\0';
-                    _codec = String(cStr);
-                    _codec.toLowerCase();
+                    activeCodec = String(cStr);
+                    activeCodec.toLowerCase();
+                    setCodecName(activeCodec);
 
                     if (!readExact(client, lenBuf, 4, 2000)) break;
                     uint32_t subSize = readU32LE(lenBuf);
@@ -1036,24 +1118,29 @@ void SnapPlayer::networkTask() {
                         requestProducerResync("codec-header scratch allocation failed");
                     } else {
                         if (!readExact(client, _encodedChunkBuf, subSize, 3000)) break;
-                        parseCodecHeader(_codec, _encodedChunkBuf, subSize);
+                        parseCodecHeader(activeCodec, _encodedChunkBuf, subSize);
                     }
 
                     uint32_t totalConsumed = consumedHeader + subSize;
                     if (payloadSize > totalConsumed && !discardBytes(client, payloadSize - totalConsumed)) break;
 
                     bool codecReady =
-                        (_codec == "pcm" && _sampleRate > 0 && (_channels == 1 || _channels == 2)) ||
-                        (_codec == "flac" && _flacDecoder != nullptr) ||
-                        (_codec == "opus" && _opusDecoder != nullptr && _opusPcmBuf != nullptr);
+                        (activeCodec == "pcm" && _sampleRate.load(std::memory_order_relaxed) > 0 &&
+                         (_channels.load(std::memory_order_relaxed) == 1 ||
+                          _channels.load(std::memory_order_relaxed) == 2)) ||
+                        (activeCodec == "flac" && _flacDecoder != nullptr) ||
+                        (activeCodec == "opus" && _opusDecoder != nullptr && _opusPcmBuf != nullptr);
                     _receivedCodecHeader = codecReady;
                     _expectedNextChunkTsUs = 0;
                     if (!codecReady) {
-                        Serial.printf("[snap] Codec is not ready: %s\n", _codec.c_str());
+                        Serial.printf("[snap] Codec is not ready: %s\n", activeCodec.c_str());
                     }
                     if (_playStarted || _playReleased) requestProducerResync("codec/header change");
                     Serial.printf("[snap] Codec: %s %u Hz %u ch %u bit ready=%d\n",
-                                  _codec.c_str(), _sampleRate, _channels, _bitsPerSample, codecReady);
+                                  activeCodec.c_str(),
+                                  _sampleRate.load(std::memory_order_relaxed),
+                                  _channels.load(std::memory_order_relaxed),
+                                  _bitsPerSample.load(std::memory_order_relaxed), codecReady);
                 }
                 else if (msgType == SNAP_MSG_WIRE_CHUNK) {
                     if (payloadSize < 12) {
@@ -1078,7 +1165,9 @@ void SnapPlayer::networkTask() {
                         continue;
                     }
 
-                    if (!_receivedCodecHeader || _timeSyncCount < 10 || chunkDataBytes == 0 || _isSuspended) {
+                    if (!_receivedCodecHeader ||
+                        _timeSyncCount.load(std::memory_order_acquire) < 10 ||
+                        chunkDataBytes == 0 || _isSuspended) {
                         if (!discardBytes(client, availablePayload)) break;
                         continue;
                     }
@@ -1097,7 +1186,7 @@ void SnapPlayer::networkTask() {
                     if (_expectedNextChunkTsUs != 0) {
                         int64_t tsErrorUs = chunkTimestampUs - _expectedNextChunkTsUs;
                         if (llabs(tsErrorUs) > CHUNK_TS_TOLERANCE_US) {
-                            _chunkTimestampResyncs++;
+                            _chunkTimestampResyncs.fetch_add(1, std::memory_order_relaxed);
                             Serial.printf("[snap] Chunk timestamp discontinuity: %+lld us\n", tsErrorUs);
                             requestProducerResync("chunk timestamp discontinuity");
                             if (!discardBytes(client, availablePayload)) break;
@@ -1106,10 +1195,10 @@ void SnapPlayer::networkTask() {
                     }
 
                     if (!_playStarted) {
-                        _firstChunkServerTsUs = chunkTimestampUs;
                         int32_t effMs = getEffectiveBufferMs();
-                        _targetPlayLocalTimeUs = _firstChunkServerTsUs + (int64_t)effMs * 1000LL - _diffToServerUs;
-                        _samplesPlayed = 0;
+                        int64_t targetPlayUs = chunkTimestampUs + (int64_t)effMs * 1000LL -
+                                               loadServerClockOffsetUs();
+                        storePlaybackAnchor(chunkTimestampUs, targetPlayUs);
                         _playStarted = true;
                     }
 
@@ -1117,7 +1206,7 @@ void SnapPlayer::networkTask() {
                     _decodeWriteFailed = false;
                     bool decodeOk = false;
 
-                    if (_codec == "pcm") {
+                    if (activeCodec == "pcm") {
                         uint64_t frames = 0;
                         if (!processPcmPayload(client, chunkDataBytes, frames)) {
                             if (!client.connected()) break;
@@ -1126,7 +1215,7 @@ void SnapPlayer::networkTask() {
                             decodeOk = frames > 0 && !_decodeWriteFailed;
                         }
                     }
-                    else if (_codec == "flac" && _flacDecoder) {
+                    else if (activeCodec == "flac" && _flacDecoder) {
                         if (!ensureEncodedScratch(chunkDataBytes)) {
                             if (!discardBytes(client, chunkDataBytes)) break;
                             requestProducerResync("FLAC scratch allocation failed");
@@ -1148,7 +1237,7 @@ void SnapPlayer::networkTask() {
                             if (!decodeOk && !_producerAwaitingResync) requestProducerResync("FLAC decode failed");
                         }
                     }
-                    else if (_codec == "opus" && _opusDecoder && _opusPcmBuf) {
+                    else if (activeCodec == "opus" && _opusDecoder && _opusPcmBuf) {
                         uint8_t* opusIn = nullptr;
                         if (chunkDataBytes <= 2048 && _opusEncodedBuf) {
                             opusIn = _opusEncodedBuf;
@@ -1163,7 +1252,8 @@ void SnapPlayer::networkTask() {
                             if (!readExact(client, opusIn, chunkDataBytes, 3000)) break;
                             int decodedSamples = opus_decode(_opusDecoder, opusIn, chunkDataBytes, _opusPcmBuf, 5760, 0);
                             if (decodedSamples > 0) {
-                                if (writeDecodedPcm(_opusPcmBuf, (uint32_t)decodedSamples, _channels)) {
+                                if (writeDecodedPcm(_opusPcmBuf, (uint32_t)decodedSamples,
+                                                    _channels.load(std::memory_order_relaxed))) {
                                     _decodedFramesThisChunk = (uint64_t)decodedSamples;
                                     decodeOk = !_decodeWriteFailed;
                                 }
@@ -1180,13 +1270,14 @@ void SnapPlayer::networkTask() {
 
                     if (trailingBytes > 0 && !discardBytes(client, trailingBytes)) break;
 
-                    if (decodeOk && _sampleRate > 0) {
+                    uint32_t sampleRate = _sampleRate.load(std::memory_order_relaxed);
+                    if (decodeOk && sampleRate > 0) {
                         _expectedNextChunkTsUs = chunkTimestampUs +
-                            (int64_t)((_decodedFramesThisChunk * 1000000ULL) / _sampleRate);
+                            (int64_t)((_decodedFramesThisChunk * 1000000ULL) / sampleRate);
                     } else {
                         _expectedNextChunkTsUs = 0;
                     }
-                    _chunksReceived++;
+                    _chunksReceived.fetch_add(1, std::memory_order_relaxed);
                 }
                 else {
                     if (!discardBytes(client, payloadSize)) break;
@@ -1211,13 +1302,13 @@ void SnapPlayer::networkTask() {
         _connected = false;
         _syncing = false;
         _client.stop();
-        _netTaskHandle = nullptr;
         if (_netTaskDone) xSemaphoreGive(_netTaskDone);
         vTaskDelete(NULL);
     }
 
 void SnapPlayer::audioTask() {
-        uint32_t activeRate = _sampleRate ? _sampleRate : 48000;
+        uint32_t activeRate = _sampleRate.load(std::memory_order_relaxed);
+        if (activeRate == 0) activeRate = 48000;
         _audioFault = false;
 
         static constexpr uint32_t PCM_OUT_CAP = 257;
@@ -1242,13 +1333,14 @@ void SnapPlayer::audioTask() {
                 }
                 _playReleased = false;
                 _playStarted = false;
-                _samplesPlayed = 0;
+                resetSamplesPlayed();
                 vTaskDelay(pdMS_TO_TICKS(20));
                 continue;
             }
 
-            if (!_i2sInstalled) {
-                activeRate = _sampleRate ? _sampleRate : 48000;
+            if (!_i2sInstalled.load(std::memory_order_acquire)) {
+                activeRate = _sampleRate.load(std::memory_order_relaxed);
+                if (activeRate == 0) activeRate = 48000;
                 if (!initI2S(activeRate)) {
                     vTaskDelay(pdMS_TO_TICKS(50));
                     continue;
@@ -1258,40 +1350,44 @@ void SnapPlayer::audioTask() {
 
             if (_resyncRequested) {
                 _resyncRequested = false;
-                _resyncGeneration++;
+                _resyncGeneration.fetch_add(1, std::memory_order_acq_rel);
                 _producerAwaitingResync = true;
                 _pcmBuf.drain();
                 _playReleased = false;
                 _playStarted = false;
-                _samplesPlayed = 0;
+                resetSamplesPlayed();
                 resetPllState();
                 continue;
             }
 
-            if (_sampleRate > 0 && (_sampleRate != activeRate || poko_i2s_rate != activeRate)) {
+            uint32_t publishedRate = _sampleRate.load(std::memory_order_relaxed);
+            if (publishedRate > 0 && (publishedRate != activeRate || poko_i2s_rate != activeRate)) {
                 deinitI2S();
-                activeRate = _sampleRate;
+                activeRate = publishedRate;
                 if (!initI2S(activeRate)) {
                     Serial.println("[snap] I2S re-init waiting after sample-rate change");
                     vTaskDelay(pdMS_TO_TICKS(50));
                     continue;
                 }
-                _resyncGeneration++;
+                _resyncGeneration.fetch_add(1, std::memory_order_acq_rel);
                 _producerAwaitingResync = true;
                 _pcmBuf.drain();
                 _playReleased = false;
                 _playStarted = false;
-                _samplesPlayed = 0;
+                resetSamplesPlayed();
                 resetPllState();
             }
 
             if (!_playReleased) {
-                if (_playStarted && _timeSyncCount >= 10) {
+                if (_playStarted && _timeSyncCount.load(std::memory_order_acquire) >= 10) {
                     int64_t nowUs = esp_timer_get_time();
                     size_t bufferedBytes = _pcmBuf.available();
                     int64_t outputDacLatencyUs =
                         (int64_t)(((uint64_t)DMA_TOTAL_FRAMES * 1000000ULL) / activeRate);
-                    int64_t releaseTimeUs = _targetPlayLocalTimeUs - outputDacLatencyUs;
+                    int64_t firstChunkUs = 0;
+                    int64_t targetPlayUs = 0;
+                    loadPlaybackAnchor(firstChunkUs, targetPlayUs);
+                    int64_t releaseTimeUs = targetPlayUs - outputDacLatencyUs;
 
                     uint32_t effMs = (uint32_t)getEffectiveBufferMs();
                     uint32_t prefillMs = constrain((int)(effMs / 4U), 80, 250);
@@ -1305,7 +1401,7 @@ void SnapPlayer::audioTask() {
 
                     if ((timeReached && bufferedBytes >= requiredMinBytes) || bufferTooFull) {
                         _playReleased = true;
-                        _samplesPlayed = 0;
+                        resetSamplesPlayed();
                         resetPllState();
                         armStartupFade(activeRate);
                         Serial.printf("[snap] Playback released: buffered=%u prefill=%u ms lag=%lld us\n",
@@ -1339,9 +1435,9 @@ void SnapPlayer::audioTask() {
                     // silently shifting the source timeline.
                     if (_consecutiveEmptyReads < 255) _consecutiveEmptyReads++;
                     if (_consecutiveEmptyReads >= EMPTY_READS_BEFORE_RESYNC) {
-                        _underruns++;
+                        uint32_t underrunCount = _underruns.fetch_add(1, std::memory_order_relaxed) + 1;
                         Serial.printf("[snap] PCM underrun episode #%u; reacquiring timeline\n",
-                                      (unsigned)_underruns);
+                                      (unsigned)underrunCount);
                         _producerAwaitingResync = true;
                         _resyncRequested = true;
                         _consecutiveEmptyReads = 0;
@@ -1354,9 +1450,13 @@ void SnapPlayer::audioTask() {
 
             // Source timestamp for the next PCM frame. _samplesPlayed is 64-bit so
             // continuous playback no longer wraps after ~24.9 hours at 48 kHz.
-            int64_t serverNowUs = esp_timer_get_time() + _diffToServerUs;
-            int64_t nextSampleServerTsUs = _firstChunkServerTsUs +
-                (int64_t)((_samplesPlayed * 1000000ULL) / activeRate);
+            int64_t firstChunkUs = 0;
+            int64_t unusedTargetUs = 0;
+            loadPlaybackAnchor(firstChunkUs, unusedTargetUs);
+            uint64_t samplesPlayed = loadSamplesPlayed();
+            int64_t serverNowUs = esp_timer_get_time() + loadServerClockOffsetUs();
+            int64_t nextSampleServerTsUs = firstChunkUs +
+                (int64_t)((samplesPlayed * 1000000ULL) / activeRate);
             int64_t effectiveBufferUs = (int64_t)getEffectiveBufferMs() * 1000LL;
             int64_t outputDacLatencyUs =
                 (int64_t)(((uint64_t)DMA_TOTAL_FRAMES * 1000000ULL) / activeRate);
@@ -1368,14 +1468,15 @@ void SnapPlayer::audioTask() {
 
             // With the 9-sample median filled, a 50 ms phase error is no longer a
             // transient. Re-anchor instead of asking the soft PLL to repair it slowly.
-            if (_ageCount >= AGE_FILTER_SIZE && llabs(ageUs) > 50000LL && _timeSyncCount >= 10) {
+            if (_ageCount >= AGE_FILTER_SIZE && llabs(ageUs) > 50000LL &&
+                _timeSyncCount.load(std::memory_order_acquire) >= 10) {
                 Serial.printf("[snap] Hard resync: filtered age=%lld us raw=%lld us\n", ageUs, rawAgeUs);
-                _resyncGeneration++;
+                _resyncGeneration.fetch_add(1, std::memory_order_acq_rel);
                 _producerAwaitingResync = true;
                 _pcmBuf.drain();
                 _playReleased = false;
                 _playStarted = false;
-                _samplesPlayed = 0;
+                resetSamplesPlayed();
                 resetPllState();
                 continue;
             }
@@ -1394,6 +1495,10 @@ void SnapPlayer::audioTask() {
             double phasePpm = (llabs(ageUs) < 80LL) ? 0.0 : errorMs * 18.0;
             double correctionPpm = constrain(phasePpm + _pllIntegralPpm, -500.0, 500.0);
             _lastCorrectionPpm = correctionPpm;
+            _publishedCorrectionCentiPpm.store((int32_t)lround(correctionPpm * 100.0),
+                                               std::memory_order_relaxed);
+            _publishedIntegralCentiPpm.store((int32_t)lround(_pllIntegralPpm * 100.0),
+                                             std::memory_order_relaxed);
             _correctionAccumulator += correctionPpm * 1e-6 * (double)samples;
 
             bool dropFrame = false;
@@ -1406,7 +1511,7 @@ void SnapPlayer::audioTask() {
                 _correctionAccumulator += 1.0;
             }
 
-            float muteGain = _serverMuted ? 0.0f : 1.0f;
+            float muteGain = _serverMuted.load(std::memory_order_relaxed) ? 0.0f : 1.0f;
             uint32_t outFrames = 0;
             uint32_t correctionPos = samples / 2U;
 
@@ -1462,7 +1567,7 @@ void SnapPlayer::audioTask() {
                 size_t written = 0;
                 esp_err_t err = poko_tx_handle ? i2s_channel_write(poko_tx_handle, pcmOut, requestedBytes, &written, pdMS_TO_TICKS(30)) : ESP_FAIL;
                 if (err != ESP_OK || written != requestedBytes) {
-                    _i2sShortWrites++;
+                    _i2sShortWrites.fetch_add(1, std::memory_order_relaxed);
                     Serial.printf("[snap] I2S short write: err=%d %u/%u\n",
                                   (int)err, (unsigned)written, (unsigned)requestedBytes);
                     _producerAwaitingResync = true;
@@ -1473,17 +1578,17 @@ void SnapPlayer::audioTask() {
 
             // Advance the authoritative source timeline, not the number of frames
             // emitted to the DAC after sample stuffing.
-            _samplesPlayed += (uint64_t)samples;
+            addSamplesPlayed(samples);
         }
 
         if (_suspendDone) xSemaphoreGive(_suspendDone);
-        _audioTaskHandle = nullptr;
         if (_audioTaskDone) xSemaphoreGive(_audioTaskDone);
         vTaskDelete(NULL);
     }
 
 SnapPlayer::SnapPlayer(void* display, Preferences* prefs, float initialVolume)
-        : _tft(display), _prefs(prefs), _serverHost(""), _serverPort(1704), _customLatencyMs(0),
+        : _tft(display), _prefs(prefs), _serverHost(""), _serverPort(1704), _metadataMutex(nullptr),
+          _customLatencyMs(0),
           _volume(initialVolume), _isRunning(false), _isLoaded(false), _connected(false),
           _syncing(false), _playStarted(false), _playReleased(false), _isSuspended(false), _netTaskHandle(NULL),
           _audioTaskHandle(NULL), _netTaskDone(nullptr), _audioTaskDone(nullptr),
@@ -1491,7 +1596,7 @@ SnapPlayer::SnapPlayer(void* display, Preferences* prefs, float initialVolume)
           _netTaskStarted(false), _audioTaskStarted(false), _i2sInstalled(false),
           _resyncRequested(false), _volumePublishPending(false),
           _receivedInitialServerSettings(false), _audioFault(false),
-          _codec("opus"), _sampleRate(48000), _channels(2), _bitsPerSample(16),
+          _knobMode(KNOB_VOLUME), _codec("opus"), _sampleRate(48000), _channels(2), _bitsPerSample(16),
           _serverBufferMs(1000), _serverLatencyMs(0), _measuredLatencyMs(0), _serverVolume(80), _serverMuted(false),
           _diffCount(0), _diffIdx(0), _ageCount(0), _ageIdx(0),
           _correctionAccumulator(0.0), _pllIntegralPpm(0.0), _lastCorrectionPpm(0.0),
@@ -1506,8 +1611,7 @@ SnapPlayer::SnapPlayer(void* display, Preferences* prefs, float initialVolume)
           _flacDecoder(nullptr), _flacInputPtr(nullptr), _flacInputRemaining(0),
           _opusDecoder(nullptr), _opusPcmBuf(nullptr), _opusEncodedBuf(nullptr),
           _encodedChunkBuf(nullptr), _encodedChunkCap(0),
-          _overlayStaticDrawn(false), _uiVolumeFillW(-1), _uiVolumeMuted(false),
-          _knobMode(KNOB_VOLUME) {
+          _overlayStaticDrawn(false), _uiVolumeFillW(-1), _uiVolumeMuted(false) {
         memset(_diffHistory, 0, sizeof(_diffHistory));
         memset(_ageHistory, 0, sizeof(_ageHistory));
         memset(_timeRequests, 0, sizeof(_timeRequests));
@@ -1515,18 +1619,23 @@ SnapPlayer::SnapPlayer(void* display, Preferences* prefs, float initialVolume)
 
 void SnapPlayer::begin() {
         _isSuspended = false;
+        if (!_metadataMutex) _metadataMutex = xSemaphoreCreateMutex();
         if (!_netTaskDone) _netTaskDone = xSemaphoreCreateBinary();
         if (!_audioTaskDone) _audioTaskDone = xSemaphoreCreateBinary();
         if (!_suspendDone) _suspendDone = xSemaphoreCreateBinary();
         if (!_audioReady) _audioReady = xSemaphoreCreateBinary();
 
-        if (!_netTaskDone || !_audioTaskDone || !_suspendDone || !_audioReady) {
-            Serial.println("[snap] WARNING: failed to allocate task completion semaphores");
+        if (!_metadataMutex || !_netTaskDone || !_audioTaskDone || !_suspendDone || !_audioReady) {
+            Serial.println("[snap] WARNING: failed to allocate synchronization primitives");
         }
 
         if (_prefs) {
-            _serverHost = _prefs->getString("snap_host", "");
-            _serverPort = (uint16_t)_prefs->getInt("snap_port", 1704);
+            String host = _prefs->getString("snap_host", "");
+            uint16_t port = (uint16_t)_prefs->getInt("snap_port", 1704);
+            if (_metadataMutex) xSemaphoreTake(_metadataMutex, portMAX_DELAY);
+            _serverHost = host;
+            _serverPort = port;
+            if (_metadataMutex) xSemaphoreGive(_metadataMutex);
             _customLatencyMs = _prefs->getInt("snap_lat", 0);
             _volume = constrain(_prefs->getInt("volume", 75) / 100.0f, 0.0f, 1.0f);
         }
@@ -1534,6 +1643,10 @@ void SnapPlayer::begin() {
 
 void SnapPlayer::load(bool startSuspended) {
         if (_isLoaded) return;
+        if (!_metadataMutex) {
+            Serial.println("[snap] Cannot load: metadata mutex is unavailable");
+            return;
+        }
         _isSuspended = startSuspended;
         _suspendDrainRequested = startSuspended;
 
@@ -1568,7 +1681,7 @@ void SnapPlayer::load(bool startSuspended) {
         _isLoaded = false;
         _playStarted = false;
         _playReleased = false;
-        _samplesPlayed = 0;
+        resetSamplesPlayed();
         _decodedFramesThisChunk = 0;
         _chunksReceived = 0;
         _bytesDropped = 0;
@@ -1623,30 +1736,32 @@ void SnapPlayer::shutdownWorkersAndResources() {
         // Tell workers to exit.
         _isRunning = false;
 
-        // Instantly unblock WiFi reads
-        _client.stop();
-
         // Wait for each worker to confirm it reached its shutdown path.
         bool netStopped = true;
-        if (_netTaskStarted && _netTaskDone != nullptr) {
-            netStopped = (xSemaphoreTake(_netTaskDone, pdMS_TO_TICKS(5000)) == pdTRUE);
+        if (_netTaskStarted) {
+            netStopped = _netTaskDone != nullptr &&
+                         (xSemaphoreTake(_netTaskDone, pdMS_TO_TICKS(5000)) == pdTRUE);
+            if (netStopped) {
+                _netTaskHandle = nullptr;
+                _netTaskStarted = false;
+            }
         }
 
         bool audioStopped = true;
-        if (_audioTaskStarted && _audioTaskDone != nullptr) {
-            audioStopped = (xSemaphoreTake(_audioTaskDone, pdMS_TO_TICKS(5000)) == pdTRUE);
+        if (_audioTaskStarted) {
+            audioStopped = _audioTaskDone != nullptr &&
+                           (xSemaphoreTake(_audioTaskDone, pdMS_TO_TICKS(5000)) == pdTRUE);
+            if (audioStopped) {
+                _audioTaskHandle = nullptr;
+                _audioTaskStarted = false;
+            }
         }
 
         Serial.printf("[snap] unload workers: net=%d audio=%d\n", netStopped, audioStopped);
 
         if (!netStopped || !audioStopped) {
-            Serial.println("[snap] ERROR: worker failed to stop cleanly, force terminating tasks");
-            if (!netStopped && _netTaskHandle != nullptr) {
-                vTaskDelete(_netTaskHandle);
-            }
-            if (!audioStopped && _audioTaskHandle != nullptr) {
-                vTaskDelete(_audioTaskHandle);
-            }
+            Serial.println("[snap] ERROR: worker shutdown timeout; preserving shared resources for a safe retry");
+            return;
         }
 
         _netTaskHandle = nullptr;
@@ -1693,44 +1808,50 @@ bool SnapPlayer::isConnected() const { return _connected; }
 
 void SnapPlayer::setVolume(float vol) {
         float next = constrain(vol, 0.0f, 1.0f);
-        if (fabsf(next - _volume) < 0.0005f) return;
+        if (fabsf(next - _volume.load(std::memory_order_relaxed)) < 0.0005f) return;
 
         _volume = next;
         if (_connected) _volumePublishPending = true;
     }
 
 void SnapPlayer::adjustVolume(int8_t delta) {
-        setVolume(_volume + (delta * 0.05f));
+        setVolume(_volume.load(std::memory_order_relaxed) + (delta * 0.05f));
         redrawOverlay();
     }
 
 void SnapPlayer::setServer(const String& host) {
+        if (_metadataMutex) xSemaphoreTake(_metadataMutex, portMAX_DELAY);
         _serverHost = host;
+        if (_metadataMutex) xSemaphoreGive(_metadataMutex);
         if (_prefs) _prefs->putString("snap_host", host);
-        if (_client.connected()) _client.stop();
+        _reconnectRequested = true;
     }
 
 void SnapPlayer::setPort(uint16_t port) {
+        if (_metadataMutex) xSemaphoreTake(_metadataMutex, portMAX_DELAY);
         _serverPort = port;
+        if (_metadataMutex) xSemaphoreGive(_metadataMutex);
         if (_prefs) _prefs->putInt("snap_port", port);
-        if (_client.connected()) _client.stop();
+        _reconnectRequested = true;
     }
 
-int32_t SnapPlayer::getCustomLatency() const { return _customLatencyMs; }
+int32_t SnapPlayer::getCustomLatency() const {
+        return _customLatencyMs.load(std::memory_order_relaxed);
+    }
 
 void SnapPlayer::setCustomLatency(int32_t lat) {
         int32_t next = constrain(lat, -2000, 2000);
-        if (next == _customLatencyMs) return;
+        if (next == _customLatencyMs.load(std::memory_order_relaxed)) return;
 
         _customLatencyMs = next;
-        if (_prefs) _prefs->putInt("snap_lat", _customLatencyMs);
+        if (_prefs) _prefs->putInt("snap_lat", next);
 
         // snapAudio is the sole ring-buffer consumer, so request the drain there.
         _resyncRequested = true;
     }
 
 void SnapPlayer::adjustCustomLatency(int32_t deltaMs) {
-        setCustomLatency(_customLatencyMs + deltaMs);
+        setCustomLatency(_customLatencyMs.load(std::memory_order_relaxed) + deltaMs);
         redrawOverlay();
     }
 
@@ -1747,48 +1868,66 @@ void SnapPlayer::handleRotate(int8_t delta) {
         }
     }
 
-String SnapPlayer::getServer() const { return _serverHost; }
+String SnapPlayer::getServer() const {
+        String host;
+        uint16_t port;
+        copyEndpoint(host, port);
+        return host;
+    }
 
-uint16_t SnapPlayer::getPort() const { return _serverPort; }
+uint16_t SnapPlayer::getPort() const {
+        String host;
+        uint16_t port;
+        copyEndpoint(host, port);
+        return port;
+    }
 
 String SnapPlayer::getStatusJSON() const {
+        String serverHost;
+        uint16_t serverPort;
+        copyEndpoint(serverHost, serverPort);
+        String codec = copyCodec();
+        int64_t serverClockOffsetUs = loadServerClockOffsetUs();
+        uint64_t samplesPlayed = loadSamplesPlayed();
         String json = "{";
         json += "\"loaded\":" + String(_isLoaded ? "true" : "false") + ",";
         json += "\"connected\":" + String(_connected ? "true" : "false") + ",";
         json += "\"syncing\":" + String(_syncing ? "true" : "false") + ",";
-        json += "\"server\":\"" + _serverHost + "\",";
-        json += "\"port\":" + String(_serverPort) + ",";
-        json += "\"codec\":\"" + _codec + "\",";
-        json += "\"sample_rate\":" + String(_sampleRate) + ",";
-        json += "\"channels\":" + String(_channels) + ",";
-        json += "\"bits\":" + String(_bitsPerSample) + ",";
-        json += "\"buffer_ms\":" + String(_serverBufferMs) + ",";
-        json += "\"server_latency_ms\":" + String(_serverLatencyMs) + ",";
-        json += "\"custom_latency_ms\":" + String(_customLatencyMs) + ",";
+        json += "\"server\":\"" + serverHost + "\",";
+        json += "\"port\":" + String(serverPort) + ",";
+        json += "\"codec\":\"" + codec + "\",";
+        json += "\"sample_rate\":" + String(_sampleRate.load(std::memory_order_relaxed)) + ",";
+        json += "\"channels\":" + String(_channels.load(std::memory_order_relaxed)) + ",";
+        json += "\"bits\":" + String(_bitsPerSample.load(std::memory_order_relaxed)) + ",";
+        json += "\"buffer_ms\":" + String(_serverBufferMs.load(std::memory_order_relaxed)) + ",";
+        json += "\"server_latency_ms\":" + String(_serverLatencyMs.load(std::memory_order_relaxed)) + ",";
+        json += "\"custom_latency_ms\":" + String(_customLatencyMs.load(std::memory_order_relaxed)) + ",";
         json += "\"effective_buffer_ms\":" + String(getEffectiveBufferMs()) + ",";
-        json += "\"diff_s\":" + String((int32_t)(_diffToServerUs / 1000000LL)) + ",";
-        json += "\"diff_us\":" + String((long long)_diffToServerUs) + ",";
-        json += "\"drift_us\":" + String(_lastDriftUs) + ",";
-        json += "\"drift_ms\":" + String(_lastDriftMs) + ",";
-        json += "\"correction_ppm\":" + String(_lastCorrectionPpm, 2) + ",";
-        json += "\"pll_integral_ppm\":" + String(_pllIntegralPpm, 2) + ",";
-        json += "\"source_frames\":" + u64String(_samplesPlayed) + ",";
+        json += "\"diff_s\":" + String((int32_t)(serverClockOffsetUs / 1000000LL)) + ",";
+        json += "\"diff_us\":" + String((long long)serverClockOffsetUs) + ",";
+        json += "\"drift_us\":" + String(_lastDriftUs.load(std::memory_order_relaxed)) + ",";
+        json += "\"drift_ms\":" + String(_lastDriftMs.load(std::memory_order_relaxed)) + ",";
+        json += "\"correction_ppm\":" +
+                String(_publishedCorrectionCentiPpm.load(std::memory_order_relaxed) / 100.0f, 2) + ",";
+        json += "\"pll_integral_ppm\":" +
+                String(_publishedIntegralCentiPpm.load(std::memory_order_relaxed) / 100.0f, 2) + ",";
+        json += "\"source_frames\":" + u64String(samplesPlayed) + ",";
         json += "\"startup_fade_ms\":" + String(STARTUP_FADE_MS) + ",";
         json += "\"i2s_prime_ms\":" + String(I2S_PRIME_MS) + ",";
-        json += "\"chunks\":" + String(_chunksReceived) + ",";
-        json += "\"bytes_dropped\":" + String(_bytesDropped) + ",";
-        json += "\"underruns\":" + String(_underruns) + ",";
-        json += "\"i2s_short_writes\":" + String(_i2sShortWrites) + ",";
-        json += "\"timestamp_resyncs\":" + String(_chunkTimestampResyncs) + ",";
-        json += "\"timesync_rejects\":" + String(_timeSyncRejects) + ",";
-        json += "\"timesync_unmatched\":" + String(_timeSyncUnmatched) + ",";
-        json += "\"timesync_samples\":" + String(_timeSyncCount) + ",";
+        json += "\"chunks\":" + String(_chunksReceived.load(std::memory_order_relaxed)) + ",";
+        json += "\"bytes_dropped\":" + String(_bytesDropped.load(std::memory_order_relaxed)) + ",";
+        json += "\"underruns\":" + String(_underruns.load(std::memory_order_relaxed)) + ",";
+        json += "\"i2s_short_writes\":" + String(_i2sShortWrites.load(std::memory_order_relaxed)) + ",";
+        json += "\"timestamp_resyncs\":" + String(_chunkTimestampResyncs.load(std::memory_order_relaxed)) + ",";
+        json += "\"timesync_rejects\":" + String(_timeSyncRejects.load(std::memory_order_relaxed)) + ",";
+        json += "\"timesync_unmatched\":" + String(_timeSyncUnmatched.load(std::memory_order_relaxed)) + ",";
+        json += "\"timesync_samples\":" + String(_timeSyncCount.load(std::memory_order_relaxed)) + ",";
         json += "\"pcm_buffer_bytes\":" + String((unsigned long)_pcmBuf.available()) + ",";
         json += "\"pcm_capacity_bytes\":" + String((unsigned long)_pcmBuf.capacity()) + ",";
-        json += "\"audio_fault\":" + String(_audioFault ? "true" : "false") + ",";
-        json += "\"volume\":" + String((int)lroundf(_volume * 100.0f)) + ",";
-        json += "\"server_volume\":" + String(_serverVolume) + ",";
-        json += "\"muted\":" + String(_serverMuted ? "true" : "false") + ",";
+        json += "\"audio_fault\":" + String(_audioFault.load(std::memory_order_relaxed) ? "true" : "false") + ",";
+        json += "\"volume\":" + String((int)lroundf(_volume.load(std::memory_order_relaxed) * 100.0f)) + ",";
+        json += "\"server_volume\":" + String(_serverVolume.load(std::memory_order_relaxed)) + ",";
+        json += "\"muted\":" + String(_serverMuted.load(std::memory_order_relaxed) ? "true" : "false") + ",";
         json += "\"play_released\":" + String(_playReleased ? "true" : "false");
         json += "}";
         return json;
@@ -1821,15 +1960,22 @@ bool SnapPlayer::isAudioActive() const {
         return _isAudioActiveFn ? _isAudioActiveFn() : true;
     }
 
-bool SnapPlayer::isPlaying() const { return _playStarted && _connected && !_isSuspended && !_serverMuted; }
+bool SnapPlayer::isPlaying() const {
+        return _playStarted.load(std::memory_order_acquire) &&
+               _connected.load(std::memory_order_acquire) &&
+               !_isSuspended.load(std::memory_order_relaxed) &&
+               !_serverMuted.load(std::memory_order_relaxed);
+    }
 
 bool SnapPlayer::isSuspended() const { return _isSuspended; }
 
 bool SnapPlayer::isSyncing() const { return _syncing; }
 
-int  SnapPlayer::getVolume() const { return (int)lroundf(_volume * 100.0f); }
+int  SnapPlayer::getVolume() const {
+        return (int)lroundf(_volume.load(std::memory_order_relaxed) * 100.0f);
+    }
 
-bool SnapPlayer::isMuted() const { return _serverMuted; }
+bool SnapPlayer::isMuted() const { return _serverMuted.load(std::memory_order_relaxed); }
 
 bool SnapPlayer::isWorkersHealthy() const {
         return _isLoaded && _netTaskStarted && _audioTaskStarted &&
@@ -1861,10 +2007,8 @@ void SnapPlayer::suspendAudio() {
         _suspendDeinitRequested = true;
         _playReleased = false;
         _playStarted = false;
-        _samplesPlayed = 0;
-        _expectedNextChunkTsUs = 0;
         _producerAwaitingResync = true;
-        resetPllState();
+        _resyncRequested = true;
     }
 
 void SnapPlayer::resumeAudio() {
@@ -1875,10 +2019,7 @@ void SnapPlayer::resumeAudio() {
         _suspendDrainRequested = true;
         _playReleased = false;
         _playStarted = false;
-        _samplesPlayed = 0;
-        _expectedNextChunkTsUs = 0;
         _producerAwaitingResync = false;
-        resetPllState();
         _resyncRequested = true;
     }
 
@@ -1887,21 +2028,23 @@ void SnapPlayer::stop() {
         if (_prefs) _prefs->putBool("snap_was_playing", false);
     }
 
-String SnapPlayer::getCodec() const { return _codec; }
+String SnapPlayer::getCodec() const { return copyCodec(); }
 
-uint32_t SnapPlayer::getSampleRate() const { return _sampleRate; }
+uint32_t SnapPlayer::getSampleRate() const { return _sampleRate.load(std::memory_order_relaxed); }
 
-int32_t SnapPlayer::getBufferMs() const { return _serverBufferMs; }
+int32_t SnapPlayer::getBufferMs() const { return _serverBufferMs.load(std::memory_order_relaxed); }
 
 int32_t SnapPlayer::getLatencyMs() const {
-        if (_measuredLatencyMs > 0) return _measuredLatencyMs;
-        if (_serverLatencyMs > 0) return _serverLatencyMs;
-        return _customLatencyMs;
+        int32_t measured = _measuredLatencyMs.load(std::memory_order_relaxed);
+        if (measured > 0) return measured;
+        int32_t server = _serverLatencyMs.load(std::memory_order_relaxed);
+        if (server > 0) return server;
+        return _customLatencyMs.load(std::memory_order_relaxed);
     }
 
-String SnapPlayer::getServerHost() const { return _serverHost; }
+String SnapPlayer::getServerHost() const { return getServer(); }
 
-uint16_t SnapPlayer::getServerPort() const { return _serverPort; }
+uint16_t SnapPlayer::getServerPort() const { return getPort(); }
 
 void SnapPlayer::setRemoteVolumePercent(int pct) {
         pct = constrain(pct, 0, 100);
@@ -1915,33 +2058,37 @@ void SnapPlayer::setVolumePercent(int pct) {
         _volume = pct / 100.0f;
         _serverVolume = pct;
         if (_onVolumeChangeFn) {
-            _onVolumeChangeFn(_serverVolume, _serverMuted);
+            _onVolumeChangeFn(_serverVolume.load(std::memory_order_relaxed),
+                              _serverMuted.load(std::memory_order_relaxed));
         }
         _volumePublishPending = true;
     }
 
 void SnapPlayer::toggleMute() {
-        setMute(!_serverMuted);
+        setMute(!_serverMuted.load(std::memory_order_relaxed));
     }
 
 void SnapPlayer::setMute(bool mute) {
         _serverMuted = mute;
         if (_onVolumeChangeFn) {
-            _onVolumeChangeFn(_serverVolume, _serverMuted);
+            _onVolumeChangeFn(_serverVolume.load(std::memory_order_relaxed),
+                              _serverMuted.load(std::memory_order_relaxed));
         }
         _volumePublishPending = true;
     }
 
 void SnapPlayer::setServer(const String& host, uint16_t port) {
+        if (_metadataMutex) xSemaphoreTake(_metadataMutex, portMAX_DELAY);
         _serverHost = host;
         _serverPort = port;
+        if (_metadataMutex) xSemaphoreGive(_metadataMutex);
         if (_prefs) {
             _prefs->putString("snap_host", host);
             _prefs->putInt("snap_port", port);
         }
-        if (_client.connected()) {
-            _client.stop();
-        } else if (!_isLoaded && WiFi.status() == WL_CONNECTED) {
+        if (_isLoaded) {
+            _reconnectRequested = true;
+        } else if (WiFi.status() == WL_CONNECTED) {
             load(true);
         }
     }

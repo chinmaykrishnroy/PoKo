@@ -1,4 +1,5 @@
 #include "VideoApp.h"
+#include <new>
 
 Arduino_Canvas* VideoApp::_activeCanvas = nullptr;
 VideoApp* VideoApp::_instance = nullptr;
@@ -419,8 +420,8 @@ void VideoApp::stopPlaybackStatic() {
 
 void VideoApp::begin() {
         if (!_canvas) {
-            _canvas = new Arduino_Canvas(128, 128, _gfx, 0, 0);
-            _canvas->begin();
+            _canvas = new (std::nothrow) Arduino_Canvas(128, 128, _gfx, 0, 0);
+            if (_canvas) _canvas->begin();
         }
         if (audioManager) {
             audioManager->setVideoHandlers(stopPlaybackStatic, playbackStoppedStatic);

@@ -92,9 +92,7 @@ void SyncedAVPlayer::audioNetworkTask() {
             }
 
             client.setNoDelay(true);
-            _activeAudioClient = &client;
             _audioConnected = true;
-            _clientConnected = true;
             bool receivedPacket = false;
 
             while (_isRunning && client.connected()) {
@@ -124,10 +122,10 @@ void SyncedAVPlayer::audioNetworkTask() {
                             break;
                         }
                         size_t sent = xStreamBufferSend(_audioStream, audioBuf, chunk, pdMS_TO_TICKS(20));
-                        if (sent < chunk) _audioBytesDropped += (chunk - sent);
+                        if (sent < chunk) _audioBytesDropped.fetch_add(chunk - sent, std::memory_order_relaxed);
                         remaining -= chunk;
                     }
-                    _audioPackets++;
+                    _audioPackets.fetch_add(1, std::memory_order_relaxed);
                     receivedPacket = true;
                 } else {
                     if (!discardBytes(client, length)) break;
@@ -135,13 +133,10 @@ void SyncedAVPlayer::audioNetworkTask() {
             }
 
             client.stop();
-            _activeAudioClient = nullptr;
             _audioConnected = false;
-            _clientConnected = _videoConnected;
         }
 
         _server.end();
-        _netTaskHandle = NULL;
         if (_netTaskDone) xSemaphoreGive(_netTaskDone);
         vTaskDelete(NULL);
     }
@@ -158,9 +153,7 @@ void SyncedAVPlayer::videoNetworkTask() {
             }
 
             client.setNoDelay(true);
-            _activeVideoClient = &client;
             _videoConnected = true;
-            _clientConnected = true;
             bool receivedPacket = false;
 
             while (_isRunning && client.connected()) {
@@ -180,14 +173,14 @@ void SyncedAVPlayer::videoNetworkTask() {
                 }
 
                 if (length > VIDEO_BUFFER_SIZE) {
-                    _videoFramesDropped++;
+                    _videoFramesDropped.fetch_add(1, std::memory_order_relaxed);
                     if (!discardBytes(client, length)) break;
                     continue;
                 }
 
                 uint8_t* buf = nullptr;
                 if (xQueueReceive(_emptyQueue, &buf, pdMS_TO_TICKS(100)) != pdTRUE || !buf) {
-                    _videoFramesDropped++;
+                    _videoFramesDropped.fetch_add(1, std::memory_order_relaxed);
                     if (!discardBytes(client, length)) break;
                     continue;
                 }
@@ -199,22 +192,19 @@ void SyncedAVPlayer::videoNetworkTask() {
 
                 VideoFrame frame = { buf, length, timestampMs };
                 if (xQueueSend(_videoQueue, &frame, 0) == pdTRUE) {
-                    _videoPackets++;
+                    _videoPackets.fetch_add(1, std::memory_order_relaxed);
                     receivedPacket = true;
                 } else {
-                    _videoFramesDropped++;
+                    _videoFramesDropped.fetch_add(1, std::memory_order_relaxed);
                     xQueueSend(_emptyQueue, &buf, 0);
                 }
             }
 
             client.stop();
-            _activeVideoClient = nullptr;
             _videoConnected = false;
-            _clientConnected = _audioConnected;
         }
 
         _videoServer.end();
-        _videoTaskHandle = NULL;
         if (_videoTaskDone) xSemaphoreGive(_videoTaskDone);
         vTaskDelete(NULL);
     }
@@ -266,14 +256,14 @@ void SyncedAVPlayer::audioTask() {
                     if (poko_tx_handle) {
                         i2s_channel_write(poko_tx_handle, stereo, sizeof(stereo), &written, pdMS_TO_TICKS(20));
                     }
-                    _samplesPlayed += AUDIO_CHUNK_BYTES / 2;
-                    _audioUnderruns++;
+                    _samplesPlayed.fetch_add(AUDIO_CHUNK_BYTES / 2, std::memory_order_relaxed);
+                    _audioUnderruns.fetch_add(1, std::memory_order_relaxed);
                 }
                 continue;
             }
 
             int16_t* mono = (int16_t*)monoBytes;
-            float vol = _volume;
+            float vol = _volume.load(std::memory_order_relaxed);
             uint16_t outIdx = 0;
 
             // Upsample 22050 Hz Mono -> 44100 Hz Stereo (each mono sample duplicated into 2 consecutive stereo frames)
@@ -295,10 +285,9 @@ void SyncedAVPlayer::audioTask() {
             if (poko_tx_handle && _isRunning) {
                 i2s_channel_write(poko_tx_handle, stereo, outIdx * sizeof(int16_t), &written, pdMS_TO_TICKS(30));
             }
-            _samplesPlayed += monoSamples;
+            _samplesPlayed.fetch_add(monoSamples, std::memory_order_relaxed);
         }
 
-        _audioTaskHandle = NULL;
         if (_audioTaskDone) xSemaphoreGive(_audioTaskDone);
         vTaskDelete(NULL);
     }
@@ -327,7 +316,7 @@ void SyncedAVPlayer::releaseResources() {
 
 SyncedAVPlayer::SyncedAVPlayer(Arduino_GFX* display, uint16_t port, float initialVolume)
         : _gfx(display), _port(port), _server(port), _videoServer(port + 1),
-          _isRunning(false), _isLoaded(false), _clientConnected(false),
+          _isRunning(false), _isLoaded(false),
           _audioConnected(false), _videoConnected(false), _wasConnected(false),
           _volume(initialVolume), _allocationFailed(false), _disconnectStartMs(0),
           _netTaskHandle(NULL), _videoTaskHandle(NULL), _audioTaskHandle(NULL),
@@ -346,26 +335,32 @@ void SyncedAVPlayer::setVolume(float vol) {
 
 bool SyncedAVPlayer::isLoaded() const { return _isLoaded; }
 
-bool SyncedAVPlayer::isRunning() const { return _isRunning; }
+bool SyncedAVPlayer::isRunning() const { return _isRunning.load(std::memory_order_acquire); }
 
-bool SyncedAVPlayer::hasStarted() const { return _playReleased; }
+bool SyncedAVPlayer::hasStarted() const { return _playReleased.load(std::memory_order_acquire); }
 
-bool SyncedAVPlayer::isConnected() const { return _clientConnected; }
+bool SyncedAVPlayer::isConnected() const {
+        return _audioConnected.load(std::memory_order_acquire) ||
+               _videoConnected.load(std::memory_order_acquire);
+    }
 
-bool SyncedAVPlayer::isPlaying() const { return _playReleased && _clientConnected; }
+bool SyncedAVPlayer::isPlaying() const { return _playReleased && isConnected(); }
 
 float SyncedAVPlayer::getRenderFps() const { return _renderFps; }
 
 uint32_t SyncedAVPlayer::audioClockMs() const {
-        if (!_playReleased) return 0;
-        if (_audioConnected && _playStarted && _samplesPlayed > 0) {
-            return _firstAudioTsMs + (uint32_t)(((uint64_t)_samplesPlayed * 1000ULL) / AUDIO_RATE);
+        if (!_playReleased.load(std::memory_order_acquire)) return 0;
+        uint32_t firstTimestamp = _firstAudioTsMs.load(std::memory_order_relaxed);
+        uint32_t played = _samplesPlayed.load(std::memory_order_relaxed);
+        if (_audioConnected.load(std::memory_order_acquire) &&
+            _playStarted.load(std::memory_order_acquire) && played > 0) {
+            return firstTimestamp + (uint32_t)(((uint64_t)played * 1000ULL) / AUDIO_RATE);
         }
-        return _firstAudioTsMs + (millis() - _wallClockStartMs);
+        return firstTimestamp + (millis() - _wallClockStartMs.load(std::memory_order_relaxed));
     }
 
 bool SyncedAVPlayer::hasFinished() {
-        if (!_playReleased || _clientConnected) {
+        if (!_playReleased || isConnected()) {
             _disconnectStartMs = 0;
             return false;
         }
@@ -393,20 +388,10 @@ void SyncedAVPlayer::load() {
         if (_isLoaded && _isRunning) return;
 
         if (_isLoaded && !_isRunning) {
-            if (_audioTaskHandle == NULL && _netTaskHandle == NULL && _videoTaskHandle == NULL) {
-                releaseResources();
-                _isLoaded = false;
-            } else {
-                if (_audioTaskDone && _audioTaskHandle != NULL) xSemaphoreTake(_audioTaskDone, pdMS_TO_TICKS(100));
-                if (_netTaskDone && _netTaskHandle != NULL) xSemaphoreTake(_netTaskDone, pdMS_TO_TICKS(100));
-                if (_videoTaskDone && _videoTaskHandle != NULL) xSemaphoreTake(_videoTaskDone, pdMS_TO_TICKS(100));
-                if (_audioTaskHandle == NULL && _netTaskHandle == NULL && _videoTaskHandle == NULL) {
-                    releaseResources();
-                    _isLoaded = false;
-                } else {
-                    Serial.println("[synced] Warning: worker tasks still active, cannot load");
-                    return;
-                }
+            unload();
+            if (_isLoaded) {
+                Serial.println("[synced] Warning: worker tasks still active, cannot load");
+                return;
             }
         }
 
@@ -467,7 +452,6 @@ void SyncedAVPlayer::load() {
         resetPlaybackState();
         _isRunning = true;
         _isLoaded = true;
-        _clientConnected = false;
         _audioConnected = false;
         _videoConnected = false;
         _wasConnected = false;
@@ -487,34 +471,27 @@ void SyncedAVPlayer::unload() {
 
         _isRunning = false;
 
-        bool taskTimeout = false;
-        // Give tasks up to 400ms each to cleanly exit their loops and delete themselves
-        if (_audioTaskDone && _audioTaskHandle != NULL) {
-            if (xSemaphoreTake(_audioTaskDone, pdMS_TO_TICKS(400)) != pdTRUE) taskTimeout = true;
-        }
-        if (_netTaskDone && _netTaskHandle != NULL) {
-            if (xSemaphoreTake(_netTaskDone, pdMS_TO_TICKS(400)) != pdTRUE) taskTimeout = true;
-        }
-        if (_videoTaskDone && _videoTaskHandle != NULL) {
-            if (xSemaphoreTake(_videoTaskDone, pdMS_TO_TICKS(400)) != pdTRUE) taskTimeout = true;
-        }
+        auto awaitTask = [](SemaphoreHandle_t done, TaskHandle_t& handle) {
+            if (handle == nullptr) return true;
+            if (!done || xSemaphoreTake(done, pdMS_TO_TICKS(400)) != pdTRUE) return false;
+            handle = nullptr;
+            return true;
+        };
+        // Clear ownership as each worker confirms exit. A later retry then waits
+        // only for workers that actually timed out.
+        bool taskTimeout = !awaitTask(_audioTaskDone, _audioTaskHandle);
+        taskTimeout = !awaitTask(_netTaskDone, _netTaskHandle) || taskTimeout;
+        taskTimeout = !awaitTask(_videoTaskDone, _videoTaskHandle) || taskTimeout;
 
         if (taskTimeout) {
             Serial.println("[synced] Warning: task shutdown timeout, preserving buffers to avoid use-after-free");
             return;
         }
 
-        _audioTaskHandle = NULL;
-        _netTaskHandle = NULL;
-        _videoTaskHandle = NULL;
-        _activeAudioClient = nullptr;
-        _activeVideoClient = nullptr;
-
         vTaskDelay(pdMS_TO_TICKS(25)); // Allow Core 0 idle task to reclaim FreeRTOS task stacks
 
         releaseResources();
         _isLoaded = false;
-        _clientConnected = false;
         _audioConnected = false;
         _videoConnected = false;
     }
@@ -522,10 +499,11 @@ void SyncedAVPlayer::unload() {
 void SyncedAVPlayer::update() {
         if (!_isLoaded) return;
 
-        if (!_wasConnected && _clientConnected) {
+        bool connected = isConnected();
+        if (!_wasConnected && connected) {
             _wasConnected = true;
             if (pokoGfx) pokoGfx->fillScreen(RGB565_BLACK);
-        } else if (_wasConnected && !_clientConnected) {
+        } else if (_wasConnected && !connected) {
             _wasConnected = false;
         }
 
@@ -537,7 +515,7 @@ void SyncedAVPlayer::update() {
         while (xQueuePeek(_videoQueue, &f, 0) == pdTRUE) {
             if (f.timestampMs + VIDEO_LATE_DROP_MS < clockMs) {
                 xQueueReceive(_videoQueue, &f, 0);
-                _videoFramesDropped++;
+                _videoFramesDropped.fetch_add(1, std::memory_order_relaxed);
                 uint8_t* ptr = f.buffer;
                 xQueueSend(_emptyQueue, &ptr, 0);
                 continue;

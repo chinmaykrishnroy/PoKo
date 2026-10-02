@@ -1,4 +1,5 @@
 #include "MusicApp.h"
+#include <new>
 
 uint16_t* MusicApp::_decodeTarget = nullptr;
 int16_t MusicApp::_decodeTargetW = 0;
@@ -576,8 +577,8 @@ MusicApp::~MusicApp() {
 
 void MusicApp::begin() {
         if (!_canvas) {
-            _canvas = new Arduino_Canvas(128, 128, _gfx, 0, 0);
-            _canvas->begin();
+            _canvas = new (std::nothrow) Arduino_Canvas(128, 128, _gfx, 0, 0);
+            if (_canvas) _canvas->begin();
         }
     }
 

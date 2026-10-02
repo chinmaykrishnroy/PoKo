@@ -8,6 +8,7 @@
 #include <freertos/task.h>
 #include <freertos/queue.h>
 #include <freertos/stream_buffer.h>
+#include <atomic>
 #include "PokoDrivers.h"
 
 // ─────────────────────────────────────────────────────────────
@@ -44,15 +45,12 @@ private:
     WiFiServer      _server;
     WiFiServer      _videoServer;
 
-    volatile bool   _isRunning;
+    std::atomic<bool> _isRunning{false};
     bool            _isLoaded;
-    volatile bool   _clientConnected;
-    volatile bool   _audioConnected;
-    volatile bool   _videoConnected;
-    WiFiClient* volatile _activeAudioClient = nullptr;
-    WiFiClient* volatile _activeVideoClient = nullptr;
+    std::atomic<bool> _audioConnected{false};
+    std::atomic<bool> _videoConnected{false};
     bool            _wasConnected;
-    volatile float  _volume;
+    std::atomic<float> _volume{1.0f};
     bool            _allocationFailed;
     uint32_t        _disconnectStartMs;
 
@@ -67,17 +65,17 @@ private:
     StreamBufferHandle_t _audioStream;
     uint8_t**            _videoBuffers;
 
-    volatile bool     _playStarted;
-    volatile bool     _playReleased;
-    volatile uint32_t _firstAudioTsMs;
-    volatile uint32_t _samplesPlayed;
-    volatile uint32_t _wallClockStartMs;
+    std::atomic<bool>     _playStarted{false};
+    std::atomic<bool>     _playReleased{false};
+    std::atomic<uint32_t> _firstAudioTsMs{0};
+    std::atomic<uint32_t> _samplesPlayed{0};
+    std::atomic<uint32_t> _wallClockStartMs{0};
 
-    volatile uint32_t _audioPackets;
-    volatile uint32_t _audioBytesDropped;
-    volatile uint32_t _audioUnderruns;
-    volatile uint32_t _videoPackets;
-    volatile uint32_t _videoFramesDropped;
+    std::atomic<uint32_t> _audioPackets{0};
+    std::atomic<uint32_t> _audioBytesDropped{0};
+    std::atomic<uint32_t> _audioUnderruns{0};
+    std::atomic<uint32_t> _videoPackets{0};
+    std::atomic<uint32_t> _videoFramesDropped{0};
     uint32_t          _videoFramesRendered;
     uint32_t          _lastFpsSampleMs;
     uint32_t          _lastFpsFrameCount;

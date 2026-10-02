@@ -1,4 +1,5 @@
 #include "ClockApp.h"
+#include <new>
 
 void ClockApp::renderToCanvas() {
         if (!_canvas) return;
@@ -135,8 +136,8 @@ ClockApp::ClockApp(Arduino_GFX* gfx, AppSwitchFn exitFn)
 
 void ClockApp::begin() {
         if (!_canvas) {
-            _canvas = new Arduino_Canvas(128, 128, _gfx, 0, 0);
-            _canvas->begin();
+            _canvas = new (std::nothrow) Arduino_Canvas(128, 128, _gfx, 0, 0);
+            if (_canvas) _canvas->begin();
         }
     }
 

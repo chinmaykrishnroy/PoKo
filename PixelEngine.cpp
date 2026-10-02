@@ -160,7 +160,9 @@ SSyncEffectPreset PixelEngine::getSSyncEffect() const { return _ssyncEffect; }
 
 void PixelEngine::setSSyncEffect(SSyncEffectPreset fx) { _ssyncEffect = fx; }
 
-FreqResponse PixelEngine::getFreqResponse() const { return _freqResp; }
+FreqResponse PixelEngine::getFreqResponse() const {
+        return _freqResp.load(std::memory_order_relaxed);
+    }
 
 void PixelEngine::setFreqResponse(FreqResponse f) { _freqResp = f; }
 
@@ -178,6 +180,7 @@ void PixelEngine::feedAudioSample(int16_t left, int16_t right) {
         int32_t mono = ((int32_t)left + (int32_t)right) / 2;
         float in = (float)mono / 32768.0f;
 
+        portENTER_CRITICAL(&_audioFilterMux);
         // 1. Digital 2nd-order Low-Pass Filter (~220 Hz for Bass / Kick drum)
         _lp1 += 0.032f * (in - _lp1);
         _lp2 += 0.032f * (_lp1 - _lp2);
@@ -190,7 +193,7 @@ void PixelEngine::feedAudioSample(int16_t left, int16_t right) {
         float mid = in - _lp2 - _hp;
 
         float filteredMag = 0.0f;
-        switch (_freqResp) {
+        switch (_freqResp.load(std::memory_order_relaxed)) {
             case FREQ_RESP_LOW:
                 filteredMag = fabsf(_lp2) * 3.4f;
                 break;
@@ -205,13 +208,17 @@ void PixelEngine::feedAudioSample(int16_t left, int16_t right) {
                 filteredMag = fabsf(in);
                 break;
         }
+        portEXIT_CRITICAL(&_audioFilterMux);
 
-        if (filteredMag > _audioLevel) {
-            _audioLevel = constrain(filteredMag, 0.0f, 1.0f);
-        }
+        float peak = constrain(filteredMag, 0.0f, 1.0f);
+        float observed = _audioLevel.load(std::memory_order_relaxed);
+        while (peak > observed &&
+               !_audioLevel.compare_exchange_weak(observed, peak,
+                                                  std::memory_order_release,
+                                                  std::memory_order_relaxed)) {}
     }
 
-float PixelEngine::getAudioLevel() const { return _audioLevel; }
+float PixelEngine::getAudioLevel() const { return _audioLevel.load(std::memory_order_acquire); }
 
 void PixelEngine::showOtaProgress(float percent) {
         if (_otaErrorActive) return;
@@ -381,8 +388,14 @@ void PixelEngine::update(bool isMusicPlaying, bool isSSyncPlaying) {
         _lastFrameMs = now;
 
         // Smooth audio decay
-        _audioLevel *= 0.88f;
-        if (_audioLevel < 0.02f) _audioLevel = 0.0f;
+        float observed = _audioLevel.load(std::memory_order_relaxed);
+        float decayed;
+        do {
+            decayed = observed * 0.88f;
+            if (decayed < 0.02f) decayed = 0.0f;
+        } while (!_audioLevel.compare_exchange_weak(observed, decayed,
+                                                    std::memory_order_acq_rel,
+                                                    std::memory_order_relaxed));
 
         // Effective volume scaling (0.0 .. 1.0)
         float volScale = (float)_effectiveVolume / 100.0f;

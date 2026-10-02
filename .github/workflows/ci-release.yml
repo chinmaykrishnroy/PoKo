@@ -64,6 +64,9 @@ jobs:
       - name: Enforce firmware header boundaries
         run: python tests/check_header_boundaries.py
 
+      - name: Enforce inter-task synchronization contracts
+        run: python tests/check_concurrency_contracts.py
+
       - name: Run FFmpeg stream smoke test
         run: python tests/firmware/stream_smoke.py
 

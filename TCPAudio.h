@@ -4,6 +4,7 @@
 #include <AudioFileSource.h>
 #include <AudioGeneratorMP3.h>
 #include <AudioOutput.h>
+#include <atomic>
 #include "PokoDrivers.h"
 
 // ─────────────────────────────────────────────────────────────
@@ -19,22 +20,21 @@ private:
     WiFiServer      _server;
 
     bool            _isLoaded;
-    volatile bool   _isRunning;
-    volatile TaskHandle_t _netTaskHandle;
+    std::atomic<bool> _isRunning{false};
+    TaskHandle_t      _netTaskHandle = nullptr; // owned by the Arduino loop task
     SemaphoreHandle_t     _netTaskDone = nullptr;
 
-    volatile bool   _clientConnected;
-    volatile bool   _abortStream;
-    volatile bool   _playStarted;
-    volatile uint32_t _disconnectStartMs;
-    volatile float  _volume;
-    WiFiClient* volatile _activeClient = nullptr;
+    std::atomic<bool>     _clientConnected{false};
+    std::atomic<bool>     _abortStream{false};
+    std::atomic<bool>     _playStarted{false};
+    std::atomic<uint32_t> _disconnectStartMs{0};
+    std::atomic<float>    _volume{1.0f};
 
     class AudioStreamTCP : public AudioFileSource {
     private:
         WiFiClient*     _client;
-        volatile bool*  _isRunning;
-        volatile bool*  _abort;
+        std::atomic<bool>* _isRunning;
+        std::atomic<bool>* _abort;
         uint8_t*        _ring;
         size_t          _capacity;
         size_t          _head;
@@ -47,7 +47,7 @@ private:
         void pump();
 
     public:
-        AudioStreamTCP(WiFiClient* client, volatile bool* isRunning, volatile bool* abortFlag, size_t bufferBytes = 131072);
+        AudioStreamTCP(WiFiClient* client, std::atomic<bool>* isRunning, std::atomic<bool>* abortFlag, size_t bufferBytes = 131072);
 
         virtual ~AudioStreamTCP() override;
 
@@ -63,12 +63,12 @@ private:
 
     class AudioOutputPokoI2S : public AudioOutput {
     private:
-        volatile float* _vol;
+        std::atomic<float>* _vol;
         uint32_t        _sampleCount = 0;
         int16_t         _buffer[512];
         int             _bufIndex = 0;
     public:
-        AudioOutputPokoI2S(volatile float* vol);
+        explicit AudioOutputPokoI2S(std::atomic<float>* vol);
 
         virtual bool begin() override;
         virtual bool SetRate(int hz) override;

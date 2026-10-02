@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <FastLED.h>
 #include <Preferences.h>
+#include <atomic>
 #include "PokoPins.h"
 
 // ─────────────────────────────────────────────────────────────
@@ -81,7 +82,8 @@ private:
     SSyncEffectPreset _ssyncEffect = SSYNC_FX_VOL_HUE;
 
     // Audio Frequency Response Filter
-    FreqResponse _freqResp = FREQ_RESP_LOW;
+    std::atomic<FreqResponse> _freqResp{FREQ_RESP_LOW};
+    portMUX_TYPE _audioFilterMux = portMUX_INITIALIZER_UNLOCKED;
     float _lp1 = 0.0f, _lp2 = 0.0f;
     float _hp = 0.0f, _prevIn = 0.0f;
 
@@ -97,7 +99,7 @@ private:
     bool     _extracting = false;
 
     // Real-time audio reactive variables
-    volatile float _audioLevel = 0.0f;  // Instantaneous smoothed audio envelope (0.0 .. 1.0)
+    std::atomic<float> _audioLevel{0.0f}; // Published by audio tasks, consumed by loop task
     int            _effectiveVolume = 75; // 0..100 (master * app / 100)
 
     // OTA Visualizer state

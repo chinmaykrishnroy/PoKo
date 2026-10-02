@@ -100,18 +100,20 @@ private:
     Preferences* _prefs;
     String _serverHost;
     uint16_t _serverPort;
-    int32_t _customLatencyMs;
-    volatile float _volume;
+    mutable SemaphoreHandle_t _metadataMutex;
+    std::atomic<int32_t> _customLatencyMs{0};
+    std::atomic<float> _volume{0.8f};
 
-    volatile bool _isRunning;
+    std::atomic<bool> _isRunning{false};
     bool _isLoaded;
-    volatile bool _connected;
-    volatile bool _syncing;
-    volatile bool _playStarted;
-    volatile bool _playReleased;
-    volatile bool _isSuspended = false;
-    volatile bool _suspendDrainRequested = false;
-    volatile bool _suspendDeinitRequested = false;
+    std::atomic<bool> _connected{false};
+    std::atomic<bool> _syncing{false};
+    std::atomic<bool> _reconnectRequested{false};
+    std::atomic<bool> _playStarted{false};
+    std::atomic<bool> _playReleased{false};
+    std::atomic<bool> _isSuspended{false};
+    std::atomic<bool> _suspendDrainRequested{false};
+    std::atomic<bool> _suspendDeinitRequested{false};
     typedef bool (*AudioActiveFn)();
     typedef void (*AudioReleaseFn)();
     typedef void (*AudioVolumeChangeFn)(int vol, bool muted);
@@ -127,11 +129,11 @@ private:
     SemaphoreHandle_t _audioReady;
     bool _netTaskStarted;
     bool _audioTaskStarted;
-    bool _i2sInstalled;
-    volatile bool _resyncRequested;
-    volatile bool _volumePublishPending;
-    bool _receivedInitialServerSettings;
-    bool _audioFault;
+    std::atomic<bool> _i2sInstalled{false};
+    std::atomic<bool> _resyncRequested{false};
+    std::atomic<bool> _volumePublishPending{false};
+    std::atomic<bool> _receivedInitialServerSettings{false};
+    std::atomic<bool> _audioFault{false};
     SnapAudioRingBuffer _pcmBuf;
     WiFiClient _client;
 
@@ -139,14 +141,14 @@ private:
     KnobMode _knobMode;
 
     String _codec;
-    uint32_t _sampleRate;
-    uint16_t _channels;
-    uint16_t _bitsPerSample;
-    int32_t _serverBufferMs;
-    int32_t _serverLatencyMs;
-    volatile int32_t _measuredLatencyMs;
-    int32_t _serverVolume;
-    bool _serverMuted;
+    std::atomic<uint32_t> _sampleRate{48000};
+    std::atomic<uint16_t> _channels{2};
+    std::atomic<uint16_t> _bitsPerSample{16};
+    std::atomic<int32_t> _serverBufferMs{1000};
+    std::atomic<int32_t> _serverLatencyMs{0};
+    std::atomic<int32_t> _measuredLatencyMs{0};
+    std::atomic<int32_t> _serverVolume{80};
+    std::atomic<bool> _serverMuted{false};
 
     static const int DMA_BUF_COUNT = POKO_I2S_DMA_DESC_NUM;
     static const int DMA_BUF_LEN = POKO_I2S_DMA_FRAME_NUM;
@@ -185,6 +187,8 @@ private:
     double _correctionAccumulator;
     double _pllIntegralPpm;
     double _lastCorrectionPpm;
+    std::atomic<int32_t> _publishedCorrectionCentiPpm{0};
+    std::atomic<int32_t> _publishedIntegralCentiPpm{0};
 
     int64_t _diffToServerUs;
     uint32_t _lastTimeSyncMs;
@@ -195,28 +199,49 @@ private:
     int64_t _targetPlayLocalTimeUs;
     int64_t _expectedNextChunkTsUs;
     uint64_t _samplesPlayed;
+    mutable portMUX_TYPE _timingMux = portMUX_INITIALIZER_UNLOCKED;
     uint64_t _decodedFramesThisChunk;
-    uint32_t _chunksReceived;
-    uint32_t _bytesDropped;
-    uint32_t _underruns;
-    uint32_t _i2sShortWrites;
-    uint32_t _chunkTimestampResyncs;
-    uint32_t _timeSyncRejects;
-    uint32_t _timeSyncUnmatched;
+    std::atomic<uint32_t> _chunksReceived{0};
+    std::atomic<uint32_t> _bytesDropped{0};
+    std::atomic<uint32_t> _underruns{0};
+    std::atomic<uint32_t> _i2sShortWrites{0};
+    std::atomic<uint32_t> _chunkTimestampResyncs{0};
+    std::atomic<uint32_t> _timeSyncRejects{0};
+    std::atomic<uint32_t> _timeSyncUnmatched{0};
     uint8_t _consecutiveEmptyReads;
-    int32_t _lastDriftMs;
-    int32_t _lastDriftUs;
-    volatile bool _producerAwaitingResync;
-    volatile bool _decodeWriteFailed;
-    volatile uint32_t _resyncGeneration;
+    std::atomic<int32_t> _lastDriftMs{0};
+    std::atomic<int32_t> _lastDriftUs{0};
+    std::atomic<bool> _producerAwaitingResync{false};
+    std::atomic<bool> _decodeWriteFailed{false};
+    std::atomic<uint32_t> _resyncGeneration{0};
     uint32_t _fadeFramesTotal;
     uint32_t _fadeFramesDone;
 
     uint32_t _lastOverlayUpdateMs;
-    uint32_t _timeSyncCount;
+    std::atomic<uint32_t> _timeSyncCount{0};
     bool _receivedCodecHeader;
 
     int32_t getEffectiveBufferMs() const;
+
+    void copyEndpoint(String& host, uint16_t& port) const;
+
+    String copyCodec() const;
+
+    void setCodecName(const String& codec);
+
+    int64_t loadServerClockOffsetUs() const;
+
+    void storeServerClockOffsetUs(int64_t value);
+
+    void storePlaybackAnchor(int64_t firstChunkUs, int64_t targetPlayUs);
+
+    void loadPlaybackAnchor(int64_t& firstChunkUs, int64_t& targetPlayUs) const;
+
+    uint64_t loadSamplesPlayed() const;
+
+    void resetSamplesPlayed();
+
+    void addSamplesPlayed(uint32_t frames);
 
     void addTimeDiffSample(int64_t diff);
 
