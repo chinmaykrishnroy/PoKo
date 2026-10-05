@@ -1,20 +1,14 @@
 #pragma once
 #include <Arduino.h>
-#include <WiFi.h>
-#include <HTTPClient.h>
-#include <ArduinoJson.h>
-#include <TJpg_Decoder.h>
-#include <U8g2lib.h>
-#include <Arduino_GFX_Library.h>
-#include <Preferences.h>
 #include "PokoAppState.h"
-#include "PokoPins.h"
-#include "PokoTheme.h"
 #include "TitleMarquee.h"
-#include "PokoDrivers.h"
-#include "SyncedAVPlayer.h"
-#include "AudioManager.h"
-#include "PowerManager.h"
+#include "CoreIApp.h"
+
+class Arduino_GFX;
+class Arduino_Canvas;
+class Preferences;
+class SyncedAVPlayer;
+class PowerManager;
 
 extern PowerManager* powerManager;
 
@@ -31,7 +25,7 @@ extern PowerManager* powerManager;
 extern Preferences prefs;
 extern SyncedAVPlayer* syncPlugin;
 
-class VideoApp {
+class VideoApp : public IApp {
 private:
     enum VideoMode {
         MODE_BROWSE,
@@ -82,58 +76,43 @@ private:
     static bool tftOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap);
 
     String getServerHost();
-
     int getServerPort();
-
     bool fetchVideoList(int index = 0, bool loadThumb = true);
-
     void fetchThumbnail(int idx);
-
     void failPlayback(int httpCode = 0);
-
     void requestPlay(int idx, bool retryMissing = true);
-
     void requestStopInternal();
-
     void requestStop();
-
     bool selectVideo(int index);
-
     void renderToCanvas();
 
 public:
     VideoApp(Arduino_GFX* gfx, AppSwitchFn exitFn);
 
     static bool playbackStoppedStatic();
-
     static void stopPlaybackStatic();
 
-    void begin();
-
-    void load();
+    // IApp interface
+    void begin()    override;
+    void load()     override;
+    void unload()   override;
+    void update()   override;
+    void refreshTheme() override;
+    const char* appName() const override { return "Video"; }
+    bool wantsHoldRepeat() const override { return true; }
+    bool isSafeForRestore() const override { return false; } // needs active network
+    void handleInput(InputEvent e) override;
+    void onDisplayWake() override {} // Video manages display internally
 
     bool prepareRemoteStream();
-
-    void unload();
-
     bool isLoaded() const;
-
-    void refreshTheme();
-
+    bool isPlaying() const;
     void onLeft();
-
     void onRight();
-
     void volumeRampDown(int step = 2);
-
     void volumeRampUp(int step = 2);
-
     void onBack();
-
     void onEnter();
-
     void onPlaybackEnded();
-
-    void update();
 };
 

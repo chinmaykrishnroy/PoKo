@@ -57,6 +57,10 @@ int main(int argc, char** argv) {
         CHECK(requests == 0);
         CHECK(app._mode == VideoApp::MODE_BROWSE && app._serverError);
         CHECK(power.locks == 0);
+    } else if (!strcmp(argv[1], "fit-query")) {
+        prefs.videoFit = true;
+        app.onRight();
+        CHECK(lastUrl.find("aspect=fit") != std::string::npos);
     }
     puts("PASS");
 }

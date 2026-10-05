@@ -15,6 +15,7 @@
 #include "TitleMarquee.h"
 #include "PowerManager.h"
 #include "AudioManager.h"
+#include "CoreIApp.h"
 
 // ─────────────────────────────────────────────────────────────
 //  GalleryApp — Photo viewer (128×128)
@@ -32,7 +33,7 @@
 extern Preferences prefs;
 extern PowerManager* powerManager;
 
-class GalleryApp {
+class GalleryApp : public IApp {
 public:
     enum PhotoSource : uint8_t { PHOTO_LITTLEFS, PHOTO_SERVER };
 
@@ -88,26 +89,22 @@ private:
 public:
     GalleryApp(Arduino_GFX* gfx, AppSwitchFn exitFn);
 
-    void begin();
-
-    void load();
-
-    void unload();
+    // IApp interface
+    void begin()    override;
+    void load()     override;
+    void unload()   override;
+    void update()   override;
+    void refreshTheme() override;
+    const char* appName() const override { return "Gallery"; }
+    bool isSafeForRestore() const override { return true; }
+    void handleInput(InputEvent e) override;
+    void onDisplayWake() override { renderToCanvas(); }
 
     void reloadList();
-
     bool isLoaded() const;
-
-    void refreshTheme();
-
     void onLeft();
-
     void onRight();
-
     void onBack();
-
     void onEnter();
-
-    void update();
 };
 

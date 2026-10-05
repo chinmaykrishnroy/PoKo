@@ -9,6 +9,7 @@
 #include "PokoTheme.h"
 #include "SnapPlayer.h"
 #include "AudioManager.h"
+#include "CoreIApp.h"
 
 // ─────────────────────────────────────────────────────────────
 //  SSyncApp — Direct Snapcast Client UI (128×128)
@@ -18,7 +19,7 @@
 
 extern Preferences prefs;
 
-class SSyncApp {
+class SSyncApp : public IApp {
 private:
     Arduino_GFX*    _gfx;
     AppSwitchFn     _exit;
@@ -30,42 +31,36 @@ private:
     uint32_t _lastDrawMs = 0;
 
 public:
-    void renderToCanvas();
+    void renderToCanvas() override;
 
 public:
     SSyncApp(Arduino_GFX* gfx, AppSwitchFn exitFn, SnapPlayer* player = nullptr);
 
     void setPlayer(SnapPlayer* p);
 
-    void begin();
-
-    void load();
-
-    void unload();
+    // IApp interface
+    void begin()    override;
+    void load()     override;
+    void unload()   override;
+    void update()   override;
+    void refreshTheme() override;
+    const char* appName() const override { return "SSync"; }
+    bool wantsHoldRepeat() const override { return true; }
+    bool isSafeForRestore() const override { return true; }
+    void handleInput(InputEvent e) override;
+    void onDisplayWake() override { renderToCanvas(); }
 
     bool isLoaded() const;
-
-    void refreshTheme();
-
     bool isPlaying() const;
-
     SnapPlayer* getPlayer();
 
     void onLeft();
-
     void onRight();
-
     void volumeRampDown(int step = 2);
-
     void volumeRampUp(int step = 2);
-
     void onBack();
-
     void onEnter();
-
     void onLongRight();
-
-    void update();
 
     // REST API status
     String apiJson();

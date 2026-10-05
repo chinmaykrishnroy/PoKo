@@ -8,6 +8,7 @@
 #include "PokoAppState.h"
 #include "PokoPins.h"
 #include "PokoUI.h"
+#include "CoreIApp.h"
 
 // ─────────────────────────────────────────────────────────────
 //  InfoApp — System information screen (128×128)
@@ -36,7 +37,7 @@ extern AudioManager* audioManager;
 extern String getNetworkStatusMsg();
 extern String apPassword;
 
-class InfoApp {
+class InfoApp : public IApp {
 private:
     Arduino_GFX*    _gfx;
     AppSwitchFn     _exit;
@@ -62,34 +63,30 @@ private:
     void buildRows();
 
 public:
-    void renderToCanvas();
+    void renderToCanvas() override;
 
 public:
     InfoApp(Arduino_GFX* gfx, AppSwitchFn exitFn);
 
-    void begin();
-
-    void load();
-
-    void unload();
+    // IApp interface
+    void begin()    override;
+    void load()     override;
+    void unload()   override;
+    void update()   override;
+    void refreshTheme() override;
+    const char* appName() const override { return "Info"; }
+    bool isSafeForRestore() const override { return true; }
+    void handleInput(InputEvent e) override;
+    void onDisplayWake() override { renderToCanvas(); }
 
     bool isLoaded() const;
 
-    void refreshTheme();
-
     void onLeft();
-
     void onRight();
-
     void onBack();
-
     void onEnter();
-
     void onLongRight();
-
     void onLongLeft();
-
-    void update();
 
     String apiJson();
 };

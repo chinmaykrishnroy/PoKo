@@ -46,7 +46,7 @@ def resolve_video_tuning(
     elif selected_profile == "smooth":
         base_fps += 3
         base_quality = min(15, base_quality + 2)
-    max_fps = 20.0 if synced else 24.0
+    max_fps = 30.0 if synced else 24.0
     return (
         selected_profile,
         max(8.0, min(max_fps, float(fps if fps is not None else base_fps))),

@@ -948,8 +948,8 @@ async function renderSystem(){
           <form id="systemPowerForm" class="form-grid">
             <div class="field"><label>Dim after<small>Seconds without input</small></label><input type="number" name="dim_timeout" min="0" max="604800" value="${p.dim_timeout}" required></div>
             <div class="field"><label>Sleep after<small>Seconds without input</small></label><input type="number" name="sleep_timeout" min="0" max="604800" value="${p.sleep_timeout}" required></div>
-            <div class="field"><label>Low-battery auto-off<small>Seconds continuously below threshold</small></label><input type="number" name="auto_off" min="0" max="604800" value="${p.auto_off}" required></div>
-            <div class="field"><label>Auto-off threshold<small>Battery percent; 0 disables</small></label><input type="number" name="auto_off_battery_pct" min="0" max="100" value="${p.auto_off_battery_pct}" required></div>
+            <div class="field"><label>Inactivity auto-off<small>Seconds before shutdown; 0 disables</small></label><input type="number" name="auto_off" min="0" max="604800" value="${p.auto_off}" required></div>
+            <div class="field"><label>Protect active use above<small>Battery percent; 0 always protects playback and torch</small></label><input type="number" name="auto_off_battery_pct" min="0" max="100" value="${p.auto_off_battery_pct}" required></div>
             <div class="field"><span class="label">Ambient clock</span><label class="switch"><input name="ambient_clock" type="checkbox" ${p.ambient_clock?'checked':''}><span></span></label></div>
             <div class="field"><span class="label">USB max performance<small>Only when power source can be detected</small></span><label class="switch"><input name="usb_perf" type="checkbox" ${p.usb_perf_max?'checked':''}><span></span></label></div>
             <div class="field"><span class="label">Allow Wi-Fi sleep<small>Lower idle power, except during realtime audio</small></span><label class="switch"><input name="wifi_sleep" type="checkbox" ${p.wifi_sleep_allowed?'checked':''}><span></span></label></div>

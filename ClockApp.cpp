@@ -195,3 +195,16 @@ void ClockApp::update() {
         _dirty = false;
         renderToCanvas();
     }
+
+// IApp::handleInput
+void ClockApp::handleInput(InputEvent e) {
+    switch (e) {
+        case InputEvent::Left:       onLeft();  break;
+        case InputEvent::Right:      onRight(); break;
+        case InputEvent::LeftDouble:
+        case InputEvent::Back:       onBack();  break;
+        case InputEvent::RightDouble:
+        case InputEvent::Enter:      onEnter(); break;
+        default: break;
+    }
+}

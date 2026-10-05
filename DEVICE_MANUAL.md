@@ -376,7 +376,7 @@ There are three ways to power off PoKo:
 3. **Web Control Panel**:  
    Visit `http://<device-ip>/`, navigate to **Settings**, and click **Power Off** (`POST /api/power?power_off=1`).
 4. **Automatic Inactivity Cutoff**:  
-   When the battery remains at or below `auto_off_pct` (default: 5%) for the configured `auto_off` delay (default: 15 minutes), the device powers off. SSync, Music, Video, and Gallery inhibit the timer while open. The critical-voltage cutoff remains immediate.
+   The device powers off after the configured `auto_off` inactivity delay (default: 15 minutes). Active SSync, Music, Video, or the solid Pixel torch inhibits that timer while externally powered or while the battery is above `auto_off_pct` (default: 5%). At or below the threshold, inactivity shutdown still applies during protected use. Clock, Gallery, and idle media screens never inhibit shutdown. A threshold of `0` always protects active playback and the torch; the critical-voltage cutoff remains immediate.
 5. **Critical Battery Cutoff**:  
    If cell voltage drops below **3.25V sustained for 15 seconds**, the system automatically initiates graceful shutdown to protect the LiPo cell from damage.
 
@@ -408,7 +408,7 @@ There are three ways to power off PoKo:
 
 If an electrical glitch causes display distortion, I²C bus lockup, or speaker codec stalls:
 - **Shortcut**: Hold **`L + R` simultaneously for 5.0 seconds**.
-- **Settings**: Select row 14 (**"Reset Drivers"**) and double-click `R` (`2R`).
+- **Settings**: Select **"Reset Drivers"** and double-click `R` (`2R`).
 - **Action**: Safely pauses media workers, reinitializes the I²C bus at 400 kHz with 50 ms timeout, resets the ES8311 codec registers, resets the GC9107 SPI display, and repaints the foreground app without restarting the ESP32.
 
 ---
@@ -520,7 +520,7 @@ Single-song album browser and MP3 streaming audio player interfacing with the lo
 
 ### App 5: Video (128×128 Synced AV Player)
 
-Full-motion video player streaming MJPEG video at 20 FPS with synchronized PCM audio over TCP from the Python media server.
+Full-motion video player streaming MJPEG video at up to 30 FPS with synchronized PCM audio over TCP from the Python media server.
 - **Display**:
   - **Browse Mode**: Centered video thumbnail, scrolling video title marquee, duration, and resolution badge (`128x128`).
   - **Playback Mode**: Full-screen 128×128 video rendering with synchronized audio output through the ES8311 speaker.
@@ -619,7 +619,7 @@ The **InfoApp** displays 28 real-time telemetry metrics categorized into 9 subsy
 
 ## 7. System Settings Reference
 
-All 16 preference items in **SettingsApp**, their adjustable ranges, and their underlying NVS storage keys:
+All 18 entries in **SettingsApp**, including their adjustable ranges and underlying NVS storage keys:
 
 | # | Item Name | Options & Values (`2R` Click) | Hold `L` / `R` Fine Tuning | NVS Key | Default |
 |:---:|:---|:---|:---|:---|:---:|
@@ -630,16 +630,17 @@ All 16 preference items in **SettingsApp**, their adjustable ranges, and their u
 | 5 | **Dim Timeout** | `15s` $\rightarrow$ `30s` $\rightarrow$ `60s` $\rightarrow$ `Off` | $\pm 5\text{s}$, $\pm 30\text{s}$, $\pm 120\text{s}$ | `dim_timeout` | `15` |
 | 6 | **Sleep Timeout** | `30s` $\rightarrow$ `1m` $\rightarrow$ `2m` $\rightarrow$ `5m` $\rightarrow$ `Off` | $\pm 5\text{s}$, $\pm 30\text{s}$, $\pm 120\text{s}$ | `sleep_timeout` | `30` |
 | 7 | **Auto-Off** | `10m` $\rightarrow$ `15m` $\rightarrow$ `30m` $\rightarrow$ `Never` | $\pm 1\text{m}$, $\pm 5\text{m}$, $\pm 30\text{m}$ | `auto_off` | `900` (15m) |
-| 8 | **Off Battery %** | `3%` $\rightarrow$ `5%` $\rightarrow$ `10%` $\rightarrow$ `Off` | $\pm 1%$, $\pm 3%$, $\pm 8%$ | `auto_off_pct` | `5` |
+| 8 | **Protect >%** | `3%` $\rightarrow$ `5%` $\rightarrow$ `10%` $\rightarrow$ `Always` | $\pm 1%$, $\pm 3%$, $\pm 8%$ | `auto_off_pct` | `5` |
 | 9 | **Ambient Clock** | `On` $\leftrightarrow$ `Off` (keeps clock visible dimmed instead of sleeping) | — | `ambient_clock` | `false` |
 | 10 | **WiFi Sleep** | `Auto` $\leftrightarrow$ `Off` (modem sleep on battery vs always awake) | — | `wifi_sleep` | `true` |
 | 11 | **USB Mode** | `MaxPerf` $\leftrightarrow$ `Managed` | — | `usb_perf` | `true` |
 | 12 | **Slide Timer** | `Off` $\rightarrow$ `3s` $\rightarrow$ `5s` $\rightarrow$ `10s` $\rightarrow$ `15s` $\rightarrow$ `30s` $\rightarrow$ `60s` | — | `gallery_timer`| `0` (Off) |
 | 13 | **SSync Auto** | `On` $\leftrightarrow$ `Off` (auto-connects Snapcast on boot/Wi-Fi) | — | `snap_auto` | `true` |
 | 14 | **LED Bright** | `Off` $\rightarrow$ `20%` $\rightarrow$ `50%` $\rightarrow$ `100%` | — | `led_bright` | `50%` |
-| 15 | **Reset Drivers** | Emergency driver re-initialization (I²C, Codec, LCD, LEDs) | — | — | — |
-| 16 | **Power Off** | Executes orderly 7-step graceful shutdown | — | — | — |
-| 17 | **Reboot** | Executes clean software reboot (`ESP.restart()`) | — | — | — |
+| 15 | **Video View** | `Fill` $\leftrightarrow$ `Fit` (crop to cover or preserve with black padding) | — | `video_fit` | `false` (`Fill`) |
+| 16 | **Reset Drivers** | Emergency driver re-initialization (I²C, Codec, LCD, LEDs) | — | — | — |
+| 17 | **Power Off** | Executes orderly 7-step graceful shutdown | — | — | — |
+| 18 | **Reboot** | Executes clean software reboot (`ESP.restart()`) | — | — | — |
 
 ---
 
@@ -667,7 +668,7 @@ All endpoints respond with `application/json`:
 |:---:|:---|:---|:---|
 | `GET` | `/api/health` | — | Complete live telemetry and system health state. |
 | `GET` | `/api/sys` | `brightness=1..100`, `volume=0..100`, `master_vol=1..100`, `amp_boost=0..5` | Get or set display brightness and audio levels. |
-| `GET` | `/api/power` | `screen=on\|off\|dim\|toggle`, `dim_timeout`, `sleep_timeout`, `auto_off`, `auto_off_battery_pct`, `reboot=1`, `power_off=1` | Manage power states, low-battery auto-off, reboot, and shutdown. |
+| `GET` | `/api/power` | `screen=on\|off\|dim\|toggle`, `dim_timeout`, `sleep_timeout`, `auto_off`, `auto_off_battery_pct`, `reboot=1`, `power_off=1` | Manage power states, inactivity auto-off, protected-use battery threshold, reboot, and shutdown. |
 | `GET` | `/api/theme` | `mode=dark\|light` | Get or toggle system UI theme. |
 | `GET`/`POST`| `/api/snap` | `host=<ip>`, `port=<port>`, `vol=0..100`, `mute=0\|1`, `action=play\|pause\|reload` | Configure and control the Snapcast client. |
 | `GET` | `/api/gallery/files`| — | List LittleFS stored photos and flash partition space. |

@@ -136,7 +136,7 @@ void SettingsApp::renderToCanvas() {
                 }
                 case 7: {
                     uint8_t pct = powerManager ? powerManager->getAutoOffBatteryPercent() : prefs.getUChar("auto_off_pct", 5);
-                    if (pct == 0) snprintf(valBuf, sizeof(valBuf), "Off");
+                    if (pct == 0) snprintf(valBuf, sizeof(valBuf), "Always");
                     else          snprintf(valBuf, sizeof(valBuf), "%u%%", pct);
                     break;
                 }
@@ -169,9 +169,10 @@ void SettingsApp::renderToCanvas() {
                     else              snprintf(valBuf, sizeof(valBuf), "100%%");
                     break;
                 }
-                case 14: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
-                case 15: snprintf(valBuf, sizeof(valBuf), "Shut"); valCol = POKO_CLR_ERR; break;
-                case 16: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
+                case 14: snprintf(valBuf, sizeof(valBuf), prefs.getBool("video_fit", false) ? "Fit" : "Fill"); break;
+                case 15: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
+                case 16: snprintf(valBuf, sizeof(valBuf), "Shut"); valCol = POKO_CLR_ERR; break;
+                case 17: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
             }
 
             _canvas->setTextColor(valCol, isSel ? theme.surface : theme.bg);
@@ -267,7 +268,7 @@ void SettingsApp::applyAction() {
                 else              prefs.putUInt("auto_off", next);
                 break;
             }
-            case 7: { // Low-battery threshold: 3% -> 5% -> 10% -> Off -> 3%
+            case 7: { // Protected activity minimum: 3% -> 5% -> 10% -> Always -> 3%
                 uint8_t cur = powerManager ? powerManager->getAutoOffBatteryPercent() : prefs.getUChar("auto_off_pct", 5);
                 uint8_t next = cur == 3 ? 5 : (cur == 5 ? 10 : (cur == 10 ? 0 : 3));
                 if (powerManager) powerManager->setAutoOffBatteryPercent(next);
@@ -346,11 +347,15 @@ void SettingsApp::applyAction() {
                 pixelEngine.saveToPreferences(prefs);
                 break;
             }
-            case 14: { // Reset Drivers
+            case 14: { // Video View: Fill crop <-> Fit with black padding
+                prefs.putBool("video_fit", !prefs.getBool("video_fit", false));
+                break;
+            }
+            case 15: { // Reset Drivers
                 handleDriverReset();
                 break;
             }
-            case 15: { // Power Off (Graceful Shutdown)
+            case 16: { // Power Off (Graceful Shutdown)
                 if (powerManager) {
                     _canvas->fillScreen(POKO_CLR_ERR);
                     _canvas->setFont(u8g2_font_helvB10_tf);
@@ -363,7 +368,7 @@ void SettingsApp::applyAction() {
                 }
                 break;
             }
-            case 16: { // Reboot
+            case 17: { // Reboot
                 prefs.putBool("clean_shutdown", true);
                 _canvas->fillScreen(POKO_CLR_ERR);
                 _canvas->setFont(u8g2_font_helvB10_tf);
@@ -437,6 +442,20 @@ void SettingsApp::onEnter() {
 void SettingsApp::onHoldingLeft() { adjustHeldValue(-1); }
 
 void SettingsApp::onHoldingRight() { adjustHeldValue(1); }
+
+void SettingsApp::handleInput(InputEvent e) {
+        switch (e) {
+            case InputEvent::Left:         onLeft();         break;
+            case InputEvent::Right:        onRight();        break;
+            case InputEvent::LeftHolding:  onHoldingLeft();  break;
+            case InputEvent::RightHolding: onHoldingRight(); break;
+            case InputEvent::LeftDouble:
+            case InputEvent::Back:         onBack();         break;
+            case InputEvent::RightDouble:
+            case InputEvent::Enter:        onEnter();        break;
+            default: break;
+        }
+    }
 
 void SettingsApp::update() {
         if (!_active) return;

@@ -6,6 +6,7 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATED = (
     "AudioManager",
+    "AppManager",
     "BatteryManager",
     "ButtonInput",
     "ClockApp",
@@ -33,8 +34,17 @@ MIGRATED = (
     "VideoApp",
 )
 
-# Templates and third-party C interfaces are valid header-only exceptions.
-HEADER_EXCEPTIONS = {"PixelToggle", "PokoPins", "es8311", "es8311_reg"}
+# Templates, core interfaces/data declarations, and third-party C interfaces
+# are valid header-only exceptions.
+HEADER_EXCEPTIONS = {
+    "CoreIApp",
+    "CoreInputEvent",
+    "CoreSystemContext",
+    "PixelToggle",
+    "PokoPins",
+    "es8311",
+    "es8311_reg",
+}
 
 
 def main() -> int:

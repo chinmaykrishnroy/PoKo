@@ -192,7 +192,7 @@ class PlaybackTests(unittest.TestCase):
         config = load_config(_config_path)
         profile, fps, quality = resolve_video_tuning(config, synced=True, profile="quality", fps=99, jpeg_quality=1)
         self.assertEqual(profile, "quality")
-        self.assertEqual(fps, 20)
+        self.assertEqual(fps, 30)
         self.assertEqual(quality, 4)
 
     def _manager(self):

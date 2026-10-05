@@ -26,10 +26,11 @@ def main() -> int:
                     "busy-main-loop", "bounce", "overflow", "combo-click", "combo-double",
                     "combo-reboot", "combo-drivers", "combo-emergency"],
         "audio": ["suspend-transition", "suspend-timeout", "stop-all"],
-    "video": ["next", "next-page", "page-failure", "http-failure", "missing-refresh", "missing-empty", "load-failure", "stop-timeout", "next-stop-timeout"],
+    "video": ["next", "next-page", "page-failure", "http-failure", "missing-refresh", "missing-empty", "load-failure", "stop-timeout", "next-stop-timeout", "fit-query"],
         "marquee": ["scroll-and-wrap"],
         "pixel-toggle": ["preserves-color", "forces-solid", "turns-off"],
-        "power-policy": ["media-inhibits", "threshold-delay", "above-threshold", "charging-inhibits", "disabled"],
+        "power-policy": ["active-above-threshold-inhibits", "inactive-delay",
+                         "low-battery-overrides-activity", "charging-idle-still-powers-off", "disabled"],
         "battery": ["periodic-read-keeps-plug-event"],
     }
     sources = {

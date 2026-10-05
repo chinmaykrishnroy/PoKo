@@ -6,6 +6,12 @@ bool shouldAutoPowerOff(uint32_t delaySec,
                         int batteryPercent,
                         bool batteryPresent,
                         bool charging,
-                        bool mediaAppActive,
+                        bool protectedActivity,
                         bool shutdownLocked,
-                        uint32_t belowThresholdMs);
+                        uint32_t inactiveMs);
+
+bool protectedActivityCanInhibitAutoOff(uint8_t thresholdPercent,
+                                        int batteryPercent,
+                                        bool batteryPresent,
+                                        bool charging,
+                                        bool protectedActivity);

@@ -559,6 +559,18 @@ void GalleryApp::onEnter() {
         _dirty = true;
     }
 
+void GalleryApp::handleInput(InputEvent e) {
+        switch (e) {
+            case InputEvent::Left:        onLeft();  break;
+            case InputEvent::Right:       onRight(); break;
+            case InputEvent::LeftDouble:
+            case InputEvent::Back:        onBack();  break;
+            case InputEvent::RightDouble:
+            case InputEvent::Enter:       onEnter(); break;
+            default: break;
+        }
+    }
+
 void GalleryApp::update() {
         if (!_active) return;
         uint32_t now = millis();

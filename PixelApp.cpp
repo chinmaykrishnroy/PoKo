@@ -385,6 +385,20 @@ void PixelApp::onEnter() {
         applyAction();
     }
 
+void PixelApp::handleInput(InputEvent e) {
+        switch (e) {
+            case InputEvent::Left:         onLeft();         break;
+            case InputEvent::Right:        onRight();        break;
+            case InputEvent::LeftHolding:  onHoldingLeft();  break;
+            case InputEvent::RightHolding: onHoldingRight(); break;
+            case InputEvent::LeftDouble:
+            case InputEvent::Back:         onBack();         break;
+            case InputEvent::RightDouble:
+            case InputEvent::Enter:        onEnter();        break;
+            default: break;
+        }
+    }
+
 void PixelApp::update() {
         if (!_active) return;
         uint32_t now = millis();

@@ -17,6 +17,7 @@
 #include "SSyncApp.h"
 #include "MusicApp.h"
 #include "VideoApp.h"
+#include "SyncedAVPlayer.h"
 #include "GalleryApp.h"
 #include "PixelApp.h"
 #include "PixelToggle.h"
@@ -764,10 +765,12 @@ void loop() {
     btnInput.update();
     if (audioManager) audioManager->update();
     if (powerManager) {
-        bool mediaAppActive = activeApp == STATE_SSYNC || activeApp == STATE_MUSIC_UI ||
-                              activeApp == STATE_VIDEO_UI || activeApp == STATE_GALLERY_UI ||
-                              (audioManager && audioManager->activeSource() != AUDIO_NONE);
-        powerManager->setMediaAppActive(mediaAppActive);
+        bool protectedActivity = (snapService && snapService->isPlaying()) ||
+                                 (musicAppInstance && musicAppInstance->isPlaying()) ||
+                                 (videoAppInstance && videoAppInstance->isPlaying()) ||
+                                 (pixelEngine.getMode() == PIXEL_MODE_SOLID &&
+                                  pixelEngine.getBrightness() > 0);
+        powerManager->setProtectedActivity(protectedActivity);
         powerManager->update();
     }
 

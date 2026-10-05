@@ -122,17 +122,18 @@ These controls are active across the entire system regardless of the open applic
   4. **Amp Boost**: +0 dB $\rightarrow$ +1 dB $\rightarrow$ +2 dB $\rightarrow$ +3 dB $\rightarrow$ +4 dB $\rightarrow$ +5 dB
   5. **Dim Timeout**: Off $\rightarrow$ 5s $\rightarrow$ 10s $\rightarrow$ 15s $\rightarrow$ 30s $\rightarrow$ 60s
   6. **Sleep Timeout**: Off $\rightarrow$ 15s $\rightarrow$ 30s $\rightarrow$ 1m $\rightarrow$ 2m $\rightarrow$ 5m
-  7. **Auto-Off**: Low-battery shutdown delay: 10m $\rightarrow$ 15m $\rightarrow$ 30m $\rightarrow$ Never
-  8. **Off Battery %**: 3% $\rightarrow$ 5% $\rightarrow$ 10% $\rightarrow$ Off. SSync, Music, Video, and Gallery inhibit this timer while open.
+  7. **Auto-Off**: Inactivity shutdown delay: 10m $\rightarrow$ 15m $\rightarrow$ 30m $\rightarrow$ Never
+  8. **Protect >%**: 3% $\rightarrow$ 5% $\rightarrow$ 10% $\rightarrow$ Always. Active SSync, Music, Video, or the solid Pixel torch inhibits auto-off above this battery level. At or below it, the inactivity timer still shuts down the device.
   9. **Ambient Clock**: On $\leftrightarrow$ Off (keeps clock visible dimmed rather than sleeping screen)
   10. **WiFi Sleep**: Auto $\leftrightarrow$ Off
   11. **USB Mode**: `MaxPerf` $\leftrightarrow$ `Managed`
   12. **Slide Timer**: Off $\rightarrow$ 3s $\rightarrow$ 5s $\rightarrow$ 10s $\rightarrow$ 15s $\rightarrow$ 30s $\rightarrow$ 60s
   13. **SSync Auto**: On $\leftrightarrow$ Off (auto-connects Snapcast on boot/Wi-Fi)
   14. **LED Bright**: Off $\rightarrow$ 20% $\rightarrow$ 50% $\rightarrow$ 100%
-  15. **Reset Drivers**: Execute emergency re-initialization of peripheral drivers
-  16. **Power Off**: Orderly shutdown sequence
-  17. **Reboot**: Clean device reboot
+  15. **Video View**: `Fill` crops to cover 128×128; `Fit` preserves the full frame with black padding
+  16. **Reset Drivers**: Execute emergency re-initialization of peripheral drivers
+  17. **Power Off**: Orderly shutdown sequence
+  18. **Reboot**: Clean device reboot
 
 ---
 
@@ -150,7 +151,7 @@ These controls are active across the entire system regardless of the open applic
 ### 4.1 Battery Detection & Header Icon
 - **No Battery Present** ($V < 2.50\text{V}$):
   - The battery icon in the top header is **completely hidden**.
-  - Battery low-voltage cutoff and battery auto-off timeouts are automatically bypassed.
+  - Battery threshold rules are bypassed; inactivity auto-off still applies unless protected playback or the solid Pixel torch is active.
   - The device operates as a standing desktop terminal on USB power.
 - **Battery Present** ($V \ge 2.50\text{V}$):
   - Dynamic battery icon sits adjacent to the status bar clock.

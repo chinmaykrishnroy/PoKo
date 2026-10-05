@@ -1,8 +1,24 @@
 #include "VideoApp.h"
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <TJpg_Decoder.h>
+#include <U8g2lib.h>
+#include <Arduino_GFX_Library.h>
+#include <Preferences.h>
 #include <new>
+#include "PokoTheme.h"
+#include "PokoDrivers.h"
+#include "SyncedAVPlayer.h"
+#include "AudioManager.h"
+#include "PowerManager.h"
 
 Arduino_Canvas* VideoApp::_activeCanvas = nullptr;
 VideoApp* VideoApp::_instance = nullptr;
+
+bool VideoApp::isPlaying() const {
+        return _mode == MODE_PLAYING;
+    }
 
 bool VideoApp::tftOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
         if (_activeCanvas) {
@@ -185,9 +201,12 @@ void VideoApp::requestPlay(int idx, bool retryMissing) {
             return;
         }
         HTTPClient http;
+        bool fitVideo = prefs.getBool("video_fit", false);
+        String aspect = fitVideo ? "fit" : "square";
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
                      "/api/video/" + String(_videos[idx].id) +
-                     "/play?audio=true&aspect=square&profile=balanced&start=0&switch=false&notify=false&async=true";
+                     "/play?audio=true&aspect=" + aspect +
+                     "&profile=balanced&start=0&switch=false&notify=false&async=true";
         http.begin(url);
         http.setConnectTimeout(1000);
         http.setTimeout(3000);
@@ -585,3 +604,18 @@ void VideoApp::update() {
             renderToCanvas();
         }
     }
+
+// IApp::handleInput
+void VideoApp::handleInput(InputEvent e) {
+    switch (e) {
+        case InputEvent::Left:         onLeft();          break;
+        case InputEvent::Right:        onRight();         break;
+        case InputEvent::LeftHolding:  volumeRampDown(2); break;
+        case InputEvent::RightHolding: volumeRampUp(2);   break;
+        case InputEvent::LeftDouble:
+        case InputEvent::Back:         onBack();          break;
+        case InputEvent::RightDouble:
+        case InputEvent::Enter:        onEnter();         break;
+        default: break;
+    }
+}

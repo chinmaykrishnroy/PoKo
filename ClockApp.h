@@ -6,10 +6,10 @@
 #include "PokoAppState.h"
 #include "PokoPins.h"
 #include "PokoUI.h"
-
 #include "PokoTheme.h"
 #include "AudioManager.h"
 #include "PowerManager.h"
+#include "CoreIApp.h"
 
 extern PowerManager* powerManager;
 
@@ -18,7 +18,7 @@ extern PowerManager* powerManager;
 //  Uses Arduino_Canvas for zero-flicker double-buffered display.
 // ─────────────────────────────────────────────────────────────
 
-class ClockApp {
+class ClockApp : public IApp {
 private:
     Arduino_GFX*    _gfx;
     AppSwitchFn     _exit;
@@ -35,24 +35,21 @@ private:
 public:
     ClockApp(Arduino_GFX* gfx, AppSwitchFn exitFn);
 
-    void begin();
-
-    void load();
-
-    void unload();
+    // IApp interface
+    void begin()    override;
+    void load()     override;
+    void unload()   override;
+    void update()   override;
+    void refreshTheme() override;
+    const char* appName() const override { return "Clock"; }
+    bool isSafeForRestore() const override { return true; }
+    void handleInput(InputEvent e) override;
+    void onDisplayWake() override { load(); } // ClockApp re-loads on wake (NTP refresh)
 
     bool isLoaded() const;
-
-    void refreshTheme();
-
     void onLeft();
-
     void onRight();
-
     void onBack();
-
     void onEnter();
-
-    void update();
 };
 

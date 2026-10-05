@@ -35,8 +35,13 @@ auto* syncPlugin = &player;
 enum { HTTP_CODE_NOT_FOUND = 404 };
 int httpResult = 202, secondHttpResult = 202, requests = 0, listRequests = 0;
 bool listResult = true;
+std::string lastUrl;
+struct Preferences {
+    bool videoFit = false;
+    bool getBool(const char*, bool fallback) { return videoFit ? true : fallback; }
+} prefs;
 struct HTTPClient {
-    void begin(String) {} void setConnectTimeout(int) {} void setTimeout(int) {}
+    void begin(String url) { lastUrl = url; } void setConnectTimeout(int) {} void setTimeout(int) {}
     int GET() { ++requests; return requests == 1 ? httpResult : secondHttpResult; }
     void end() {}
 };

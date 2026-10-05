@@ -812,3 +812,18 @@ const char* MusicApp::getCurrentTitle() const {
 bool MusicApp::hasServerError() const {
         return _serverError;
     }
+
+// IApp::handleInput
+void MusicApp::handleInput(InputEvent e) {
+    switch (e) {
+        case InputEvent::Left:         onLeft();          break;
+        case InputEvent::Right:        onRight();         break;
+        case InputEvent::LeftHolding:  volumeRampDown(2); break;
+        case InputEvent::RightHolding: volumeRampUp(2);   break;
+        case InputEvent::LeftDouble:
+        case InputEvent::Back:         onBack();          break;
+        case InputEvent::RightDouble:
+        case InputEvent::Enter:        onEnter();         break;
+        default: break;
+    }
+}

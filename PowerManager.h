@@ -23,7 +23,7 @@
 //    - Smooth non-blocking backlight fading
 //    - Pop-safe speaker amplifier PA standby after audio idle
 //    - Dynamic Wi-Fi modem sleep vs. zero-jitter SSync protection
-//    - Battery monitoring and low-voltage auto-shutdown
+//    - Battery-aware inactivity auto-shutdown
 //    - Graceful power-off (BAT_EN = LOW / Deep Sleep fallback)
 // ─────────────────────────────────────────────────────────────
 
@@ -81,9 +81,9 @@ private:
     uint32_t              _sleepTimeoutSec     = 30;
     uint32_t              _autoOffSec          = 900; // 15 min default
     uint8_t               _autoOffBatteryPct   = 5;
-    bool                  _mediaAppActive      = false;
-    bool                  _lowBatteryTiming    = false;
-    uint32_t              _lowBatterySinceMs   = 0;
+    bool                  _protectedActivity   = false;
+    bool                  _autoOffTiming       = false;
+    uint32_t              _autoOffSinceMs      = 0;
     bool                  _ambientClockEnabled = false;
 
     // Backlight ramp
@@ -163,8 +163,8 @@ public:
     void setAutoOffBatteryPercent(uint8_t percent, bool persist = true);
     uint8_t getAutoOffBatteryPercent() const;
 
-    void setMediaAppActive(bool active);
-    bool isMediaAppActive() const;
+    void setProtectedActivity(bool active);
+    bool isProtectedActivity() const;
 
     void setAmbientClock(bool en);
     bool isAmbientClock() const;

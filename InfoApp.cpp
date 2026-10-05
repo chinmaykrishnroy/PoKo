@@ -378,3 +378,18 @@ String InfoApp::apiJson() {
         j += "}";
         return j;
     }
+
+// IApp::handleInput — routes typed input events to existing methods
+void InfoApp::handleInput(InputEvent e) {
+    switch (e) {
+        case InputEvent::Left:       onLeft();      break;
+        case InputEvent::Right:      onRight();     break;
+        case InputEvent::LeftDouble:
+        case InputEvent::Back:       onBack();      break;
+        case InputEvent::RightDouble:
+        case InputEvent::Enter:      onBack();      break;  // InfoApp: enter acts as back
+        case InputEvent::LongRight:  onLongRight(); break;
+        case InputEvent::LongLeft:   onLongLeft();  break;
+        default: break;
+    }
+}

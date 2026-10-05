@@ -13,6 +13,7 @@
 #include "PokoTheme.h"
 #include "TCPAudio.h"
 #include "AudioManager.h"
+#include "CoreIApp.h"
 
 // ─────────────────────────────────────────────────────────────
 //  MusicApp — Single-Song Audio Browser & MP3 TCP Stream Player
@@ -27,7 +28,7 @@
 extern Preferences prefs;
 extern TCPAudio* audioPlugin;
 
-class MusicApp {
+class MusicApp : public IApp {
 private:
     enum MusicMode {
         MODE_BROWSE,
@@ -112,48 +113,36 @@ public:
 
     ~MusicApp();
 
-    void begin();
-
-    void pausePlayback();
-
-    void resumePlayback();
-
-    void stopPlaybackInternal();
-
-    void stopPlayback();
-
-    void togglePlayPause();
-
-    bool prepareRemoteStream();
-
-    void load();
-
-    void unload();
+    // IApp interface
+    void begin()    override;
+    void load()     override;
+    void unload()   override;
+    void update()   override;
+    void refreshTheme() override;
+    const char* appName() const override { return "Music"; }
+    bool wantsHoldRepeat() const override { return true; }
+    bool isSafeForRestore() const override { return false; } // needs active network
+    void handleInput(InputEvent e) override;
+    void onDisplayWake() override {} // Music app manages display internally
 
     bool isLoaded() const;
 
-    void refreshTheme();
-
+    void pausePlayback();
+    void resumePlayback();
+    void stopPlaybackInternal();
+    void stopPlayback();
+    void togglePlayPause();
+    bool prepareRemoteStream();
     void onLeft();
-
     void onRight();
-
     void volumeRampDown(int step = 2);
-
     void volumeRampUp(int step = 2);
-
     void onBack();
-
     void onEnter();
-
     void onPlaybackEnded();
 
-    void update();
-
     bool isPlaying() const;
-
     const char* getCurrentTitle() const;
-
     bool hasServerError() const;
 };
 

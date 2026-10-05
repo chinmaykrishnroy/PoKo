@@ -8,6 +8,7 @@
 #include "PokoTheme.h"
 #include "PixelEngine.h"
 #include "AudioManager.h"
+#include "CoreIApp.h"
 
 // ─────────────────────────────────────────────────────────────
 //  PixelApp — On-device NeoPixel Ring Studio (128×128)
@@ -22,7 +23,7 @@
 extern Preferences prefs;
 extern AudioManager* audioManager;
 
-class PixelApp {
+class PixelApp : public IApp {
 private:
     Arduino_GFX*    _gfx;
     AppSwitchFn     _exit;
@@ -57,41 +58,34 @@ private:
     };
 
     void adjustScroll();
-
     uint16_t toRgb565(uint8_t r, uint8_t g, uint8_t b);
 
 public:
-    void renderToCanvas();
-
+    void renderToCanvas() override;
     void applyAction();
-
     void adjustCurrentValue(int delta);
 
 public:
     PixelApp(Arduino_GFX* gfx, AppSwitchFn exitFn);
 
-    void begin();
-
-    void load();
-
-    void unload();
+    // IApp interface
+    void begin()    override;
+    void load()     override;
+    void unload()   override;
+    void update()   override;
+    void refreshTheme() override;
+    const char* appName() const override { return "Pixels"; }
+    bool wantsHoldRepeat() const override { return true; }
+    bool isSafeForRestore() const override { return true; }
+    void handleInput(InputEvent e) override;
+    void onDisplayWake() override { renderToCanvas(); }
 
     bool isLoaded() const;
-
-    void refreshTheme();
-
     void onLeft();
-
     void onRight();
-
     void onHoldingLeft();
-
     void onHoldingRight();
-
     void onBack();
-
     void onEnter();
-
-    void update();
 };
 

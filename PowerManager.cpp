@@ -73,7 +73,7 @@ void PowerManager::begin() {
         _currentDuty = _targetDuty;
         setBacklight(_currentDuty);
 
-        Serial.printf("[power] PowerManager initialized (dim=%us, sleep=%us, auto_off=%us at <=%u%%, usb_perf=%s)\n",
+        Serial.printf("[power] PowerManager initialized (dim=%us, sleep=%us, auto_off=%us, protect_active_above=%u%%, usb_perf=%s)\n",
                       _dimTimeoutSec, _sleepTimeoutSec, _autoOffSec, _autoOffBatteryPct,
                       _usbPerfMax ? "MaxPerf" : "Managed");
     }
@@ -106,6 +106,7 @@ uint32_t PowerManager::getLocks() const {
 
 bool PowerManager::notifyUserActivity(ActivitySource src) {
         _lastActivityMs = millis();
+        _autoOffTiming = false;
 
         if (_displayState != DISPLAY_POWER_ACTIVE) {
             wakeDisplay();
@@ -353,26 +354,30 @@ void PowerManager::update() {
             }
         }
 
-        // 6. Low-battery Auto Power-Off. Media apps always inhibit this timer.
+        // 6. Inactivity Auto Power-Off. Active playback or the solid Pixel
+        // torch inhibits the timer while external power is present or the
+        // battery remains above the configured protection threshold.
         int batteryPct = (_battery && isBatteryPresent()) ? _battery->getPercentage() : -1;
+        bool batteryPresent = isBatteryPresent();
+        bool charging = _battery && _battery->isCharging();
         bool shutdownLocked = hasLock(POWER_LOCK_PREVENT_DEEP_SLEEP) || hasLock(POWER_LOCK_OTA);
-        bool eligible = _autoOffSec > 0 && _autoOffBatteryPct > 0 && isBatteryPresent() &&
-                        !_battery->isCharging() && !_mediaAppActive && !shutdownLocked &&
-                        batteryPct >= 0 && batteryPct <= _autoOffBatteryPct;
-        if (!eligible) {
-            _lowBatteryTiming = false;
+        bool activityInhibits = protectedActivityCanInhibitAutoOff(
+            _autoOffBatteryPct, batteryPct, batteryPresent, charging, _protectedActivity);
+        bool timerInhibited = _autoOffSec == 0 || shutdownLocked || activityInhibits;
+        if (timerInhibited) {
+            _autoOffTiming = false;
         } else {
-            if (!_lowBatteryTiming) {
-                _lowBatteryTiming = true;
-                _lowBatterySinceMs = now;
-                Serial.printf("[power] Battery at %d%% (threshold %u%%); auto-off timer started\n",
-                              batteryPct, _autoOffBatteryPct);
+            if (!_autoOffTiming) {
+                _autoOffTiming = true;
+                _autoOffSinceMs = now;
+                Serial.printf("[power] Inactivity auto-off timer started (delay=%us, battery=%d%%, protect_above=%u%%)\n",
+                              _autoOffSec, batteryPct, _autoOffBatteryPct);
             }
-            uint32_t lowBatteryMs = now - _lowBatterySinceMs;
+            uint32_t inactiveMs = now - _autoOffSinceMs;
             if (shouldAutoPowerOff(_autoOffSec, _autoOffBatteryPct, batteryPct,
-                                   true, false, _mediaAppActive, shutdownLocked, lowBatteryMs)) {
-                Serial.printf("[power] Battery <= %u%% for %u sec -> Auto Power-Off\n",
-                              _autoOffBatteryPct, _autoOffSec);
+                                   batteryPresent, charging, _protectedActivity,
+                                   shutdownLocked, inactiveMs)) {
+                Serial.printf("[power] Inactive for %u sec -> Auto Power-Off\n", _autoOffSec);
                 powerOff(false);
             }
         }
@@ -408,6 +413,7 @@ uint32_t PowerManager::getSleepTimeout() const { return _sleepTimeoutSec; }
 
 void PowerManager::setAutoOffTimeout(uint32_t sec, bool persist) {
         _autoOffSec = sec;
+        _autoOffTiming = false;
         if (persist && _prefs) _prefs->putUInt("auto_off", sec);
     }
 
@@ -415,18 +421,18 @@ uint32_t PowerManager::getAutoOffTimeout() const { return _autoOffSec; }
 
 void PowerManager::setAutoOffBatteryPercent(uint8_t percent, bool persist) {
         _autoOffBatteryPct = constrain(percent, 0, 100);
-        _lowBatteryTiming = false;
+        _autoOffTiming = false;
         if (persist && _prefs) _prefs->putUChar("auto_off_pct", _autoOffBatteryPct);
     }
 
 uint8_t PowerManager::getAutoOffBatteryPercent() const { return _autoOffBatteryPct; }
 
-void PowerManager::setMediaAppActive(bool active) {
-        if (_mediaAppActive != active) _lowBatteryTiming = false;
-        _mediaAppActive = active;
+void PowerManager::setProtectedActivity(bool active) {
+        if (_protectedActivity != active) _autoOffTiming = false;
+        _protectedActivity = active;
     }
 
-bool PowerManager::isMediaAppActive() const { return _mediaAppActive; }
+bool PowerManager::isProtectedActivity() const { return _protectedActivity; }
 
 void PowerManager::setAmbientClock(bool en) {
         _ambientClockEnabled = en;
@@ -488,8 +494,16 @@ String PowerManager::getTelemetryJson() const {
         json += String(_autoOffSec);
         json += ",\"auto_off_battery_pct\":";
         json += String(_autoOffBatteryPct);
+        json += ",\"protected_activity\":";
+        json += _protectedActivity ? "true" : "false";
+        // Kept for dashboard/client compatibility; semantics now mean actual
+        // protected playback or solid-torch activity, not an open media page.
         json += ",\"media_app_active\":";
-        json += _mediaAppActive ? "true" : "false";
+        json += _protectedActivity ? "true" : "false";
+        json += ",\"auto_off_timer_active\":";
+        json += _autoOffTiming ? "true" : "false";
+        json += ",\"auto_off_elapsed_sec\":";
+        json += _autoOffTiming ? String((millis() - _autoOffSinceMs) / 1000) : "0";
         json += ",\"ambient_clock\":";
         json += _ambientClockEnabled ? "true" : "false";
         json += ",\"idle_sec\":";
