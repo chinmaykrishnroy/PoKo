@@ -11,6 +11,7 @@ void PokoUI::drawStatusBar() {
         // Connected  -> Solid green
         // AP waiting -> Red blinking
         // AP client connected -> Solid red
+        // Hibernated -> Static medium pink
         bool blinkPhase = ((millis() / 350) % 2 == 0);
         uint16_t dotColor = 0;
         bool showDot = true;
@@ -25,6 +26,9 @@ void PokoUI::drawStatusBar() {
             int clients = WiFi.softAPgetStationNum();
             dotColor = pokoClrErr();
             showDot = (clients > 0) ? true : blinkPhase;
+        } else if (wifiState == STATE_WIFI_HIBERNATED) {
+            dotColor = POKO_CLR_WIFI_SLEEP;
+            showDot = true;
         }
 
         if (showDot) {
@@ -348,7 +352,9 @@ void PokoUI::update() {
         }
 
         bool audioBlinking = (audioManager && (audioManager->isSoundPlaying() || audioManager->hasError()));
-        bool wifiBlinking = (wifiState != STATE_WIFI_CONNECTED);
+        bool wifiBlinking = wifiState == STATE_WIFI_CONNECTING ||
+                            (wifiState == STATE_WIFI_AP &&
+                             WiFi.softAPgetStationNum() == 0);
         bool batteryBlinking = batteryManager.isPresent() && (batteryManager.isCharging() || (batteryManager.getPercentage() <= 15));
         uint32_t updateInterval = (audioBlinking || wifiBlinking || batteryBlinking) ? 200 : 1000;
         if (now - _lastStatusMs >= updateInterval) {

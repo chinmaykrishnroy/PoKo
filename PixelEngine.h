@@ -146,6 +146,7 @@ public:
 
     uint8_t getBrightness() const;
     void setBrightness(uint8_t b);
+    void blackoutNow();
 
     uint16_t getSpeed() const;
     void setSpeed(uint16_t s);

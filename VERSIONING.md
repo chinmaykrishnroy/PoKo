@@ -126,6 +126,7 @@ git push origin main --tags
 
 | Version | Date | Highlights |
 |---------|------|-----------|
+| v1.6.0 | 2026-10-06 | Media-safe staged power management, Wi-Fi hibernation, codec shutdown, battery smoothing, and wake hardening |
 | v1.5.0 | 2026-10-02 | Race-free inter-task state, safe worker shutdown, and graceful allocation failure handling |
 | v1.4.0 | 2026-10-01 | Declaration-only firmware modules, media-aware low-battery shutdown, and stronger CI regression checks |
 | v1.3.4 | 2026-09-30 | DHCP-safe server-pushed playback and color-preserving L+R Pixel toggle |
@@ -141,7 +142,7 @@ git push origin main --tags
 
 If a firmware update changes the NVS keys or value types, document it here and provide a migration note in the changelog. Users upgrading from an incompatible version may need to wipe NVS via the Settings app (hold L+R for 5 s).
 
-Current NVS keys (reviewed for v1.5.0):
+Current NVS keys (reviewed for v1.6.0):
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|

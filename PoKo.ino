@@ -70,6 +70,8 @@ String apPassword = "";
 bool webServerStarted = false;
 uint32_t staTimeoutMs = 15000;
 uint32_t apTimeoutMs  = 120000;
+bool networkWakeInProgress = false;
+AppState pendingNetworkApp = STATE_COUNT;
 
 bool startSetupAP() {
     static const char alphabet[] = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
@@ -97,9 +99,71 @@ void ensureWebServerStarted(const char* reason) {
                   (WiFi.getMode() & WIFI_AP) ? WiFi.softAPIP().toString().c_str() : WiFi.localIP().toString().c_str());
 }
 
+void hibernateNetwork() {
+    if (wifiState == STATE_WIFI_HIBERNATED) return;
+    Serial.println("[wifi] entering hibernate");
+    if (audioManager) {
+        if (audioManager->activeSource() == AUDIO_SSYNC) {
+            audioManager->stopActiveSession();
+        } else if (audioManager->suspendedSource() == AUDIO_SSYNC) {
+            audioManager->setSuspendedSource(AUDIO_NONE);
+        }
+    }
+    if (snapService && snapService->isLoaded()) {
+        snapService->stop();
+        snapService->unload();
+    }
+    shutdownAudioOutputHardware();
+    dnsServer.stop();
+    if (webServerStarted) {
+        server.stop();
+        webServerStarted = false;
+    }
+    WiFi.disconnect(false, false);
+    WiFi.mode(WIFI_OFF);
+    wifiState = STATE_WIFI_HIBERNATED;
+    if (powerManager) powerManager->setWifiHibernated(true);
+}
+
+void wakeNetwork() {
+    if (wifiState != STATE_WIFI_HIBERNATED) return;
+    networkWakeInProgress = true;
+    if (powerManager) powerManager->setWifiHibernated(false);
+    if (savedSSID.length() > 0) {
+        WiFi.mode(WIFI_STA);
+        WiFi.setSleep(false);
+        WiFi.begin(savedSSID.c_str(), savedPass.c_str());
+        wifiTimer = millis();
+        wifiState = STATE_WIFI_CONNECTING;
+        Serial.println("[wifi] waking from hibernate");
+    } else if (!startSetupAP()) {
+        wifiState = STATE_WIFI_CONNECTING;
+        wifiTimer = millis();
+    }
+}
+
+bool appNeedsNetwork(AppState state) {
+    return state == STATE_SSYNC || state == STATE_MUSIC_UI ||
+           state == STATE_VIDEO_UI || state == STATE_GALLERY_UI;
+}
+
+bool ensureNetworkReady(AppState pendingApp) {
+    bool hibernated = wifiState == STATE_WIFI_HIBERNATED;
+    if (networkActionShouldWait(appNeedsNetwork(pendingApp),
+                                wifiState == STATE_WIFI_CONNECTED,
+                                networkWakeInProgress, hibernated)) {
+        pendingNetworkApp = pendingApp;
+        Serial.printf("[wifi] deferring app=%d until network is usable\n", (int)pendingApp);
+        if (wifiState == STATE_WIFI_HIBERNATED) wakeNetwork();
+        return false;
+    }
+    return true;
+}
+
 String getNetworkStatusMsg() {
     if (wifiState == STATE_WIFI_CONNECTED) return "";
     if (wifiState == STATE_WIFI_AP) return "AP:POKO_SETUP";
+    if (wifiState == STATE_WIFI_HIBERNATED) return "WiFi asleep";
     return "Connecting...";
 }
 
@@ -201,6 +265,8 @@ void showThemedLoadingScreen(AppState state) {
 // ── Central App Switcher (Exclusive Resource Model) ───────────
 void onAppChange(AppState newState) {
     if (newState == activeApp) return;
+
+    if (!ensureNetworkReady(newState)) return;
 
     Serial.printf("[app] switch %d -> %d\n", (int)activeApp, (int)newState);
 
@@ -482,8 +548,26 @@ void onComboBothUltra() {
     ESP.restart();
 }
 
+void enterChargeOnlySleep() {
+    Serial.println("[power] charge-only boot: CHG_STAT active after clean power-off");
+    powerLatchOff();
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+    uint64_t wakeMask = 0;
+    for (int pin : {POKO_PIN_BTN_PWR, POKO_PIN_BTN_DOWN, POKO_PIN_BTN_UP}) {
+        pinMode(pin, INPUT_PULLUP);
+        rtc_gpio_pullup_en((gpio_num_t)pin);
+        rtc_gpio_pulldown_dis((gpio_num_t)pin);
+        if (digitalRead(pin) != LOW) wakeMask |= 1ULL << pin;
+    }
+    if (wakeMask) esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
+    Serial.println("[power] DEEP_SLEEP reason=charge_only wake=button");
+    Serial.flush();
+    esp_deep_sleep_start();
+}
+
 // ── Arduino Setup ─────────────────────────────────────────────
 void setup() {
+    if (completePendingIdlePowerOffWake()) return;
     powerLatchOn();
     Serial.begin(115200);
     delay(100);
@@ -504,6 +588,15 @@ void setup() {
                             rstReason == ESP_RST_WDT ||
                             rstReason == ESP_RST_BROWNOUT);
     bool cleanShutdown = prefs.getBool("clean_shutdown", false);
+    pinMode(POKO_PIN_BTN_PWR, INPUT_PULLUP);
+    bool powerButtonHeld = digitalRead(POKO_PIN_BTN_PWR) == LOW;
+    if (rstReason == ESP_RST_POWERON && cleanShutdown &&
+        batteryManager.isCharging() && !powerButtonHeld) {
+        // CHG_STAT cannot reveal VBUS once charge termination deasserts it.
+        // This safe subset catches USB insertion while actively charging;
+        // full-battery USB insertion remains indistinguishable from normal boot.
+        enterChargeOnlySleep();
+    }
     prefs.putBool("clean_shutdown", false);
 
     // Track consecutive crashes to prevent endless reboot loops
@@ -574,8 +667,9 @@ void setup() {
     // 2. Backlight (attached, kept OFF until UI is drawn)
     initBacklight();
 
-    // 3. Audio Codec (ES8311) & I2S Master Clock
-    ensureAudioOutput(44100);
+    // 3. Cache audio settings without starting I2S/MCLK or the codec.
+    // Each audio client initializes the output lazily when playback starts.
+    standbyAudioOutputHardware();
     int savedMaster = prefs.getInt("master_vol", 100);
     setMasterVolumeLimit(savedMaster);
     int savedVol = prefs.getInt("volume", 75);
@@ -590,6 +684,7 @@ void setup() {
     // 5. Button Input Setup (3 physical buttons: DOWN=0, UP=4, PWR=5)
     btnInput.onPress([]() -> bool {
         if (!powerManager) return false;
+        wakeNetwork();
         auto state = powerManager->getDisplayState();
         if (state == DISPLAY_POWER_OFF || state == DISPLAY_POWER_SLEEP) {
             powerManager->wakeDisplay();
@@ -672,7 +767,9 @@ void setup() {
 
     // Register display wake callback to immediately repaint the active app
     if (powerManager) {
+        powerManager->setNetworkCallbacks(hibernateNetwork, wakeNetwork);
         powerManager->setWakeCallback([]() {
+            wakeNetwork();
             if (activeApp == STATE_LAUNCHER && pokoUI) {
                 pokoUI->renderDirect();
             } else if (activeApp == STATE_INFO && infoAppInstance) {
@@ -765,12 +862,17 @@ void loop() {
     btnInput.update();
     if (audioManager) audioManager->update();
     if (powerManager) {
-        bool protectedActivity = (snapService && snapService->isPlaying()) ||
-                                 (musicAppInstance && musicAppInstance->isPlaying()) ||
-                                 (videoAppInstance && videoAppInstance->isPlaying()) ||
-                                 (pixelEngine.getMode() == PIXEL_MODE_SOLID &&
-                                  pixelEngine.getBrightness() > 0);
-        powerManager->setProtectedActivity(protectedActivity);
+        ProtectedActivityKind protectedKind = PROTECTED_NONE;
+        if (snapService && snapService->isPlaying()) protectedKind = PROTECTED_SSYNC;
+        else if (musicAppInstance && musicAppInstance->isPlaying()) protectedKind = PROTECTED_MUSIC;
+        else if (videoAppInstance && videoAppInstance->isPlaying()) protectedKind = PROTECTED_VIDEO;
+        else if (pixelEngine.getMode() == PIXEL_MODE_SOLID &&
+                 pixelEngine.getBrightness() > 0 &&
+                 pixelEngine.getTargetMask() != 0 &&
+                 (pixelEngine.getR() != 0 || pixelEngine.getG() != 0 ||
+                  pixelEngine.getB() != 0)) protectedKind = PROTECTED_TORCH;
+        powerManager->setProtectedActivity(protectedKind != PROTECTED_NONE,
+                                           protectedKind);
         powerManager->update();
     }
 
@@ -833,6 +935,16 @@ void loop() {
                     }
                 }
             }
+            if (networkWakeInProgress) {
+                networkWakeInProgress = false;
+                AppState readyApp = pendingNetworkApp;
+                pendingNetworkApp = STATE_COUNT;
+                if (readyApp != STATE_COUNT) {
+                    Serial.printf("[wifi] network ready; resuming deferred app=%d\n",
+                                  (int)readyApp);
+                    onAppChange(readyApp);
+                }
+            }
         } else if (millis() - wifiTimer > staTimeoutMs) {
             Serial.println("[wifi] connection timeout -> fallback to AP mode");
             WiFi.disconnect();
@@ -843,6 +955,12 @@ void loop() {
                 Serial.println("[wifi] AP fallback failed to start");
             }
             if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
+            if (networkWakeInProgress) {
+                networkWakeInProgress = false;
+                AppState failedApp = pendingNetworkApp;
+                pendingNetworkApp = STATE_COUNT;
+                if (failedApp != STATE_COUNT) onAppChange(failedApp);
+            }
         }
     } else if (wifiState == STATE_WIFI_AP) {
         dnsServer.processNextRequest();
@@ -874,7 +992,7 @@ void loop() {
     }
 
     // Web Server requests
-    server.handleClient();
+    if (webServerStarted) server.handleClient();
 
     // Active App execution
     if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->update();
@@ -896,5 +1014,10 @@ void loop() {
     bool isMusicPlaying = (musicAppInstance && musicAppInstance->isPlaying());
     bool isSSyncPlaying = (snapService && snapService->isPlaying());
     pixelEngine.update(isMusicPlaying, isSSyncPlaying);
+
+    if (powerManager) {
+        uint8_t yieldMs = powerManager->recommendedLoopYieldMs();
+        if (yieldMs > 0) vTaskDelay(pdMS_TO_TICKS(yieldMs));
+    }
 }
 

@@ -38,7 +38,7 @@ private:
     int8_t   _holdDirection = 0;
     int8_t   _pendingItem = -1;
 
-    static constexpr uint8_t ITEM_COUNT   = 18;
+    static constexpr uint8_t ITEM_COUNT   = 23;
     static constexpr uint8_t ROW_H        = 16;
     static constexpr uint8_t TOP_Y        = 14;
     static constexpr uint8_t ROWS_VISIBLE = 6;
@@ -55,7 +55,12 @@ private:
         "Protect >%",
         "Ambient Clock",
         "WiFi Sleep",
-        "USB Mode",
+        "WiFi Hibernate",
+        "Light Sleep",
+        "Deep Sleep",
+        "Idle CPU",
+        "Loop Yield",
+        "Charge Perf",
         "Slide Timer",
         "SSync Auto",
         "LED Bright",

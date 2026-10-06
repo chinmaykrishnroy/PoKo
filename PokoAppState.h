@@ -6,7 +6,12 @@ enum AppState {
     STATE_SSYNC, STATE_GALLERY_UI, STATE_PIXELS_UI, STATE_SETTINGS_UI, STATE_COUNT
 };
 
-enum WifiModeState { STATE_WIFI_CONNECTING, STATE_WIFI_CONNECTED, STATE_WIFI_AP };
+enum WifiModeState {
+    STATE_WIFI_CONNECTING,
+    STATE_WIFI_CONNECTED,
+    STATE_WIFI_AP,
+    STATE_WIFI_HIBERNATED
+};
 extern WifiModeState wifiState;
 using AppSwitchFn = void (*)(AppState);
 

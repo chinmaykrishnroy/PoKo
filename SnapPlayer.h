@@ -110,6 +110,7 @@ private:
     std::atomic<bool> _syncing{false};
     std::atomic<bool> _reconnectRequested{false};
     std::atomic<bool> _playStarted{false};
+    std::atomic<uint32_t> _lastAudibleMs{0};
     std::atomic<bool> _playReleased{false};
     std::atomic<bool> _isSuspended{false};
     std::atomic<bool> _suspendDrainRequested{false};

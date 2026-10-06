@@ -30,8 +30,15 @@ def main() -> int:
         "marquee": ["scroll-and-wrap"],
         "pixel-toggle": ["preserves-color", "forces-solid", "turns-off"],
         "power-policy": ["active-above-threshold-inhibits", "inactive-delay",
-                         "low-battery-overrides-activity", "charging-idle-still-powers-off", "disabled"],
-        "battery": ["periodic-read-keeps-plug-event"],
+                         "low-battery-overrides-activity", "charging-idle-still-powers-off", "disabled",
+                         "display-independent-timeouts", "idle-power-stages",
+                         "continuous-media-blocks-all-stages",
+                         "media-stop-starts-idle-progression",
+                         "media-low-battery-override",
+                         "light-sleep-next-deadline",
+                         "network-wake-defers-actions"],
+        "battery": ["periodic-read-keeps-plug-event", "percentage-slew"],
+        "audio-activity": ["silence", "audible-positive", "audible-negative"],
     }
     sources = {
         "buttons": [HERE / "buttons.cpp", ROOT / "ButtonInput.cpp", args.onebutton / "OneButton.cpp"],
@@ -41,6 +48,7 @@ def main() -> int:
         "pixel-toggle": [HERE / "pixel_toggle.cpp"],
         "power-policy": [HERE / "power_policy.cpp", ROOT / "PowerPolicy.cpp"],
         "battery": [HERE / "battery.cpp", ROOT / "BatteryManager.cpp"],
+        "audio-activity": [HERE / "audio_activity.cpp", ROOT / "AudioActivity.cpp"],
     }
     # Real OneButton must precede stubs/OneButton.h. Only Arduino hardware is mocked.
     includes = [args.onebutton, HERE / "stubs", HERE, ROOT]

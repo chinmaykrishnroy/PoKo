@@ -139,6 +139,16 @@ void standbyAudioOutputHardware() {
     setSpeakerAmp(false);
 }
 
+void shutdownAudioOutputHardware() {
+    standbyAudioOutputHardware();
+    if (_es8311Handle) es8311_power_down(_es8311Handle);
+    deinitI2S();
+    if (_es8311Handle) {
+        es8311_delete(_es8311Handle);
+        _es8311Handle = nullptr;
+    }
+}
+
 void restoreAudioOutputHardware() {
     setSpeakerAmp(true);
     vTaskDelay(pdMS_TO_TICKS(15));
@@ -415,6 +425,7 @@ void setLEDBrightness(uint8_t b) {
 
 void turnOffLEDs() {
     pixelEngine.setMode(PIXEL_MODE_OFF);
+    pixelEngine.blackoutNow();
 }
 
 // ── Driver reset (called on 5-second both-hold combo) ────────

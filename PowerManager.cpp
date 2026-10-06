@@ -1,6 +1,43 @@
 #include "PowerManager.h"
 #include <esp_task_wdt.h>
 
+static constexpr uint32_t IDLE_POWEROFF_MAGIC = 0x504F4B4FU;
+RTC_DATA_ATTR static uint32_t pendingIdlePowerOff = 0;
+
+static const char* protectedKindName(ProtectedActivityKind kind) {
+        switch (kind) {
+            case PROTECTED_SSYNC: return "SSYNC";
+            case PROTECTED_MUSIC: return "MUSIC";
+            case PROTECTED_VIDEO: return "VIDEO";
+            case PROTECTED_TORCH: return "TORCH";
+            default: return "NONE";
+        }
+    }
+
+static uint64_t buttonWakeMask() {
+        uint64_t mask = 0;
+        for (int pin : {POKO_PIN_BTN_PWR, POKO_PIN_BTN_DOWN, POKO_PIN_BTN_UP}) {
+            pinMode(pin, INPUT_PULLUP);
+            rtc_gpio_pullup_en((gpio_num_t)pin);
+            rtc_gpio_pulldown_dis((gpio_num_t)pin);
+            if (digitalRead(pin) != LOW) mask |= 1ULL << pin;
+        }
+        return mask;
+    }
+
+bool completePendingIdlePowerOffWake() {
+        bool timerPowerOff = pendingIdlePowerOff == IDLE_POWEROFF_MAGIC &&
+                             esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
+        pendingIdlePowerOff = 0;
+        if (!timerPowerOff) return false;
+
+        powerLatchOff();
+        uint64_t wakeMask = buttonWakeMask();
+        if (wakeMask) esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
+        esp_deep_sleep_start();
+        return true;
+    }
+
 void PowerManager::_recalcLocks() {
         uint32_t combined = 0;
         for (uint8_t i = 0; i < LOCK_OWNER_COUNT; i++) {
@@ -10,6 +47,12 @@ void PowerManager::_recalcLocks() {
     }
 
 void PowerManager::setWakeCallback(std::function<void()> cb) { _wakeCb = cb; }
+
+void PowerManager::setNetworkCallbacks(std::function<void()> hibernateCb,
+                                       std::function<void()> wakeCb) {
+        _wifiHibernateCb = hibernateCb;
+        _networkWakeCb = wakeCb;
+    }
 
 uint8_t PowerManager::percentToDuty(int pct) const {
         pct = constrain(pct, 0, 100);
@@ -24,7 +67,9 @@ bool PowerManager::isBatteryPresent() const {
         return _battery && _battery->isPresent();
     }
 
-bool PowerManager::isUsbPowered() const {
+bool PowerManager::hasSustainedPowerForMaxPerformance() const {
+        // CHG_STAT proves only that charging is active right now. It is useful
+        // for this performance decision, but is not USB/VBUS detection.
         return !isBatteryPresent() || (_battery && _battery->isCharging());
     }
 
@@ -35,14 +80,76 @@ bool PowerManager::isUsbPerfMax() const {
 void PowerManager::setUsbPerfMax(bool en) {
         _usbPerfMax = en;
         if (_prefs) _prefs->putBool("usb_perf", en);
-        if (_usbPerfMax && isUsbPowered()) {
+        if (_usbPerfMax && hasSustainedPowerForMaxPerformance()) {
             WiFi.setSleep(false);
             _wifiSleepEnabled = false;
         }
     }
 
+void PowerManager::setWifiSleepAllowed(bool en, bool persist) {
+        if (persist && _prefs) _prefs->putBool("wifi_sleep", en);
+        bool perfOverride = isMaxPerfActive() || hasLock(POWER_LOCK_REALTIME_NET) ||
+                            hasLock(POWER_LOCK_OTA);
+        bool enableNow = en && !perfOverride && WiFi.status() == WL_CONNECTED;
+        WiFi.setSleep(enableNow);
+        _wifiSleepEnabled = enableNow;
+    }
+
+bool PowerManager::isWifiSleepAllowed() const {
+        return _prefs ? _prefs->getBool("wifi_sleep", true) : true;
+    }
+
+void PowerManager::setWifiHibernated(bool hibernated) {
+        _wifiHibernated = hibernated;
+    }
+
+bool PowerManager::isWifiHibernated() const { return _wifiHibernated; }
+
+void PowerManager::setWifiHibernateTimeout(uint32_t sec, bool persist) {
+        _wifiHibernateSec = sec > uint32_t{604800} ? uint32_t{604800} : sec;
+        if (persist && _prefs) _prefs->putUInt("wifi_hib", _wifiHibernateSec);
+    }
+
+uint32_t PowerManager::getWifiHibernateTimeout() const { return _wifiHibernateSec; }
+
+void PowerManager::setLightSleepTimeout(uint32_t sec, bool persist) {
+        _lightSleepSec = sec > uint32_t{604800} ? uint32_t{604800} : sec;
+        if (persist && _prefs) _prefs->putUInt("light_sleep", _lightSleepSec);
+    }
+
+uint32_t PowerManager::getLightSleepTimeout() const { return _lightSleepSec; }
+
+void PowerManager::setDeepSleepTimeout(uint32_t sec, bool persist) {
+        _deepSleepSec = sec > uint32_t{604800} ? uint32_t{604800} : sec;
+        if (persist && _prefs) _prefs->putUInt("deep_sleep", _deepSleepSec);
+    }
+
+uint32_t PowerManager::getDeepSleepTimeout() const { return _deepSleepSec; }
+
+void PowerManager::setIdleCpuMhz(uint8_t mhz, bool persist) {
+        _idleCpuMhz = mhz >= 160 ? 160 : 80;
+        if (persist && _prefs) _prefs->putUChar("idle_cpu", _idleCpuMhz);
+    }
+
+uint8_t PowerManager::getIdleCpuMhz() const { return _idleCpuMhz; }
+
+void PowerManager::setLoopYieldMs(uint8_t ms, bool persist) {
+        _loopYieldMs = constrain(ms, 0, 20);
+        if (persist && _prefs) _prefs->putUChar("loop_yield", _loopYieldMs);
+    }
+
+uint8_t PowerManager::getLoopYieldMs() const { return _loopYieldMs; }
+
+uint8_t PowerManager::recommendedLoopYieldMs() const {
+        if (_protectedActivity ||
+            hasLock(POWER_LOCK_AUDIO | POWER_LOCK_REALTIME_NET | POWER_LOCK_OTA)) {
+            return 0;
+        }
+        return _loopYieldMs;
+    }
+
 bool PowerManager::isMaxPerfActive() const {
-        return !isBatteryPresent() || (isUsbPowered() && _usbPerfMax);
+        return _usbPerfMax && hasSustainedPowerForMaxPerformance();
     }
 
 bool PowerManager::isAmbientClockEnabled() const {
@@ -56,6 +163,7 @@ PowerManager::PowerManager(BatteryManager* bat, AudioManager* audio, Preferences
 
 void PowerManager::begin() {
         _lastActivityMs = millis();
+        _lastProtectedActivityMs = _lastActivityMs;
         _lastAudioActiveMs = millis();
 
         if (_prefs) {
@@ -65,6 +173,11 @@ void PowerManager::begin() {
             _autoOffBatteryPct = constrain(_prefs->getUChar("auto_off_pct", 5), 0, 100);
             _ambientClockEnabled = _prefs->getBool("ambient_clock", false);
             _usbPerfMax = _prefs->getBool("usb_perf", true);
+            _wifiHibernateSec = _prefs->getUInt("wifi_hib", 120);
+            _lightSleepSec = _prefs->getUInt("light_sleep", 120);
+            _deepSleepSec = _prefs->getUInt("deep_sleep", 600);
+            _idleCpuMhz = _prefs->getUChar("idle_cpu", 80) >= 160 ? 160 : 80;
+            _loopYieldMs = constrain(_prefs->getUChar("loop_yield", 2), 0, 20);
             _userBrightnessPercent = constrain(_prefs->getInt("brightness", 80), 1, 100);
         }
 
@@ -73,8 +186,10 @@ void PowerManager::begin() {
         _currentDuty = _targetDuty;
         setBacklight(_currentDuty);
 
-        Serial.printf("[power] PowerManager initialized (dim=%us, sleep=%us, auto_off=%us, protect_active_above=%u%%, usb_perf=%s)\n",
-                      _dimTimeoutSec, _sleepTimeoutSec, _autoOffSec, _autoOffBatteryPct,
+        Serial.printf("[power] PowerManager initialized (dim=%us, sleep=%us, auto_off=%us, wifi_hib=%us, light=%us, deep=%us, idle_cpu=%uMHz, yield=%ums, protect_active_above=%u%%, usb_perf=%s)\n",
+                      _dimTimeoutSec, _sleepTimeoutSec, _autoOffSec,
+                      _wifiHibernateSec, _lightSleepSec, _deepSleepSec,
+                      _idleCpuMhz, _loopYieldMs, _autoOffBatteryPct,
                       _usbPerfMax ? "MaxPerf" : "Managed");
     }
 
@@ -106,7 +221,6 @@ uint32_t PowerManager::getLocks() const {
 
 bool PowerManager::notifyUserActivity(ActivitySource src) {
         _lastActivityMs = millis();
-        _autoOffTiming = false;
 
         if (_displayState != DISPLAY_POWER_ACTIVE) {
             wakeDisplay();
@@ -148,7 +262,7 @@ void PowerManager::dimDisplay() {
         int dimmedPct = max(5, userBr / 4);
         _targetDuty = percentToDuty(dimmedPct);
 
-        Serial.printf("[power] Display DIMMED (brightness=%d%%)\n", dimmedPct);
+        Serial.printf("[power] ACTIVE -> DISPLAY_DIMMED brightness=%d%%\n", dimmedPct);
     }
 
 void PowerManager::sleepDisplay() {
@@ -166,7 +280,9 @@ void PowerManager::sleepDisplay() {
             turnOffLEDs();
         }
 
-        Serial.println("[power] Display SLEEP / OFF");
+        Serial.printf("[power] DISPLAY -> DISPLAY_OFF locks=%lu protected_media=%s idle_ms=%lu\n",
+                      (unsigned long)getLocks(), _protectedActivity ? "true" : "false",
+                      (unsigned long)(millis() - _lastActivityMs));
     }
 
 void PowerManager::toggleScreen() {
@@ -187,9 +303,9 @@ void PowerManager::powerOff(bool restart) {
         p.putBool("clean_shutdown", true);
         p.end();
 
-        // 2. Stop audio pipelines and put hardware into pop-free standby
+        // 2. Stop audio pipelines and fully power down codec/I2S
         if (_audio) _audio->stopAll();
-        standbyAudioOutputHardware();
+        shutdownAudioOutputHardware();
 
         // 3. Turn off LEDs
         turnOffLEDs();
@@ -218,7 +334,7 @@ void PowerManager::powerOff(bool restart) {
 
         // 7. If USB power is attached, the board remains powered.
         // USB fallback: all three active-low RTC GPIO buttons can wake the chip.
-        Serial.println("[power] USB power active or fallback; entering Deep Sleep with GPIO wake...");
+        Serial.println("[power] Latch released; entering Deep Sleep with GPIO wake fallback");
         // Wait for the shutdown gesture to release, otherwise ANY_LOW wakes
         // immediately. RTC pull-ups keep the active-low inputs stable in sleep.
         uint32_t releaseStart = millis();
@@ -237,8 +353,64 @@ void PowerManager::powerOff(bool restart) {
         esp_deep_sleep_start();
     }
 
+void PowerManager::_enterLightSleep(uint32_t idleMs) {
+        esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+        uint64_t wakeMask = buttonWakeMask();
+        if (wakeMask) esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
+        uint32_t wakeMs = nextLightSleepWakeMs(idleMs, _deepSleepSec, _autoOffSec);
+        esp_sleep_enable_timer_wakeup((uint64_t)wakeMs * 1000ULL);
+        Serial.printf("[power] LIGHT_SLEEP enter reason=idle wake_in_ms=%lu locks=%lu protected_media=%s idle_ms=%lu\n",
+                      (unsigned long)wakeMs, (unsigned long)getLocks(),
+                      _protectedActivity ? "true" : "false", (unsigned long)idleMs);
+        esp_light_sleep_start();
+
+        esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+        for (int pin : {POKO_PIN_BTN_PWR, POKO_PIN_BTN_DOWN, POKO_PIN_BTN_UP}) {
+            rtc_gpio_hold_dis((gpio_num_t)pin);
+            rtc_gpio_deinit((gpio_num_t)pin);
+            pinMode(pin, INPUT_PULLUP);
+        }
+        Serial.printf("[power] LIGHT_SLEEP wake cause=%d\n", (int)cause);
+        if (cause == ESP_SLEEP_WAKEUP_EXT1) {
+            notifyUserActivity(ACTIVITY_BUTTON);
+            if (_networkWakeCb) _networkWakeCb();
+        }
+    }
+
+void PowerManager::_enterDeepIdle(uint32_t idleMs) {
+        Serial.printf("[power] DEEP_SLEEP reason=idle_reboot_with_rtc_state locks=%lu protected_media=%s idle_ms=%lu\n",
+                      (unsigned long)getLocks(), _protectedActivity ? "true" : "false",
+                      (unsigned long)idleMs);
+        if (_audio) _audio->stopAll();
+        shutdownAudioOutputHardware();
+        turnOffLEDs();
+        setBacklight(0);
+        displaySleep();
+        if (_wifiHibernateCb && !_wifiHibernated) _wifiHibernateCb();
+        WiFi.disconnect(false, false);
+        WiFi.mode(WIFI_OFF);
+
+        esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+        uint64_t wakeMask = buttonWakeMask();
+        if (wakeMask) esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
+
+        uint64_t autoOffMs = (uint64_t)_autoOffSec * 1000ULL;
+        if (_autoOffSec > 0 && autoOffMs > idleMs) {
+            pendingIdlePowerOff = IDLE_POWEROFF_MAGIC;
+            esp_sleep_enable_timer_wakeup((autoOffMs - idleMs) * 1000ULL);
+        } else {
+            pendingIdlePowerOff = 0;
+        }
+        esp_deep_sleep_start();
+    }
+
 void PowerManager::update() {
         uint32_t now = millis();
+        bool protectedMedia = protectedMediaHeld(
+            _protectedActivity, now, _lastProtectedActivityMs);
+        uint32_t userIdleMs = now - _lastActivityMs;
+        uint32_t powerIdleMs = effectivePowerIdleMs(
+            now, _lastActivityMs, _lastProtectedActivityMs);
 
         // 1. Update Battery Monitor
         if (_battery) {
@@ -258,13 +430,17 @@ void PowerManager::update() {
             }
         }
 
-        // 1b. CPU Frequency Scaling — 240 MHz on USB/charging (MaxPerf), 160 MHz on battery
+        // 1b. CPU Frequency Scaling — 240 MHz for explicit performance,
+        // 160 MHz while interactive, configurable 80/160 MHz while screen-off idle.
         {
             bool wantMax = isMaxPerfActive() || hasLock(POWER_LOCK_OTA) || hasLock(POWER_LOCK_REALTIME_NET);
-            uint32_t targetMhz = wantMax ? 240 : 160;
+            bool interactive = _displayState != DISPLAY_POWER_OFF || protectedMedia ||
+                               hasLock(POWER_LOCK_DISPLAY | POWER_LOCK_AUDIO);
+            uint32_t targetMhz = wantMax ? 240 : (interactive ? 160 : _idleCpuMhz);
             if (getCpuFrequencyMhz() != targetMhz) {
                 setCpuFrequencyMhz(targetMhz);
-                Serial.printf("[power] CPU -> %u MHz (%s)\n", targetMhz, wantMax ? "MaxPerf/USB" : "Battery/Managed");
+                Serial.printf("[power] CPU -> %u MHz (%s)\n", targetMhz,
+                              wantMax ? "MaxPerf/Realtime" : (interactive ? "Interactive" : "Idle"));
             }
         }
 
@@ -272,9 +448,18 @@ void PowerManager::update() {
         if (_audio) {
             AudioSource src = _audio->activeSource();
             bool isRendering = _audio->isSoundPlaying();
+            if (_audio->hasActiveSession() && poko_tx_handle) {
+                _audioHardwareOff = false;
+            }
 
             if (isRendering) {
                 _lastAudioActiveMs = now;
+            }
+            bool keepAudioPowered = isRendering ||
+                (_audio->hasActiveSession() &&
+                 (now - _lastAudioActiveMs) < 5000);
+
+            if (keepAudioPowered) {
                 acquireLock(POWER_LOCK_AUDIO, LOCK_OWNER_AUDIO);
 
                 // SSync and Video only lock low-latency Wi-Fi while actively rendering
@@ -286,6 +471,7 @@ void PowerManager::update() {
                 if (_paStandbyDone || !isSpeakerAmpEnabled()) {
                     restoreAudioOutputHardware();
                     _paStandbyDone = false;
+                    _audioHardwareOff = false;
                 }
             } else {
                 // Audio is not actively rendering: allow Wi-Fi modem sleep on battery
@@ -298,6 +484,12 @@ void PowerManager::update() {
                     standbyAudioOutputHardware();
                     _paStandbyDone = true;
                     Serial.println("[power] Audio idle 3s -> speaker amp standby");
+                }
+                if (!_audioHardwareOff && !_audio->hasActiveSession() &&
+                    (now - _lastAudioActiveMs >= 10000)) {
+                    shutdownAudioOutputHardware();
+                    _audioHardwareOff = true;
+                    Serial.println("[power] Audio idle 10s -> codec and I2S powered down");
                 }
             }
         }
@@ -336,21 +528,17 @@ void PowerManager::update() {
             setBacklight(_currentDuty);
         }
 
-        // 5. Inactivity State Machine
+        // 5. Inactivity State Machine. Dim and sleep are independent deadlines
+        // measured from the same user activity timestamp.
         if (!hasLock(POWER_LOCK_DISPLAY) && !hasLock(POWER_LOCK_OTA)) {
             uint32_t idleMs = now - _lastActivityMs;
-
-            if (_displayState == DISPLAY_POWER_ACTIVE) {
-                if (_dimTimeoutSec > 0 && idleMs >= (_dimTimeoutSec * 1000)) {
-                    dimDisplay();
-                }
-            } else if (_displayState == DISPLAY_POWER_DIMMED) {
-                if (_sleepTimeoutSec > 0 && idleMs >= (_sleepTimeoutSec * 1000)) {
-                    // If ambient clock is enabled, keep clock dimmed rather than sleeping
-                    if (!_ambientClockEnabled) {
-                        sleepDisplay();
-                    }
-                }
+            DisplayIdleAction action = displayIdleAction(
+                idleMs, _dimTimeoutSec, _sleepTimeoutSec, _ambientClockEnabled);
+            if (action == DISPLAY_IDLE_SLEEP) {
+                sleepDisplay();
+            } else if (action == DISPLAY_IDLE_DIM &&
+                       _displayState == DISPLAY_POWER_ACTIVE) {
+                dimDisplay();
             }
         }
 
@@ -362,24 +550,61 @@ void PowerManager::update() {
         bool charging = _battery && _battery->isCharging();
         bool shutdownLocked = hasLock(POWER_LOCK_PREVENT_DEEP_SLEEP) || hasLock(POWER_LOCK_OTA);
         bool activityInhibits = protectedActivityCanInhibitAutoOff(
-            _autoOffBatteryPct, batteryPct, batteryPresent, charging, _protectedActivity);
+            _autoOffBatteryPct, batteryPct, batteryPresent, charging, protectedMedia);
         bool timerInhibited = _autoOffSec == 0 || shutdownLocked || activityInhibits;
-        if (timerInhibited) {
-            _autoOffTiming = false;
-        } else {
-            if (!_autoOffTiming) {
-                _autoOffTiming = true;
-                _autoOffSinceMs = now;
-                Serial.printf("[power] Inactivity auto-off timer started (delay=%us, battery=%d%%, protect_above=%u%%)\n",
-                              _autoOffSec, batteryPct, _autoOffBatteryPct);
-            }
-            uint32_t inactiveMs = now - _autoOffSinceMs;
+        _autoOffTiming = !timerInhibited;
+        if (!timerInhibited) {
+            uint32_t inactiveMs = protectedMedia ? userIdleMs : powerIdleMs;
             if (shouldAutoPowerOff(_autoOffSec, _autoOffBatteryPct, batteryPct,
-                                   batteryPresent, charging, _protectedActivity,
+                                   batteryPresent, charging, protectedMedia,
                                    shutdownLocked, inactiveMs)) {
-                Serial.printf("[power] Inactive for %u sec -> Auto Power-Off\n", _autoOffSec);
+                Serial.printf("[power] AUTO_OFF execute battery=%d protected_media=%s idle_ms=%lu\n",
+                              batteryPct, protectedMedia ? "true" : "false",
+                              (unsigned long)inactiveMs);
                 powerOff(false);
             }
+        }
+
+        // 7. Layered idle power states. Always-on/ambient display choices are
+        // respected because radio hibernate and sleep require DISPLAY_POWER_OFF.
+        uint32_t idleMs = powerIdleMs;
+        bool blockingLowPowerLock = hasLock(
+            POWER_LOCK_DISPLAY | POWER_LOCK_AUDIO | POWER_LOCK_REALTIME_NET |
+            POWER_LOCK_OTA | POWER_LOCK_PREVENT_LIGHT_SLEEP |
+            POWER_LOCK_PREVENT_DEEP_SLEEP);
+        bool displayOff = _displayState == DISPLAY_POWER_OFF;
+        if (idlePowerStageDue(_deepSleepSec, idleMs, displayOff,
+                              protectedMedia, blockingLowPowerLock)) {
+            _enterDeepIdle(idleMs);
+            return;
+        }
+        bool blockingWifiLock = hasLock(POWER_LOCK_AUDIO | POWER_LOCK_REALTIME_NET |
+                                        POWER_LOCK_OTA | POWER_LOCK_PREVENT_DEEP_SLEEP);
+        if (!_wifiHibernated && _wifiHibernateCb &&
+            idlePowerStageDue(_wifiHibernateSec, idleMs, true,
+                              protectedMedia, blockingWifiLock)) {
+            Serial.printf("[power] WIFI -> HIBERNATE reason=idle locks=%lu protected_media=%s idle_ms=%lu\n",
+                          (unsigned long)getLocks(), protectedMedia ? "true" : "false",
+                          (unsigned long)idleMs);
+            _wifiHibernateCb();
+        }
+        if (_wifiHibernated &&
+            idlePowerStageDue(_lightSleepSec, idleMs, displayOff,
+                              protectedMedia, blockingLowPowerLock)) {
+            _enterLightSleep(idleMs);
+        }
+
+        if (now - _lastPowerTraceMs >= 30000) {
+            _lastPowerTraceMs = now;
+            if (activityInhibits) {
+                Serial.printf("[power] AUTO_OFF blocked_by=%s battery=%d\n",
+                              protectedKindName(_protectedKind), batteryPct);
+            }
+            Serial.printf("[power] locks=%lu protected_media=%s source=%s user_idle_ms=%lu power_idle_ms=%lu wifi_hibernated=%s\n",
+                          (unsigned long)getLocks(), protectedMedia ? "true" : "false",
+                          protectedKindName(_protectedKind),
+                          (unsigned long)userIdleMs, (unsigned long)powerIdleMs,
+                          _wifiHibernated ? "true" : "false");
         }
     }
 
@@ -413,7 +638,6 @@ uint32_t PowerManager::getSleepTimeout() const { return _sleepTimeoutSec; }
 
 void PowerManager::setAutoOffTimeout(uint32_t sec, bool persist) {
         _autoOffSec = sec;
-        _autoOffTiming = false;
         if (persist && _prefs) _prefs->putUInt("auto_off", sec);
     }
 
@@ -421,15 +645,15 @@ uint32_t PowerManager::getAutoOffTimeout() const { return _autoOffSec; }
 
 void PowerManager::setAutoOffBatteryPercent(uint8_t percent, bool persist) {
         _autoOffBatteryPct = constrain(percent, 0, 100);
-        _autoOffTiming = false;
         if (persist && _prefs) _prefs->putUChar("auto_off_pct", _autoOffBatteryPct);
     }
 
 uint8_t PowerManager::getAutoOffBatteryPercent() const { return _autoOffBatteryPct; }
 
-void PowerManager::setProtectedActivity(bool active) {
-        if (_protectedActivity != active) _autoOffTiming = false;
+void PowerManager::setProtectedActivity(bool active, ProtectedActivityKind kind) {
+        if (active) _lastProtectedActivityMs = millis();
         _protectedActivity = active;
+        _protectedKind = active ? kind : PROTECTED_NONE;
     }
 
 bool PowerManager::isProtectedActivity() const { return _protectedActivity; }
@@ -450,10 +674,13 @@ String PowerManager::getTelemetryJson() const {
         json += "\"voltage\":";
         if (_battery) json += String(_battery->getVoltage(), 2);
         else          json += "0.0";
+        json += ",\"raw_voltage\":";
+        if (_battery) json += String(_battery->getRawVoltage(), 2);
+        else          json += "0.0";
         json += ",\"percentage\":";
         if (_battery) json += String(_battery->getPercentage());
         else          json += "-1";
-        json += ",\"percentage_source\":\"voltage_estimate\"";
+        json += ",\"percentage_source\":\"filtered_voltage_estimate\"";
         json += ",\"charging\":";
         json += (_battery && _battery->isCharging()) ? "true" : "false";
         json += ",\"full\":";
@@ -464,8 +691,11 @@ String PowerManager::getTelemetryJson() const {
         json += (_battery && _battery->isCritical()) ? "true" : "false";
         json += ",\"battery_present\":";
         json += isBatteryPresent() ? "true" : "false";
+        json += ",\"external_power_presence\":\"";
+        json += isBatteryPresent() ? "unknown" : "required_no_battery";
+        json += "\"";
         json += ",\"usb_powered\":";
-        json += (!isBatteryPresent() || (_battery && _battery->isCharging())) ? "true" : "null";
+        json += isBatteryPresent() ? "null" : "true";
         json += ",\"usb_perf_max\":";
         json += _usbPerfMax ? "true" : "false";
 
@@ -496,6 +726,9 @@ String PowerManager::getTelemetryJson() const {
         json += String(_autoOffBatteryPct);
         json += ",\"protected_activity\":";
         json += _protectedActivity ? "true" : "false";
+        json += ",\"protected_activity_source\":\"";
+        json += protectedKindName(_protectedKind);
+        json += "\"";
         // Kept for dashboard/client compatibility; semantics now mean actual
         // protected playback or solid-torch activity, not an open media page.
         json += ",\"media_app_active\":";
@@ -503,17 +736,32 @@ String PowerManager::getTelemetryJson() const {
         json += ",\"auto_off_timer_active\":";
         json += _autoOffTiming ? "true" : "false";
         json += ",\"auto_off_elapsed_sec\":";
-        json += _autoOffTiming ? String((millis() - _autoOffSinceMs) / 1000) : "0";
+        json += _autoOffTiming ? String(getIdleSeconds()) : "0";
         json += ",\"ambient_clock\":";
         json += _ambientClockEnabled ? "true" : "false";
         json += ",\"idle_sec\":";
         json += String(getIdleSeconds());
+        json += ",\"power_idle_sec\":";
+        json += String(effectivePowerIdleMs(millis(), _lastActivityMs,
+                                            _lastProtectedActivityMs) / 1000);
         json += ",\"speaker_amp\":";
         json += isSpeakerAmpEnabled() ? "true" : "false";
         json += ",\"wifi_sleep\":";
         json += _wifiSleepEnabled ? "true" : "false";
         json += ",\"wifi_sleep_allowed\":";
-        json += (_prefs && _prefs->getBool("wifi_sleep", true)) ? "true" : "false";
+        json += isWifiSleepAllowed() ? "true" : "false";
+        json += ",\"wifi_hibernated\":";
+        json += _wifiHibernated ? "true" : "false";
+        json += ",\"wifi_hibernate_timeout\":";
+        json += String(_wifiHibernateSec);
+        json += ",\"light_sleep_timeout\":";
+        json += String(_lightSleepSec);
+        json += ",\"deep_sleep_timeout\":";
+        json += String(_deepSleepSec);
+        json += ",\"idle_cpu_mhz\":";
+        json += String(_idleCpuMhz);
+        json += ",\"loop_yield_ms\":";
+        json += String(_loopYieldMs);
 
         json += "}";
         return json;

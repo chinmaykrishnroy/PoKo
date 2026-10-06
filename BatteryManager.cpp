@@ -50,7 +50,8 @@ void BatteryManager::begin() {
 
 void BatteryManager::readNow() {
     float rawV = sampleAdcVoltage();
-    _voltage = _voltage <= 0.1f ? rawV : (_voltage * 0.8f) + (rawV * 0.2f);
+    _rawVoltage = rawV;
+    _voltage = _voltage <= 0.1f ? rawV : (_voltage * 0.9f) + (rawV * 0.1f);
     if (!isPresent()) {
         _percentage = -1;
         _isCharging = false;
@@ -61,12 +62,28 @@ void BatteryManager::readNow() {
         return;
     }
 
-    _percentage = voltageToPercent(_voltage);
-    _isFull = !_isCharging && _voltage >= 4.15f;
+    int targetPercentage = voltageToPercent(_voltage);
+    uint32_t now = millis();
+    if (_percentage < 0) {
+        _percentage = targetPercentage;
+        _lastPercentUpdateMs = now;
+    } else if ((int32_t)(now - _settleUntilMs) >= 0 &&
+               now - _lastPercentUpdateMs >= 10000) {
+        uint32_t steps = max(uint32_t{1},
+                             (now - _lastPercentUpdateMs) / uint32_t{10000});
+        if (_isCharging && targetPercentage > _percentage) {
+            _percentage = min(targetPercentage, _percentage + (int)steps);
+        } else if (!_isCharging && targetPercentage < _percentage) {
+            _percentage = max(targetPercentage, _percentage - (int)steps);
+        }
+        _lastPercentUpdateMs = now;
+    }
+    if (!_isCharging && _isFull && _voltage < 4.00f) _isFull = false;
+
     if (_voltage < 3.25f && !_isCharging) {
         if (_lowVoltageStartMs == 0) _lowVoltageStartMs = millis();
         else if (millis() - _lowVoltageStartMs > 15000) _isCritical = true;
-    } else {
+    } else if (_isCharging || _voltage >= 3.35f) {
         _lowVoltageStartMs = 0;
         _isCritical = false;
     }
@@ -84,6 +101,13 @@ void BatteryManager::update(uint32_t intervalMs) {
                 _isCharging = rawCharging;
                 _chgFilterCount = 0;
                 _justPluggedIn = _justPluggedIn || (_isCharging && !wasCharging);
+                _settleUntilMs = now + 30000;
+                _lastPercentUpdateMs = now;
+                if (_isCharging) {
+                    _isFull = false;
+                } else if (wasCharging && _voltage >= 4.10f) {
+                    _isFull = true;
+                }
                 Serial.printf("[bat] Charging state change: %s\n", _isCharging ? "CHARGING" : "DISCHARGING");
                 readNow();
                 return;
@@ -103,6 +127,7 @@ bool BatteryManager::consumePluggedInEvent() {
 
 bool BatteryManager::isPresent() const { return _voltage >= 2.50f; }
 float BatteryManager::getVoltage() const { return _voltage; }
+float BatteryManager::getRawVoltage() const { return _rawVoltage; }
 int BatteryManager::getPercentage() const { return _percentage; }
 bool BatteryManager::isCharging() const { return isPresent() && _isCharging; }
 bool BatteryManager::isFull() const { return isPresent() && _isFull; }

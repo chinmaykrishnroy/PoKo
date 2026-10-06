@@ -27,13 +27,13 @@ void PixelEngine::begin() {
     }
 
 void PixelEngine::loadFromPreferences(Preferences& prefs) {
-        _mode = (PixelMode)constrain(prefs.getInt("px_mode", (int)PIXEL_MODE_SPINNER), 0, (int)PIXEL_MODE_COUNT - 1);
+        _mode = (PixelMode)constrain(prefs.getInt("px_mode", (int)PIXEL_MODE_OFF), 0, (int)PIXEL_MODE_COUNT - 1);
         _r = (uint8_t)prefs.getInt("px_r", 0);
         _g = (uint8_t)prefs.getInt("px_g", 200);
         _b = (uint8_t)prefs.getInt("px_b", 255);
         _targetPixel = (uint8_t)constrain(prefs.getInt("px_target", 8), 0, 255);
         _targetMask = (uint8_t)prefs.getInt("px_mask", _targetPixel == 8 ? 0xFF : (_targetPixel < 8 ? (1 << _targetPixel) : 0xFF));
-        _brightness = (uint8_t)constrain(prefs.getInt("px_bright", 40), 1, 255);
+        _brightness = (uint8_t)constrain(prefs.getInt("px_bright", 128), 0, 255);
         _speedMs = (uint16_t)constrain(prefs.getInt("px_speed", 70), 20, 2000);
         _musicLightOn = prefs.getBool("px_mus_on", true);
         _musicEffect = (MusicEffectPreset)constrain(prefs.getInt("px_mus_eff", 0), 0, (int)MUSIC_FX_COUNT - 1);
@@ -132,8 +132,14 @@ const char* PixelEngine::getTargetMaskLabel() const {
 uint8_t PixelEngine::getBrightness() const { return _brightness; }
 
 void PixelEngine::setBrightness(uint8_t b) {
-        _brightness = constrain(b, 1, 255);
+        _brightness = b;
         if (_initialized) FastLED.setBrightness(_brightness);
+    }
+
+void PixelEngine::blackoutNow() {
+        if (!_initialized) return;
+        fill_solid(_leds, POKO_LED_COUNT, CRGB::Black);
+        FastLED.show();
     }
 
 uint16_t PixelEngine::getSpeed() const { return _speedMs; }

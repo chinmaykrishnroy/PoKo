@@ -8,6 +8,7 @@
 #define POKO_CLR_WARN      0xFD20
 #define POKO_CLR_ERR       0xF800
 #define POKO_CLR_GREEN     0x07E0
+#define POKO_CLR_WIFI_SLEEP 0xFB56
 #define POKO_CLR_TILE_BG   0x1082
 
 struct PokoThemePalette {

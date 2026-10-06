@@ -12,6 +12,7 @@ public:
     bool consumePluggedInEvent();
     bool isPresent() const;
     float getVoltage() const;
+    float getRawVoltage() const;
     int getPercentage() const;
     bool isCharging() const;
     bool isFull() const;
@@ -27,6 +28,7 @@ private:
     float sampleAdcVoltage();
 
     float _voltage = 0.0f;
+    float _rawVoltage = 0.0f;
     int _percentage = -1;
     bool _isCharging = false;
     bool _isFull = false;
@@ -36,4 +38,6 @@ private:
     uint32_t _lastChgCheckMs = 0;
     uint8_t _chgFilterCount = 0;
     bool _justPluggedIn = false;
+    uint32_t _settleUntilMs = 0;
+    uint32_t _lastPercentUpdateMs = 0;
 };

@@ -137,7 +137,7 @@ To maximize performance when plugged into USB while ensuring cool operation and 
 | Resource Lock | Managed Behavior |
 |:---|:---|
 | **`POWER_LOCK_REALTIME_NET`** | Acquired automatically by SSync audio and Video playback while actively rendering. **Disables 802.11 modem sleep** (`WiFi.setSleep(false)`), guaranteeing zero-jitter, low-latency socket packet throughput. |
-| **`POWER_LOCK_AUDIO`** | Prevents system auto-off and deep sleep while audio is streaming in the foreground or background. |
+| **`POWER_LOCK_AUDIO`** | Keeps the amplifier and audio output active while audible samples are rendering. Auto-off protection is evaluated separately from actual playback/torch activity. |
 | **`POWER_LOCK_DISPLAY`** | Keeps GC9107 backlight and screen fully awake during video playback and gallery slideshows. |
 | **`POWER_LOCK_OTA`** | Locks CPU at maximum 240 MHz and disables display sleep during firmware uploads. |
 
@@ -372,7 +372,7 @@ There are three ways to power off PoKo:
 1. **Physical Power Button**:  
    Press and hold the **`PWR` button for $\ge 2.0$ seconds**.
 2. **On-Device Settings Menu**:  
-   Open **Settings** (App 8), scroll to row 15 (**"Power Off"**), and double-click `R` (**`2R`**).
+   Open **Settings** (App 8), scroll to row 22 (**"Power Off"**), and double-click `R` (**`2R`**).
 3. **Web Control Panel**:  
    Visit `http://<device-ip>/`, navigate to **Settings**, and click **Power Off** (`POST /api/power?power_off=1`).
 4. **Automatic Inactivity Cutoff**:  
@@ -387,7 +387,9 @@ There are three ways to power off PoKo:
 4. **Display Sleep**: Backlight PWM is ramped to `0`, and the GC9107 controller enters deep sleep mode (`0x10`).
 5. **Radio Disconnect**: Wi-Fi radio disconnects from router and powers down (`WIFI_OFF`).
 6. **Battery Latch Release**: The hardware power latch pin `POKO_PIN_BAT_EN` (`GPIO 2`) is driven **`LOW`**. If powered by a battery, this physically cuts battery power to the board.
-7. **USB Deep Sleep Fallback**: If the board is plugged into USB power, the board remains powered by 5V VBUS. In this case, the ESP32-S3 enters **Deep Sleep** with RTC wakeup enabled on all three buttons (`GPIO 0, 4, 5` via `ESP_EXT1_WAKEUP_ANY_LOW`). Pressing any button wakes the system.
+7. **Deep-Sleep Fallback**: After releasing the battery latch, the ESP32-S3 enters **Deep Sleep** with RTC wakeup enabled on all three buttons (`GPIO 0, 4, 5` via `ESP_EXT1_WAKEUP_ANY_LOW`) if power remains available. Pressing any button performs a fresh boot. Firmware cannot reliably detect USB/VBUS from CHG_STAT after charging terminates.
+
+Idle deep sleep is also a fresh boot, not a RAM resume. RTC-retained state records a pending auto-off deadline so a timer wake can release the latch without running the normal application boot. After a clean power-off, a power-on reset with CHG_STAT actively low and no held power button enters charge-only deep sleep. USB insertion with a full battery cannot be identified reliably because CHG_STAT is then deasserted.
 
 ---
 
@@ -401,6 +403,18 @@ There are three ways to power off PoKo:
   When enabled in Settings, the screen **never completely turns off**. Instead, it remains on at minimum brightness (5%), displaying a soft bedside digital clock.
 - **Instant Screen Wake**:  
   Pressing `PWR`, `L`, `R`, or plugging in a USB cable instantly wakes the screen to full user brightness.
+
+User inactivity and protected-media activity use separate clocks. Audible SSync,
+Music, and Video maintain audio/network locks and block Wi-Fi hibernate, light
+sleep, idle deep sleep, codec shutdown, and ordinary auto-off. The display may
+still dim or sleep. When playback stops, the low-power progression begins from
+the media stop time rather than from an old user-input timestamp. At or below
+the configured low-battery protection threshold, auto-off may still stop active
+media after the user-inactivity deadline.
+
+Light sleep uses the next pending deep-sleep or auto-off deadline, capped at a
+20-second health wake. EXT1 wake restores GPIO 0, 4, and 5 from RTC control to
+normal `INPUT_PULLUP` before button scanning resumes.
 
 ---
 
@@ -493,6 +507,7 @@ Native on-device client for the **Snapcast** multi-room synchronized audio proto
   - Network latency and jitter buffer size (e.g. `LATENCY: 12 ms`, `BUFFER: 1000 ms`).
   - Visual volume bar and mute status.
 - **Footer**: `L:V-  R:V+  2R:Mute` (or `2R:Resume SSync` when suspended).
+- A connected silent Snapcast stream remains connected but stops counting as active playback after five seconds without meaningful PCM energy. This releases playback-based power protection until audible samples resume.
 - **Controls**:
   - `L`: Decrease volume (-5% per click).
   - `R`: Increase volume (+5% per click).
@@ -619,7 +634,7 @@ The **InfoApp** displays 28 real-time telemetry metrics categorized into 9 subsy
 
 ## 7. System Settings Reference
 
-All 18 entries in **SettingsApp**, including their adjustable ranges and underlying NVS storage keys:
+All 23 entries in **SettingsApp**, including their adjustable ranges and underlying NVS storage keys:
 
 | # | Item Name | Options & Values (`2R` Click) | Hold `L` / `R` Fine Tuning | NVS Key | Default |
 |:---:|:---|:---|:---|:---|:---:|
@@ -628,19 +643,24 @@ All 18 entries in **SettingsApp**, including their adjustable ranges and underly
 | 3 | **Brightness** | `25%` $\rightarrow$ `50%` $\rightarrow$ `75%` $\rightarrow$ `100%` | $\pm 1\%$, $\pm 3\%$, $\pm 8\%$ | `brightness` | `80` |
 | 4 | **Amp Boost** | `+0 dB` $\rightarrow$ `+1 dB` $\rightarrow$ `+2 dB` $\rightarrow$ `+3 dB` $\rightarrow$ `+4 dB` $\rightarrow$ `+5 dB` | — | `amp_boost` | `0` |
 | 5 | **Dim Timeout** | `15s` $\rightarrow$ `30s` $\rightarrow$ `60s` $\rightarrow$ `Off` | $\pm 5\text{s}$, $\pm 30\text{s}$, $\pm 120\text{s}$ | `dim_timeout` | `15` |
-| 6 | **Sleep Timeout** | `30s` $\rightarrow$ `1m` $\rightarrow$ `2m` $\rightarrow$ `5m` $\rightarrow$ `Off` | $\pm 5\text{s}$, $\pm 30\text{s}$, $\pm 120\text{s}$ | `sleep_timeout` | `30` |
+| 6 | **Sleep Timeout** | `30s` $\rightarrow$ `1m` $\rightarrow$ `2m` $\rightarrow$ `5m` $\rightarrow$ `Off`; measured independently from the last input even when dimming is disabled | $\pm 5\text{s}$, $\pm 30\text{s}$, $\pm 120\text{s}$ | `sleep_timeout` | `30` |
 | 7 | **Auto-Off** | `10m` $\rightarrow$ `15m` $\rightarrow$ `30m` $\rightarrow$ `Never` | $\pm 1\text{m}$, $\pm 5\text{m}$, $\pm 30\text{m}$ | `auto_off` | `900` (15m) |
 | 8 | **Protect >%** | `3%` $\rightarrow$ `5%` $\rightarrow$ `10%` $\rightarrow$ `Always` | $\pm 1%$, $\pm 3%$, $\pm 8%$ | `auto_off_pct` | `5` |
 | 9 | **Ambient Clock** | `On` $\leftrightarrow$ `Off` (keeps clock visible dimmed instead of sleeping) | — | `ambient_clock` | `false` |
 | 10 | **WiFi Sleep** | `Auto` $\leftrightarrow$ `Off` (modem sleep on battery vs always awake) | — | `wifi_sleep` | `true` |
-| 11 | **USB Mode** | `MaxPerf` $\leftrightarrow$ `Managed` | — | `usb_perf` | `true` |
-| 12 | **Slide Timer** | `Off` $\rightarrow$ `3s` $\rightarrow$ `5s` $\rightarrow$ `10s` $\rightarrow$ `15s` $\rightarrow$ `30s` $\rightarrow$ `60s` | — | `gallery_timer`| `0` (Off) |
-| 13 | **SSync Auto** | `On` $\leftrightarrow$ `Off` (auto-connects Snapcast on boot/Wi-Fi) | — | `snap_auto` | `true` |
-| 14 | **LED Bright** | `Off` $\rightarrow$ `20%` $\rightarrow$ `50%` $\rightarrow$ `100%` | — | `led_bright` | `50%` |
-| 15 | **Video View** | `Fill` $\leftrightarrow$ `Fit` (crop to cover or preserve with black padding) | — | `video_fit` | `false` (`Fill`) |
-| 16 | **Reset Drivers** | Emergency driver re-initialization (I²C, Codec, LCD, LEDs) | — | — | — |
-| 17 | **Power Off** | Executes orderly 7-step graceful shutdown | — | — | — |
-| 18 | **Reboot** | Executes clean software reboot (`ESP.restart()`) | — | — | — |
+| 11 | **WiFi Hibernate** | `1m` $\rightarrow$ `2m` $\rightarrow$ `5m` $\rightarrow$ `10m` $\rightarrow$ `Off`; static medium-pink dot while asleep | fine seconds adjustment | `wifi_hib` | `120` |
+| 12 | **Light Sleep** | `30s` $\rightarrow$ `1m` $\rightarrow$ `2m` $\rightarrow$ `5m` $\rightarrow$ `Off` | fine seconds adjustment | `light_sleep` | `120` |
+| 13 | **Deep Sleep** | `5m` $\rightarrow$ `10m` $\rightarrow$ `15m` $\rightarrow$ `30m` $\rightarrow$ `Off` | fine minutes adjustment | `deep_sleep` | `600` |
+| 14 | **Idle CPU** | `80MHz` $\leftrightarrow$ `160MHz` | — | `idle_cpu` | `80` |
+| 15 | **Loop Yield** | `0ms` $\rightarrow$ `1ms` $\rightarrow$ `2ms` $\rightarrow$ `5ms` $\rightarrow$ `10ms` | — | `loop_yield` | `2` |
+| 16 | **Charge Perf** | `MaxPerf` $\leftrightarrow$ `Managed`; CHG_STAT performance hint, not USB/VBUS presence | — | `usb_perf` | `true` |
+| 17 | **Slide Timer** | `Off` $\rightarrow$ `3s` $\rightarrow$ `5s` $\rightarrow$ `10s` $\rightarrow$ `15s` $\rightarrow$ `30s` $\rightarrow$ `60s` | — | `gallery_timer`| `0` (Off) |
+| 18 | **SSync Auto** | `On` $\leftrightarrow$ `Off` (auto-connects Snapcast on boot/Wi-Fi) | — | `snap_auto` | `true` |
+| 19 | **LED Bright** | `Off` $\rightarrow$ `20%` $\rightarrow$ `50%` $\rightarrow$ `100%`; Off immediately latches black to all LEDs | — | `px_bright` | `50%` |
+| 20 | **Video View** | `Fill` $\leftrightarrow$ `Fit` (crop to cover or preserve with black padding) | — | `video_fit` | `false` (`Fill`) |
+| 21 | **Reset Drivers** | Emergency driver re-initialization (I²C, Codec, LCD, LEDs) | — | — | — |
+| 22 | **Power Off** | Executes orderly 7-step graceful shutdown | — | — | — |
+| 23 | **Reboot** | Executes clean software reboot (`ESP.restart()`) | — | — | — |
 
 ---
 
@@ -668,7 +688,7 @@ All endpoints respond with `application/json`:
 |:---:|:---|:---|:---|
 | `GET` | `/api/health` | — | Complete live telemetry and system health state. |
 | `GET` | `/api/sys` | `brightness=1..100`, `volume=0..100`, `master_vol=1..100`, `amp_boost=0..5` | Get or set display brightness and audio levels. |
-| `GET` | `/api/power` | `screen=on\|off\|dim\|toggle`, `dim_timeout`, `sleep_timeout`, `auto_off`, `auto_off_battery_pct`, `reboot=1`, `power_off=1` | Manage power states, inactivity auto-off, protected-use battery threshold, reboot, and shutdown. |
+| `GET` | `/api/power` | `screen=on\|off\|dim\|toggle`, display/auto-off timeouts, `wifi_hibernate_timeout`, `light_sleep_timeout`, `deep_sleep_timeout`, `idle_cpu_mhz`, `loop_yield_ms`, `reboot=1`, `power_off=1` | Manage the complete layered idle policy, reboot, and shutdown. |
 | `GET` | `/api/theme` | `mode=dark\|light` | Get or toggle system UI theme. |
 | `GET`/`POST`| `/api/snap` | `host=<ip>`, `port=<port>`, `vol=0..100`, `mute=0\|1`, `action=play\|pause\|reload` | Configure and control the Snapcast client. |
 | `GET` | `/api/gallery/files`| — | List LittleFS stored photos and flash partition space. |

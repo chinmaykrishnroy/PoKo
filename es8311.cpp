@@ -404,6 +404,28 @@ void es8311_delete(es8311_handle_t dev)
     free(dev);
 }
 
+esp_err_t es8311_power_down(es8311_handle_t dev)
+{
+    if (!dev) return ESP_ERR_INVALID_ARG;
+    esp_err_t ret = ESP_OK;
+    ret |= es8311_write_reg(dev, ES8311_DAC_REG32, 0x00);
+    ret |= es8311_write_reg(dev, ES8311_ADC_REG17, 0x00);
+    ret |= es8311_write_reg(dev, ES8311_SYSTEM_REG0E, 0xFF);
+    ret |= es8311_write_reg(dev, ES8311_SYSTEM_REG12, 0x02);
+    ret |= es8311_write_reg(dev, ES8311_SYSTEM_REG14, 0x00);
+    ret |= es8311_write_reg(dev, ES8311_SYSTEM_REG0D, 0xFA);
+    ret |= es8311_write_reg(dev, ES8311_ADC_REG15, 0x00);
+    ret |= es8311_write_reg(dev, ES8311_CLK_MANAGER_REG02, 0x10);
+    ret |= es8311_write_reg(dev, ES8311_RESET_REG00, 0x00);
+    ret |= es8311_write_reg(dev, ES8311_RESET_REG00, 0x1F);
+    ret |= es8311_write_reg(dev, ES8311_CLK_MANAGER_REG01, 0x30);
+    ret |= es8311_write_reg(dev, ES8311_CLK_MANAGER_REG01, 0x00);
+    ret |= es8311_write_reg(dev, ES8311_GP_REG45, 0x00);
+    ret |= es8311_write_reg(dev, ES8311_SYSTEM_REG0D, 0xFC);
+    ret |= es8311_write_reg(dev, ES8311_CLK_MANAGER_REG02, 0x00);
+    return ret;
+}
+
 // Extra gain headroom above 0 dB unity (0.5 dB/step, max 10 steps = +5 dB).
 // Controlled via es8311_set_amp_boost_db(). Default 0 = no boost.
 static int _amp_boost_steps = 0;

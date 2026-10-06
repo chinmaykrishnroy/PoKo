@@ -61,20 +61,32 @@ enum ActivitySource : uint8_t {
     ACTIVITY_MEDIA
 };
 
+enum ProtectedActivityKind : uint8_t {
+    PROTECTED_NONE = 0,
+    PROTECTED_SSYNC,
+    PROTECTED_MUSIC,
+    PROTECTED_VIDEO,
+    PROTECTED_TORCH
+};
+
 class PowerManager {
 private:
     BatteryManager*       _battery;
     AudioManager*         _audio;
     Preferences*          _prefs;
     std::function<void()> _wakeCb = nullptr;
+    std::function<void()> _wifiHibernateCb = nullptr;
+    std::function<void()> _networkWakeCb = nullptr;
 
     std::atomic<uint32_t> _locks{POWER_LOCK_NONE};
     uint32_t              _ownerLocks[LOCK_OWNER_COUNT] = {0};
     DisplayPowerState     _displayState        = DISPLAY_POWER_ACTIVE;
 
     uint32_t              _lastActivityMs      = 0;
+    uint32_t              _lastProtectedActivityMs = 0;
     uint32_t              _lastAudioActiveMs   = 0;
     uint32_t              _lastDimStepMs       = 0;
+    uint32_t              _lastPowerTraceMs    = 0;
 
     // Timeout settings (in seconds)
     uint32_t              _dimTimeoutSec       = 15;
@@ -82,8 +94,8 @@ private:
     uint32_t              _autoOffSec          = 900; // 15 min default
     uint8_t               _autoOffBatteryPct   = 5;
     bool                  _protectedActivity   = false;
+    ProtectedActivityKind _protectedKind       = PROTECTED_NONE;
     bool                  _autoOffTiming       = false;
-    uint32_t              _autoOffSinceMs      = 0;
     bool                  _ambientClockEnabled = false;
 
     // Backlight ramp
@@ -92,24 +104,57 @@ private:
     uint8_t               _currentDuty         = 204;
     bool                  _wifiSleepEnabled    = false;
     bool                  _paStandbyDone       = false;
+    bool                  _audioHardwareOff    = true;
     bool                  _usbPerfMax          = true;
+    bool                  _wifiHibernated      = false;
+    uint32_t              _wifiHibernateSec    = 120;
+    uint32_t              _lightSleepSec       = 120;
+    uint32_t              _deepSleepSec        = 600;
+    uint8_t               _idleCpuMhz          = 80;
+    uint8_t               _loopYieldMs         = 2;
     SemaphoreHandle_t     _lockMutex           = nullptr;
 
     void _recalcLocks();
+    void _enterLightSleep(uint32_t idleMs);
+    void _enterDeepIdle(uint32_t idleMs);
 
 public:
     void setWakeCallback(std::function<void()> cb);
+    void setNetworkCallbacks(std::function<void()> hibernateCb,
+                             std::function<void()> wakeCb);
     uint8_t percentToDuty(int pct) const;
 
     int getUserBrightnessPercent() const;
 
     bool isBatteryPresent() const;
 
-    bool isUsbPowered() const;
+    bool hasSustainedPowerForMaxPerformance() const;
 
     bool isUsbPerfMax() const;
 
     void setUsbPerfMax(bool en);
+
+    void setWifiSleepAllowed(bool en, bool persist = true);
+    bool isWifiSleepAllowed() const;
+
+    void setWifiHibernated(bool hibernated);
+    bool isWifiHibernated() const;
+
+    void setWifiHibernateTimeout(uint32_t sec, bool persist = true);
+    uint32_t getWifiHibernateTimeout() const;
+
+    void setLightSleepTimeout(uint32_t sec, bool persist = true);
+    uint32_t getLightSleepTimeout() const;
+
+    void setDeepSleepTimeout(uint32_t sec, bool persist = true);
+    uint32_t getDeepSleepTimeout() const;
+
+    void setIdleCpuMhz(uint8_t mhz, bool persist = true);
+    uint8_t getIdleCpuMhz() const;
+
+    void setLoopYieldMs(uint8_t ms, bool persist = true);
+    uint8_t getLoopYieldMs() const;
+    uint8_t recommendedLoopYieldMs() const;
 
     bool isMaxPerfActive() const;
 
@@ -163,7 +208,8 @@ public:
     void setAutoOffBatteryPercent(uint8_t percent, bool persist = true);
     uint8_t getAutoOffBatteryPercent() const;
 
-    void setProtectedActivity(bool active);
+    void setProtectedActivity(bool active,
+                              ProtectedActivityKind kind = PROTECTED_NONE);
     bool isProtectedActivity() const;
 
     void setAmbientClock(bool en);
@@ -174,4 +220,8 @@ public:
     // ── Telemetry JSON Builder for /api/power ───────────────────
     String getTelemetryJson() const;
 };
+
+// Called before normal hardware initialization. This is deep sleep plus reboot;
+// RTC-retained state lets a timer wake complete the pending inactivity cutoff.
+bool completePendingIdlePowerOffWake();
 

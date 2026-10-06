@@ -37,6 +37,7 @@ bool isDisplayAsleep();
 void setSpeakerAmp(bool enabled);
 bool isSpeakerAmpEnabled();
 void standbyAudioOutputHardware();
+void shutdownAudioOutputHardware();
 void restoreAudioOutputHardware();
 
 esp_err_t initI2S(uint32_t sampleRate = 44100,

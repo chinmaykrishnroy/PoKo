@@ -199,7 +199,7 @@ loopback smoke test, and a full ESP32-S3 compile for pull requests and pushes to
 `main`. Each successful run stores the application `.bin` as a workflow artifact.
 
 Pushing an annotated semantic-version tag such as `v1.3.2` runs the same gates,
-checks that `InfoApp.h` and `PokoAPI.h` contain that version, and publishes a
+checks that `InfoApp.cpp` and `PokoAPI.cpp` contain that version, and publishes a
 GitHub Release with `PoKo-v1.3.2.bin` and its SHA-256 checksum. Upload the
 application `.bin` through `/ota`; the merged, bootloader, and partition images
 are for USB provisioning and are not OTA images.
@@ -208,7 +208,7 @@ are for USB provisioning and are not OTA images.
 
 ## Documentation
 
-- [**Complete Device & Microcontroller Manual (DEVICE_MANUAL.md)**](DEVICE_MANUAL.md) — Comprehensive reference covering ESP32-S3 architecture, FreeRTOS tasks, dynamic resource/power management, on-screen dots (Wi-Fi, audio, carousel), detailed walkthrough of all 8 apps, power telemetry, all 18 Settings entries, reboot/shutdown procedures, and REST API.
+- [**Complete Device & Microcontroller Manual (DEVICE_MANUAL.md)**](DEVICE_MANUAL.md) — Comprehensive reference covering ESP32-S3 architecture, FreeRTOS tasks, layered idle power management, on-screen dots (Wi-Fi, audio, carousel), detailed walkthrough of all 8 apps, power telemetry, all 23 Settings entries, reboot/shutdown procedures, and REST API.
 - [**Button Controls & Navigation Guide (BUTTON_CONTROLS.md)**](BUTTON_CONTROLS.md) — Physical button layout, debounce timings, and quick gesture matrix.
 - [**Release Versioning & Git Tags (VERSIONING.md)**](VERSIONING.md) — Semantic versioning policy and automated release workflows.
 

@@ -7,6 +7,44 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v1.6.0] — 2026-10-06
+
+### Added
+- Configurable Wi-Fi hibernation, light sleep, deep sleep, idle CPU frequency,
+  and loop-yield controls in the device Settings app and Web API.
+- Power transition telemetry for display, radio, light/deep sleep, auto-off,
+  power locks, protected media, and separate user/media idle clocks.
+- Filtered voltage-based battery percentage with directional slew limiting,
+  plug-state settling, and low-voltage hysteresis.
+
+### Changed
+- Audio hardware now initializes lazily and fully powers down the PA, I2S,
+  MCLK, and ES8311 after playback sessions end.
+- Idle deep sleep is documented and handled as a reboot with RTC-retained
+  pending power-off state. Light-sleep timer wakes target the next deadline.
+- CHG_STAT remains charging telemetry and is no longer presented as reliable
+  USB/VBUS presence. Detectable clean charge-only starts remain logically off.
+
+### Fixed
+- Continuous audible SSync, Music, and Video maintain their power locks and
+  cannot be interrupted by Wi-Fi hibernation, light/deep sleep, codec shutdown,
+  or normal auto-off. Low-battery protection remains authoritative.
+- A transient playback-state sample can no longer expose already-expired user
+  idle deadlines and shut down active media.
+- Network app actions after Wi-Fi hibernation wait for usable connectivity.
+- EXT1 light-sleep wake restores GPIO 0, 4, and 5 from RTC mode before normal
+  button handling resumes.
+- The hibernated Wi-Fi indicator is static medium pink without forcing 200 ms
+  launcher redraws.
+
+### Tested
+- Added long-duration protected-media, playback-stop progression, low-battery,
+  light-sleep deadline, network-wake, audio activity, and battery slew tests.
+- Verified the user-compiled image by OTA on physical hardware at
+  `192.168.0.4`; the device rebooted and exposed the new power telemetry.
+
+---
+
 ## [v1.5.0] — 2026-10-02
 
 ### Changed

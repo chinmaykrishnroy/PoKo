@@ -35,7 +35,7 @@ void PokoAPI::begin() {
             json += "\"psram_free\":" + String(ESP.getFreePsram()) + ",";
             json += "\"uptime_ms\":" + String(millis()) + ",";
             json += "\"cpu_mhz\":" + String(getCpuFrequencyMhz()) + ",";
-            json += "\"firmware_version\":\"v1.5.0\",";
+            json += "\"firmware_version\":\"v1.6.0\",";
             json += "\"app_state\":" + String((int)activeApp) + ",";
             json += "\"theme\":\"" + String(isDarkTheme() ? "dark" : "light") + "\",";
             json += "\"master_vol\":" + String(getMasterVolumeLimit()) + ",";
@@ -118,6 +118,10 @@ void PokoAPI::begin() {
                 return;
             }
 
+            if (_server->args() > 0) {
+                powerManager->notifyUserActivity(ACTIVITY_WEB_COMMAND);
+            }
+
             if (_server->hasArg("dim_timeout")) {
                 long value = _server->arg("dim_timeout").toInt();
                 powerManager->setDimTimeout((uint32_t)constrain(value, 0L, 604800L));
@@ -141,7 +145,26 @@ void PokoAPI::begin() {
                 powerManager->setUsbPerfMax(_server->arg("usb_perf").toInt() != 0);
             }
             if (_server->hasArg("wifi_sleep")) {
-                _prefs->putBool("wifi_sleep", _server->arg("wifi_sleep").toInt() != 0);
+                powerManager->setWifiSleepAllowed(_server->arg("wifi_sleep").toInt() != 0);
+            }
+            if (_server->hasArg("wifi_hibernate_timeout")) {
+                long value = _server->arg("wifi_hibernate_timeout").toInt();
+                powerManager->setWifiHibernateTimeout((uint32_t)constrain(value, 0L, 604800L));
+            }
+            if (_server->hasArg("light_sleep_timeout")) {
+                long value = _server->arg("light_sleep_timeout").toInt();
+                powerManager->setLightSleepTimeout((uint32_t)constrain(value, 0L, 604800L));
+            }
+            if (_server->hasArg("deep_sleep_timeout")) {
+                long value = _server->arg("deep_sleep_timeout").toInt();
+                powerManager->setDeepSleepTimeout((uint32_t)constrain(value, 0L, 604800L));
+            }
+            if (_server->hasArg("idle_cpu_mhz")) {
+                powerManager->setIdleCpuMhz((uint8_t)_server->arg("idle_cpu_mhz").toInt());
+            }
+            if (_server->hasArg("loop_yield_ms")) {
+                long value = _server->arg("loop_yield_ms").toInt();
+                powerManager->setLoopYieldMs((uint8_t)constrain(value, 0L, 20L));
             }
 
             if (_server->hasArg("screen")) {

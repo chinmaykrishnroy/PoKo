@@ -951,8 +951,13 @@ async function renderSystem(){
             <div class="field"><label>Inactivity auto-off<small>Seconds before shutdown; 0 disables</small></label><input type="number" name="auto_off" min="0" max="604800" value="${p.auto_off}" required></div>
             <div class="field"><label>Protect active use above<small>Battery percent; 0 always protects playback and torch</small></label><input type="number" name="auto_off_battery_pct" min="0" max="100" value="${p.auto_off_battery_pct}" required></div>
             <div class="field"><span class="label">Ambient clock</span><label class="switch"><input name="ambient_clock" type="checkbox" ${p.ambient_clock?'checked':''}><span></span></label></div>
-            <div class="field"><span class="label">USB max performance<small>Only when power source can be detected</small></span><label class="switch"><input name="usb_perf" type="checkbox" ${p.usb_perf_max?'checked':''}><span></span></label></div>
+            <div class="field"><span class="label">Charging max performance<small>Uses active CHG_STAT only; this is not USB/VBUS detection</small></span><label class="switch"><input name="usb_perf" type="checkbox" ${p.usb_perf_max?'checked':''}><span></span></label></div>
             <div class="field"><span class="label">Allow Wi-Fi sleep<small>Lower idle power, except during realtime audio</small></span><label class="switch"><input name="wifi_sleep" type="checkbox" ${p.wifi_sleep_allowed?'checked':''}><span></span></label></div>
+            <div class="field"><label>Wi-Fi hibernate after<small>Seconds idle; 0 disables remote-offline mode</small></label><input type="number" name="wifi_hibernate_timeout" min="0" max="604800" value="${p.wifi_hibernate_timeout}" required></div>
+            <div class="field"><label>Light sleep after<small>Seconds idle; requires screen off and Wi-Fi hibernated</small></label><input type="number" name="light_sleep_timeout" min="0" max="604800" value="${p.light_sleep_timeout}" required></div>
+            <div class="field"><label>Deep sleep after<small>Seconds idle; any physical button wakes</small></label><input type="number" name="deep_sleep_timeout" min="0" max="604800" value="${p.deep_sleep_timeout}" required></div>
+            <div class="field"><label>Idle CPU<small>MHz while screen is off and media is idle</small></label><select name="idle_cpu_mhz"><option value="80" ${p.idle_cpu_mhz===80?'selected':''}>80 MHz</option><option value="160" ${p.idle_cpu_mhz===160?'selected':''}>160 MHz</option></select></div>
+            <div class="field"><label>Idle loop yield<small>Milliseconds; 0 disables</small></label><input type="number" name="loop_yield_ms" min="0" max="20" value="${p.loop_yield_ms}" required></div>
             <div class="form-foot" style="grid-column:1/-1"><button class="btn blue" type="submit">${icon('save')} Save power policy</button></div>
           </form>
         </div>
@@ -980,7 +985,7 @@ async function renderSystem(){
 async function savePowerPolicy(e){
   e.preventDefault();
   const form=e.currentTarget,values=new FormData(form),query=new URLSearchParams();
-  for(const key of ['dim_timeout','sleep_timeout','auto_off','auto_off_battery_pct'])query.set(key,values.get(key));
+  for(const key of ['dim_timeout','sleep_timeout','auto_off','auto_off_battery_pct','wifi_hibernate_timeout','light_sleep_timeout','deep_sleep_timeout','idle_cpu_mhz','loop_yield_ms'])query.set(key,values.get(key));
   for(const key of ['ambient_clock','usb_perf','wifi_sleep'])query.set(key,values.has(key)?'1':'0');
   try{await api('/api/power?'+query);toast('Power policy saved');renderSystem()}catch(err){toast(err.message,true)}
 }

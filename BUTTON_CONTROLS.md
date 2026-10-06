@@ -126,14 +126,19 @@ These controls are active across the entire system regardless of the open applic
   8. **Protect >%**: 3% $\rightarrow$ 5% $\rightarrow$ 10% $\rightarrow$ Always. Active SSync, Music, Video, or the solid Pixel torch inhibits auto-off above this battery level. At or below it, the inactivity timer still shuts down the device.
   9. **Ambient Clock**: On $\leftrightarrow$ Off (keeps clock visible dimmed rather than sleeping screen)
   10. **WiFi Sleep**: Auto $\leftrightarrow$ Off
-  11. **USB Mode**: `MaxPerf` $\leftrightarrow$ `Managed`
-  12. **Slide Timer**: Off $\rightarrow$ 3s $\rightarrow$ 5s $\rightarrow$ 10s $\rightarrow$ 15s $\rightarrow$ 30s $\rightarrow$ 60s
-  13. **SSync Auto**: On $\leftrightarrow$ Off (auto-connects Snapcast on boot/Wi-Fi)
-  14. **LED Bright**: Off $\rightarrow$ 20% $\rightarrow$ 50% $\rightarrow$ 100%
-  15. **Video View**: `Fill` crops to cover 128×128; `Fit` preserves the full frame with black padding
-  16. **Reset Drivers**: Execute emergency re-initialization of peripheral drivers
-  17. **Power Off**: Orderly shutdown sequence
-  18. **Reboot**: Clean device reboot
+  11. **WiFi Hibernate**: 1m $\rightarrow$ 2m $\rightarrow$ 5m $\rightarrow$ 10m $\rightarrow$ Off. The status dot is static medium pink; any physical button reconnects.
+  12. **Light Sleep**: 30s $\rightarrow$ 1m $\rightarrow$ 2m $\rightarrow$ 5m $\rightarrow$ Off. Requires the display to be off and Wi-Fi hibernated; timer wakes target the next real deadline with a 20-second maximum interval.
+  13. **Deep Sleep**: 5m $\rightarrow$ 10m $\rightarrow$ 15m $\rightarrow$ 30m $\rightarrow$ Off. Any physical button performs a fresh boot; RTC-retained state preserves only the pending idle power-off intent.
+  14. **Idle CPU**: 80 MHz $\leftrightarrow$ 160 MHz
+  15. **Loop Yield**: 0ms $\rightarrow$ 1ms $\rightarrow$ 2ms $\rightarrow$ 5ms $\rightarrow$ 10ms
+  16. **Charge Perf**: `MaxPerf` $\leftrightarrow$ `Managed`. The firmware can observe active charging, not persistent USB/VBUS presence after charge termination.
+  17. **Slide Timer**: Off $\rightarrow$ 3s $\rightarrow$ 5s $\rightarrow$ 10s $\rightarrow$ 15s $\rightarrow$ 30s $\rightarrow$ 60s
+  18. **SSync Auto**: On $\leftrightarrow$ Off (auto-connects Snapcast on boot/Wi-Fi)
+  19. **LED Bright**: Off $\rightarrow$ 20% $\rightarrow$ 50% $\rightarrow$ 100% (true 0/51/128/255 brightness levels)
+  20. **Video View**: `Fill` crops to cover 128×128; `Fit` preserves the full frame with black padding
+  21. **Reset Drivers**: Execute emergency re-initialization of peripheral drivers
+  22. **Power Off**: Orderly shutdown sequence
+  23. **Reboot**: Clean device reboot
 
 ---
 
@@ -159,9 +164,9 @@ These controls are active across the entire system regardless of the open applic
   - **Discharging**: Fill bar dynamically transitions from green ($>50\%$) through yellow down to red ($\le 15\%$).
   - Low-voltage battery protection automatically powers down the system if cell drops below $3.25\text{V}$ sustained for 15 seconds.
 
-### 4.2 USB Performance Modes
-Configurable in Settings $\rightarrow$ `USB Mode`:
-- **`MaxPerf` (Default on USB)**:
+### 4.2 Charging Performance Hint
+Configurable in Settings $\rightarrow$ `Charge Perf`:
+- **`MaxPerf` (Default while CHG_STAT proves active charging)**:
   - Wi-Fi 802.11 modem sleep is **disabled** (`WiFi.setSleep(false)`), providing minimum socket latency and maximum bandwidth for SSync audio, Web UI streaming, and OTA updates.
   - CPU operates at maximum 240 MHz dual-core clock.
   - Auto-off deep sleep is bypassed.

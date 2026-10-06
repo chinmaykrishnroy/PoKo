@@ -1,4 +1,5 @@
 #include "SnapPlayer.h"
+#include "AudioActivity.h"
 
 SnapAudioRingBuffer::SnapAudioRingBuffer() : _buffer(nullptr), _capacity(0) {
         _head.store(0, std::memory_order_relaxed);
@@ -280,7 +281,14 @@ bool SnapPlayer::writeRingExact(const uint8_t* data, size_t bytes) {
             return false;
         }
 
-        if (sent == bytes) return true;
+        if (sent == bytes) {
+            if (pcm16HasAudibleSignal(data, bytes)) {
+                uint32_t audibleAt = millis();
+                _lastAudibleMs.store(audibleAt == 0 ? 1 : audibleAt,
+                                     std::memory_order_release);
+            }
+            return true;
+        }
 
         _bytesDropped.fetch_add((uint32_t)(bytes - sent), std::memory_order_relaxed);
         _decodeWriteFailed = true;
@@ -1199,6 +1207,7 @@ void SnapPlayer::networkTask() {
                         int64_t targetPlayUs = chunkTimestampUs + (int64_t)effMs * 1000LL -
                                                loadServerClockOffsetUs();
                         storePlaybackAnchor(chunkTimestampUs, targetPlayUs);
+                        _lastAudibleMs.store(0, std::memory_order_release);
                         _playStarted = true;
                     }
 
@@ -1961,7 +1970,9 @@ bool SnapPlayer::isAudioActive() const {
     }
 
 bool SnapPlayer::isPlaying() const {
-        return _playStarted.load(std::memory_order_acquire) &&
+        uint32_t lastAudible = _lastAudibleMs.load(std::memory_order_acquire);
+        bool recentlyAudible = lastAudible != 0 && (millis() - lastAudible) < 5000;
+        return _playStarted.load(std::memory_order_acquire) && recentlyAudible &&
                _connected.load(std::memory_order_acquire) &&
                !_isSuspended.load(std::memory_order_relaxed) &&
                !_serverMuted.load(std::memory_order_relaxed);

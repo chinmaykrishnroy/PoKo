@@ -17,13 +17,17 @@ void SettingsApp::flushHeldValue() {
             case 5: if (powerManager) prefs.putUInt("sleep_timeout", powerManager->getSleepTimeout()); break;
             case 6: if (powerManager) prefs.putUInt("auto_off", powerManager->getAutoOffTimeout()); break;
             case 7: if (powerManager) prefs.putUChar("auto_off_pct", powerManager->getAutoOffBatteryPercent()); break;
+            case 10: if (powerManager) prefs.putUInt("wifi_hib", powerManager->getWifiHibernateTimeout()); break;
+            case 11: if (powerManager) prefs.putUInt("light_sleep", powerManager->getLightSleepTimeout()); break;
+            case 12: if (powerManager) prefs.putUInt("deep_sleep", powerManager->getDeepSleepTimeout()); break;
         }
         _pendingItem = -1;
     }
 
 void SettingsApp::adjustHeldValue(int direction) {
         if (!powerManager || (_selected != 1 && _selected != 2 && _selected != 4 &&
-                              _selected != 5 && _selected != 6 && _selected != 7)) return;
+                              _selected != 5 && _selected != 6 && _selected != 7 &&
+                              _selected != 10 && _selected != 11 && _selected != 12)) return;
         uint32_t now = millis();
         if (_holdDirection != direction || now - _lastHoldMs > 350) _holdStartMs = now;
         _holdDirection = direction;
@@ -47,9 +51,18 @@ void SettingsApp::adjustHeldValue(int direction) {
             powerManager->setSleepTimeout(adjustSeconds(powerManager->getSleepTimeout(), secondsStep), false);
         } else if (_selected == 6) {
             powerManager->setAutoOffTimeout(adjustSeconds(powerManager->getAutoOffTimeout(), autoOffStep), false);
-        } else {
+        } else if (_selected == 7) {
             powerManager->setAutoOffBatteryPercent((uint8_t)constrain(
                 (int)powerManager->getAutoOffBatteryPercent() + direction * percentStep, 0, 100), false);
+        } else if (_selected == 10) {
+            powerManager->setWifiHibernateTimeout(
+                adjustSeconds(powerManager->getWifiHibernateTimeout(), secondsStep), false);
+        } else if (_selected == 11) {
+            powerManager->setLightSleepTimeout(
+                adjustSeconds(powerManager->getLightSleepTimeout(), secondsStep), false);
+        } else if (_selected == 12) {
+            powerManager->setDeepSleepTimeout(
+                adjustSeconds(powerManager->getDeepSleepTimeout(), autoOffStep), false);
         }
         _pendingItem = _selected;
         _dirty = true;
@@ -146,33 +159,57 @@ void SettingsApp::renderToCanvas() {
                     break;
                 }
                 case 9: {
-                    bool ws = prefs.getBool("wifi_sleep", true);
+                    bool ws = powerManager ? powerManager->isWifiSleepAllowed() : prefs.getBool("wifi_sleep", true);
                     snprintf(valBuf, sizeof(valBuf), ws ? "Auto" : "Off");
                     break;
                 }
                 case 10: {
+                    uint32_t value = powerManager ? powerManager->getWifiHibernateTimeout() : prefs.getUInt("wifi_hib", 120);
+                    if (value == 0) snprintf(valBuf, sizeof(valBuf), "Off");
+                    else if (value % 60 == 0) snprintf(valBuf, sizeof(valBuf), "%um", value / 60);
+                    else snprintf(valBuf, sizeof(valBuf), "%us", value);
+                    break;
+                }
+                case 11: {
+                    uint32_t value = powerManager ? powerManager->getLightSleepTimeout() : prefs.getUInt("light_sleep", 120);
+                    if (value == 0) snprintf(valBuf, sizeof(valBuf), "Off");
+                    else if (value % 60 == 0) snprintf(valBuf, sizeof(valBuf), "%um", value / 60);
+                    else snprintf(valBuf, sizeof(valBuf), "%us", value);
+                    break;
+                }
+                case 12: {
+                    uint32_t value = powerManager ? powerManager->getDeepSleepTimeout() : prefs.getUInt("deep_sleep", 600);
+                    if (value == 0) snprintf(valBuf, sizeof(valBuf), "Off");
+                    else snprintf(valBuf, sizeof(valBuf), "%um", value / 60);
+                    break;
+                }
+                case 13: snprintf(valBuf, sizeof(valBuf), "%uMHz",
+                                  powerManager ? powerManager->getIdleCpuMhz() : prefs.getUChar("idle_cpu", 80)); break;
+                case 14: snprintf(valBuf, sizeof(valBuf), "%ums",
+                                  powerManager ? powerManager->getLoopYieldMs() : prefs.getUChar("loop_yield", 2)); break;
+                case 15: {
                     bool um = powerManager ? powerManager->isUsbPerfMax() : prefs.getBool("usb_perf", true);
                     snprintf(valBuf, sizeof(valBuf), um ? "MaxPerf" : "Managed");
                     break;
                 }
-                case 11: {
+                case 16: {
                     if (curSlide == 0) snprintf(valBuf, sizeof(valBuf), "Off");
                     else snprintf(valBuf, sizeof(valBuf), "%ds", curSlide);
                     break;
                 }
-                case 12: snprintf(valBuf, sizeof(valBuf), ssyncAuto ? "On" : "Off"); break;
-                case 13: {
+                case 17: snprintf(valBuf, sizeof(valBuf), ssyncAuto ? "On" : "Off"); break;
+                case 18: {
                     uint8_t br = pixelEngine.getBrightness();
                     if (br == 0)      snprintf(valBuf, sizeof(valBuf), "Off");
-                    else if (br <= 3) snprintf(valBuf, sizeof(valBuf), "20%%");
-                    else if (br <= 7) snprintf(valBuf, sizeof(valBuf), "50%%");
+                    else if (br <= 51) snprintf(valBuf, sizeof(valBuf), "20%%");
+                    else if (br <= 128) snprintf(valBuf, sizeof(valBuf), "50%%");
                     else              snprintf(valBuf, sizeof(valBuf), "100%%");
                     break;
                 }
-                case 14: snprintf(valBuf, sizeof(valBuf), prefs.getBool("video_fit", false) ? "Fit" : "Fill"); break;
-                case 15: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
-                case 16: snprintf(valBuf, sizeof(valBuf), "Shut"); valCol = POKO_CLR_ERR; break;
-                case 17: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
+                case 19: snprintf(valBuf, sizeof(valBuf), prefs.getBool("video_fit", false) ? "Fit" : "Fill"); break;
+                case 20: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
+                case 21: snprintf(valBuf, sizeof(valBuf), "Shut"); valCol = POKO_CLR_ERR; break;
+                case 22: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
             }
 
             _canvas->setTextColor(valCol, isSel ? theme.surface : theme.bg);
@@ -195,7 +232,9 @@ void SettingsApp::renderToCanvas() {
         _canvas->setFont(u8g2_font_5x7_tf);
         _canvas->setTextColor(theme.footerText, theme.headerBg);
         const char* hint = (_selected == 1 || _selected == 2 || _selected == 4 ||
-                            _selected == 5 || _selected == 6 || _selected == 7) ? "Hold L:- R:+  2R:Set" : "L:Prv  R:Nxt  2R:Set";
+                            _selected == 5 || _selected == 6 || _selected == 7 ||
+                            _selected == 10 || _selected == 11 || _selected == 12)
+                               ? "Hold L:- R:+  2R:Set" : "L:Prv  R:Nxt  2R:Set";
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
         _canvas->print(hint);
@@ -283,20 +322,57 @@ void SettingsApp::applyAction() {
                 break;
             }
             case 9: { // WiFi Sleep (Auto <-> Off)
-                bool cur = prefs.getBool("wifi_sleep", true);
+                bool cur = powerManager ? powerManager->isWifiSleepAllowed() : prefs.getBool("wifi_sleep", true);
                 bool next = !cur;
-                prefs.putBool("wifi_sleep", next);
-                WiFi.setSleep(next);
+                if (powerManager) powerManager->setWifiSleepAllowed(next);
+                else {
+                    prefs.putBool("wifi_sleep", next);
+                    WiFi.setSleep(next);
+                }
                 break;
             }
-            case 10: { // USB Mode (MaxPerf <-> Managed)
+            case 10: { // WiFi Hibernate: 1m -> 2m -> 5m -> 10m -> Off
+                uint32_t cur = powerManager ? powerManager->getWifiHibernateTimeout() : prefs.getUInt("wifi_hib", 120);
+                uint32_t next = cur == 60 ? 120 : (cur == 120 ? 300 : (cur == 300 ? 600 : (cur == 600 ? 0 : 60)));
+                if (powerManager) powerManager->setWifiHibernateTimeout(next);
+                else prefs.putUInt("wifi_hib", next);
+                break;
+            }
+            case 11: { // Light Sleep: 30s -> 1m -> 2m -> 5m -> Off
+                uint32_t cur = powerManager ? powerManager->getLightSleepTimeout() : prefs.getUInt("light_sleep", 120);
+                uint32_t next = cur == 30 ? 60 : (cur == 60 ? 120 : (cur == 120 ? 300 : (cur == 300 ? 0 : 30)));
+                if (powerManager) powerManager->setLightSleepTimeout(next);
+                else prefs.putUInt("light_sleep", next);
+                break;
+            }
+            case 12: { // Deep Sleep: 5m -> 10m -> 15m -> 30m -> Off
+                uint32_t cur = powerManager ? powerManager->getDeepSleepTimeout() : prefs.getUInt("deep_sleep", 600);
+                uint32_t next = cur == 300 ? 600 : (cur == 600 ? 900 : (cur == 900 ? 1800 : (cur == 1800 ? 0 : 300)));
+                if (powerManager) powerManager->setDeepSleepTimeout(next);
+                else prefs.putUInt("deep_sleep", next);
+                break;
+            }
+            case 13: { // Idle CPU: 80 <-> 160 MHz
+                uint8_t cur = powerManager ? powerManager->getIdleCpuMhz() : prefs.getUChar("idle_cpu", 80);
+                if (powerManager) powerManager->setIdleCpuMhz(cur >= 160 ? 80 : 160);
+                else prefs.putUChar("idle_cpu", cur >= 160 ? 80 : 160);
+                break;
+            }
+            case 14: { // Loop Yield: 0 -> 1 -> 2 -> 5 -> 10 ms
+                uint8_t cur = powerManager ? powerManager->getLoopYieldMs() : prefs.getUChar("loop_yield", 2);
+                uint8_t next = cur == 0 ? 1 : (cur == 1 ? 2 : (cur == 2 ? 5 : (cur == 5 ? 10 : 0)));
+                if (powerManager) powerManager->setLoopYieldMs(next);
+                else prefs.putUChar("loop_yield", next);
+                break;
+            }
+            case 15: { // Charging-performance hint (MaxPerf <-> Managed)
                 bool cur = powerManager ? powerManager->isUsbPerfMax() : prefs.getBool("usb_perf", true);
                 bool next = !cur;
                 if (powerManager) powerManager->setUsbPerfMax(next);
                 else              prefs.putBool("usb_perf", next);
                 break;
             }
-            case 11: { // Cycle Slide Timer: 0 -> 3 -> 5 -> 10 -> 15 -> 30 -> 60 -> 0
+            case 16: { // Cycle Slide Timer: 0 -> 3 -> 5 -> 10 -> 15 -> 30 -> 60 -> 0
                 int cur = prefs.getInt("gallery_timer", 0);
                 int next = 0;
                 if (cur == 0)       next = 3;
@@ -309,7 +385,7 @@ void SettingsApp::applyAction() {
                 prefs.putInt("gallery_timer", next);
                 break;
             }
-            case 12: { // SSync Auto (On <-> Off)
+            case 17: { // SSync Auto (On <-> Off)
                 bool nextAuto = !prefs.getBool("snap_auto", true);
                 prefs.putBool("snap_auto", nextAuto);
                 if (nextAuto) {
@@ -336,26 +412,27 @@ void SettingsApp::applyAction() {
                 }
                 break;
             }
-            case 13: { // LED Bright (Off -> 20% -> 50% -> 100% -> Off)
+            case 18: { // LED Bright (Off -> 20% -> 50% -> 100% -> Off)
                 uint8_t curB = pixelEngine.getBrightness();
-                uint8_t nextB = 7;
-                if (curB == 0)      nextB = 3;
-                else if (curB <= 3) nextB = 7;
-                else if (curB <= 7) nextB = 15;
+                uint8_t nextB = 128;
+                if (curB == 0)        nextB = 51;
+                else if (curB <= 51)  nextB = 128;
+                else if (curB <= 128) nextB = 255;
                 else                nextB = 0;
                 pixelEngine.setBrightness(nextB);
+                if (nextB == 0) pixelEngine.blackoutNow();
                 pixelEngine.saveToPreferences(prefs);
                 break;
             }
-            case 14: { // Video View: Fill crop <-> Fit with black padding
+            case 19: { // Video View: Fill crop <-> Fit with black padding
                 prefs.putBool("video_fit", !prefs.getBool("video_fit", false));
                 break;
             }
-            case 15: { // Reset Drivers
+            case 20: { // Reset Drivers
                 handleDriverReset();
                 break;
             }
-            case 16: { // Power Off (Graceful Shutdown)
+            case 21: { // Power Off (Graceful Shutdown)
                 if (powerManager) {
                     _canvas->fillScreen(POKO_CLR_ERR);
                     _canvas->setFont(u8g2_font_helvB10_tf);
@@ -368,7 +445,7 @@ void SettingsApp::applyAction() {
                 }
                 break;
             }
-            case 17: { // Reboot
+            case 22: { // Reboot
                 prefs.putBool("clean_shutdown", true);
                 _canvas->fillScreen(POKO_CLR_ERR);
                 _canvas->setFont(u8g2_font_helvB10_tf);
