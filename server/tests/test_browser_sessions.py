@@ -101,6 +101,7 @@ class SessionTests(unittest.TestCase):
                 for attribute in ("Secure", "HttpOnly", "SameSite=Strict", "Max-Age=2592000"):
                     self.assertIn(attribute, cookie)
                 auth = {"Cookie": cookie.split(";", 1)[0]}
+                self.assertEqual(request("/login", extra=auth)[0], 303)
                 with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
                     responses = list(pool.map(lambda _: request("/api/server/config", extra=auth), range(20)))
                 self.assertTrue(all(r[0] == 200 for r in responses))

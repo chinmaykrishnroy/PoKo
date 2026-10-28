@@ -410,6 +410,9 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
             path = urlparse(self.path).path
             browser = bool(self.headers.get("Sec-Fetch-Mode")) or "text/html" in self.headers.get("Accept", "")
             if self.authentication.enabled and path == "/login" and self.command == "GET":
+                if self.authentication.cookie_role(self.headers.get("Cookie", "")):
+                    self._auth_redirect("/")
+                    return
                 self._html(LOGIN_HTML.replace("__MESSAGE__", "Remembered sessions last up to 30 days, or until the server restarts."))
                 return
             if self.authentication.enabled and path == "/api/security/login" and self.command == "POST":
@@ -460,7 +463,7 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/security/logout" and self.command == "POST":
                 self.authentication.logout(self.headers.get("Cookie", ""))
-                self._auth_redirect("/login", "poko_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0")
+                self._auth_redirect("/login" if self.authentication.enabled else "/", "poko_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0")
                 return
             if path == "/api/security/password" and self.command == "POST":
                 data = self._read_json_body()

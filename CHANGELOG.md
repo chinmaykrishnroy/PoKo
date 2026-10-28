@@ -7,7 +7,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [v2.1.1] — 2026-10-28
+## [v2.1.2] — 2026-10-28
+
+- Includes the session/password features below, with Linux/Windows host tests.
+- Bound queued device-authentication waits to each action's timeout budget.
+- Treat remembered-device sessions awaiting clock sync as a temporary retry,
+  rather than prompting for a password. Saved-password pages support L/R paging.
+- Earlier v2.1 candidates were superseded before publication while isolating
+  test configuration and fixing a missing header in the Linux test stub.
+
+## [v2.1.1 candidate] — 2026-10-28
 
 - Includes the session/password features below. The v2.1.0 candidate was
   superseded after CI identified a test depending on an ignored local config;

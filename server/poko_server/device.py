@@ -29,8 +29,13 @@ class DeviceClient:
         self._auth_lock = threading.Lock()
 
     def _open(self, request, timeout):
-        with self._auth_lock:
-            return self._open_authenticated(request, timeout)
+        deadline = time.monotonic() + timeout
+        if not self._auth_lock.acquire(timeout=max(0, timeout)):
+            raise TimeoutError("device authentication is busy")
+        try:
+            return self._open_authenticated(request, max(0.001, deadline - time.monotonic()))
+        finally:
+            self._auth_lock.release()
 
     def _open_authenticated(self, request, timeout):
         password = os.environ.get("POKO_DEVICE_PASSWORD", "")

@@ -14,6 +14,18 @@ from server.poko_server.device import DeviceClient
 
 
 class DeviceNonceTests(unittest.TestCase):
+    def test_busy_device_controls_keep_their_timeout_budget(self):
+        config = load_config(Path(__file__).parents[1] / "config.example.yml")
+        client = DeviceClient(config)
+        client._auth_lock.acquire()
+        started = time.monotonic()
+        try:
+            status, _, _ = client.request("/api/health", timeout=0.05)
+        finally:
+            client._auth_lock.release()
+        self.assertEqual(status, 503)
+        self.assertLess(time.monotonic() - started, 0.5)
+
     def test_parallel_device_actions_serialize_shared_digest_challenges(self):
         lock = threading.Lock()
         current = [0]

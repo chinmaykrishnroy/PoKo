@@ -13,6 +13,10 @@ bool loaded = false;
 unsigned nextSlot = 0;
 unsigned failures = 0;
 uint32_t failureWindow = 0;
+uint64_t currentEpoch() {
+    time_t now = time(nullptr);
+    return now >= 1700000000 && (uint64_t)now < 4102444800ULL ? (uint64_t)now : 0;
+}
 const char* loginHtml = R"LOGIN(<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · PoKo</title>
 <style>body{font:16px system-ui;background:#11151b;color:#edf1f7;margin:40px auto;width:min(360px,85vw)}label{display:block;margin:18px 0 6px}input:not([type=checkbox]){box-sizing:border-box;width:100%;padding:12px;font:inherit}button{margin:24px 0;padding:12px;width:100%;font:inherit}p{line-height:1.5}</style>
 <h1>Sign in to PoKo</h1><p>Your password is saved on the device. View it through Settings → Security on its screen.</p>
@@ -28,7 +32,7 @@ void eraseSlot(unsigned slot) {
     prefs.remove(keyFor("ws_e", slot).c_str());
 }
 void loadSessions() {
-    uint64_t now = time(nullptr);
+    uint64_t now = currentEpoch();
     if (loaded || now < 1700000000) return;
     loaded = true;
     for (unsigned i = 0; i < sessions.size(); ++i) {
@@ -41,8 +45,9 @@ void loadSessions() {
     }
 }
 String cookieToken(WebServer& server) {
-    std::string cookie(server.header("Cookie").c_str());
-    if (cookie.size() > 4096) return "";
+    String rawCookie = server.header("Cookie");
+    if (rawCookie.length() > 4096) return "";
+    std::string cookie(rawCookie.c_str());
     size_t offset = 0;
     while (offset < cookie.size()) {
         size_t end = cookie.find(';', offset);
@@ -68,7 +73,7 @@ void issueSession(WebServer& server, bool remember) {
     eraseSlot(slot);
     char token[65];
     for (unsigned i = 0; i < 8; ++i) snprintf(token + i * 8, 9, "%08lx", (unsigned long)esp_random());
-    uint64_t now = time(nullptr);
+    uint64_t now = currentEpoch();
     remember = remember && now >= 1700000000;
     sessions[slot] = {String(token), (uint32_t)millis(), remember ? now + 30 * 86400ULL : 0, remember};
     String cookie = "poko_device_session=" + String(token);
@@ -93,7 +98,7 @@ bool deviceBrowserSessionAuthorized(WebServer& server) {
     loadSessions();
     String token = cookieToken(server);
     if (token.length() != 64) return false;
-    uint64_t now = time(nullptr);
+    uint64_t now = currentEpoch();
     for (unsigned i = 0; i < sessions.size(); ++i) {
         auto& session = sessions[i];
         if (!session.token.length()) continue;
@@ -109,8 +114,20 @@ void clearDeviceBrowserSessions() {
     for (unsigned i = 0; i < sessions.size(); ++i) eraseSlot(i);
 }
 
+bool deviceBrowserSessionPendingClock(WebServer& server) {
+    if (currentEpoch()) return false;
+    String token = cookieToken(server);
+    if (token.length() != 64) return false;
+    for (unsigned i = 0; i < sessions.size(); ++i) {
+        if (prefs.getString(keyFor("ws_t", i).c_str(), "").equalsConstantTime(token) &&
+            prefs.getULong64(keyFor("ws_e", i).c_str(), 0) >= 1700000000) return true;
+    }
+    return false;
+}
+
 void installDeviceBrowserSessions(WebServer& server) {
     server.on("/login", HTTP_GET, [&server]() {
+        if (deviceBrowserSessionAuthorized(server)) { redirect(server, "/"); return; }
         server.sendHeader("Cache-Control", "no-store");
         server.send(200, "text/html; charset=utf-8", loginHtml);
     });

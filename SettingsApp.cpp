@@ -96,7 +96,7 @@ void SettingsApp::renderToCanvas() {
                 _canvas->setCursor(3, 85); _canvas->print("Server stays paired");
                 _canvas->setCursor(3, 101); _canvas->print(_resetConfirm ? "2R:Confirm reset" : (_securityReset ? "2R:Reset password" : "2R:Show password"));
             }
-            _canvas->setCursor(3, 122); _canvas->print(_recoveryPassword.length() ? "L/R:Page  2L:Back" : "L/R:Option 2L:Back");
+            _canvas->setCursor(3, 122); _canvas->print(_recoveryPassword.length() ? (_recoveryPassword.length() > 60 ? "L/R:Page  2L:Back" : "2L:Back") : "L/R:Option 2L:Back");
             _canvas->flush();
             return;
         }
@@ -528,7 +528,14 @@ bool SettingsApp::isLoaded() const { return _active; }
 void SettingsApp::refreshTheme() { if (_active) renderToCanvas(); }
 
 void SettingsApp::onLeft() {
-        if (_securityPage) { onRight(); return; }
+        if (_securityPage) {
+            if (_recoveryPassword.length()) {
+                unsigned pages = (_recoveryPassword.length() + 59) / 60;
+                _passwordPage = (_passwordPage + pages - 1) % pages;
+                _dirty = true;
+            } else onRight();
+            return;
+        }
         flushHeldValue();
         _selected = (_selected == 0) ? (ITEM_COUNT - 1) : (_selected - 1);
         adjustScroll();

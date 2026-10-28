@@ -2,5 +2,6 @@
 #include <WebServer.h>
 bool deviceBrowserRequest(WebServer& server);
 bool deviceBrowserSessionAuthorized(WebServer& server);
+bool deviceBrowserSessionPendingClock(WebServer& server);
 void clearDeviceBrowserSessions();
 void installDeviceBrowserSessions(WebServer& server);

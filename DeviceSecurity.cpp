@@ -18,6 +18,15 @@ bool replaceDevicePassword(const String& password) {
 
 bool deviceRequestAuthorized(WebServer& server, bool challenge) {
     if (deviceBrowserSessionAuthorized(server)) return true;
+    if (deviceBrowserSessionPendingClock(server)) {
+        if (challenge) {
+            server.sendHeader("Retry-After", "2");
+            if (server.uri() == "/")
+                server.send(503, "text/html", "<meta http-equiv=refresh content=2><p>Waiting for device clock sync. <a href=/login>Sign in for this boot</a></p>");
+            else server.send(503, "application/json", "{\"ok\":false,\"error\":\"Device clock syncing; retry shortly\"}");
+        }
+        return false;
+    }
     if (deviceBrowserRequest(server)) {
         if (challenge) {
             if (server.method() == HTTP_GET && (server.uri() == "/" || server.uri() == "/ota")) {
