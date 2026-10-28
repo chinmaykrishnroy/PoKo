@@ -48,7 +48,7 @@ void PokoAPI::begin() {
             json += "\"last_wake_cause\":" + String((int)esp_sleep_get_wakeup_cause()) + ",";
             json += "\"last_ext1_wake_mask\":" + String((unsigned long)esp_sleep_get_ext1_wakeup_status()) + ",";
             json += "\"cpu_mhz\":" + String(getCpuFrequencyMhz()) + ",";
-            json += "\"firmware_version\":\"v2.4.0\",";
+            json += "\"firmware_version\":\"v2.4.1\",";
             json += "\"app_state\":" + String((int)activeApp) + ",";
             json += "\"theme\":\"" + String(isDarkTheme() ? "dark" : "light") + "\",";
             json += "\"master_vol\":" + String(getMasterVolumeLimit()) + ",";

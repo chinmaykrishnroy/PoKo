@@ -50,7 +50,7 @@ void InfoApp::buildRows() {
         }
 
         // 2. Firmware Version & Build
-        add("Ver", "v2.4.0", pokoClrCyan());
+        add("Ver", "v2.4.1", pokoClrCyan());
         add("Build", __DATE__, currentTheme().muted);
 
         // 3. Reset Reason

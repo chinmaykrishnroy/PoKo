@@ -9,7 +9,9 @@ class Preferences {
 public:
     bool begin(const char* name,bool) { _namespace=name;return true; }
     void end() {}
-    int getInt(const char* key,int fallback) {
+    // Xtensa's int32_t is long, distinct from int. Preserve that distinction on
+    // host platforms so template deduction errors cannot hide behind the stub.
+    long getInt(const char* key,int fallback) {
         auto it=storedPrefs.find(_namespace+key);return it==storedPrefs.end()?fallback:it->second;
     }
     uint8_t getUChar(const char* key,uint8_t fallback) { return (uint8_t)getInt(key,fallback); }

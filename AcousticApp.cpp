@@ -25,7 +25,9 @@ void AcousticApp::begin() {
     _time=std::min<uint8_t>(6,p.getUChar("time",3));
     _fft=std::min<uint8_t>(3,p.getUChar("fft",3));
     _octave=p.getUChar("octave",0)%2;_response=p.getUChar("response",0)%2;
-    _gain=std::max(0,std::min(30,p.getInt("gain",18)))/3*3;p.end();
+    int32_t savedGain=p.getInt("gain",18);
+    _gain=(int)std::max<int32_t>(0,std::min<int32_t>(30,savedGain))/3*3;
+    p.end();
 }
 void AcousticApp::load() {
     if (_loaded) { renderToCanvas();return; }
