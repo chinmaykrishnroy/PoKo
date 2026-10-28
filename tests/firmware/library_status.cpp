@@ -25,16 +25,23 @@ struct HeaderState {
     Canvas canvas;
     Canvas* _canvas=&canvas;
     enum { MODE_BROWSE, MODE_PLAYING };
-    int _mode=MODE_BROWSE,_videoCount=0,_songCount=0,_catalogIndex=0,_catalogTotal=0;
+    int _mode=MODE_BROWSE,_videoCount=0,_songCount=0,_catalogIndex=0,_catalogTotal=0,_pageStart=0;
     bool _serverError=false,_serverOffline=false,_contentMissing=false,_loadingList=false;
     bool _paused=false,_streamStarted=false;
 };
-struct VideoApp: HeaderState { void renderToCanvas(); };
-struct MusicApp: HeaderState { void renderToCanvas(); };
+struct VideoApp: HeaderState { void renderToCanvas(); bool cached(int); };
+struct MusicApp: HeaderState { void renderToCanvas(); bool cached(int); };
 #include "../../build/library-status-methods.inc"
 
 template<class App> bool check(const char* state) {
     App app;
+    if (!strcmp(state,"invalidated-cache")) {
+        app._songCount=app._videoCount=3;
+        app._pageStart=-1;
+        if(app.cached(0)) { puts("FAIL: invalidated catalog reused old media");return false; }
+        app._pageStart=0;
+        return app.cached(0) && app.cached(2) && !app.cached(3);
+    }
     std::string expected;
     if (!strcmp(state,"empty")) expected="0/0";
     else if (!strcmp(state,"offline")) { app._serverError=app._serverOffline=true; expected="Offline"; }

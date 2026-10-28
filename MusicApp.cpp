@@ -76,7 +76,7 @@ bool MusicApp::fetchSongList(int index, bool loadArt) {
             _dirty = true;
             return false;
         }
-        if (_songCount > 0 && index >= _pageStart && index < _pageStart + _songCount) {
+        if (_pageStart >= 0 && _songCount > 0 && index >= _pageStart && index < _pageStart + _songCount) {
             _catalogIndex = index;
             _selectedIdx = index - _pageStart;
             if (loadArt) fetchArtwork(_selectedIdx);

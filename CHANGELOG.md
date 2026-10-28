@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v2.2.2] — 2026-10-28
+
+- Respect invalidated Music/Video catalog pages when reopening an app, so a
+  library that became empty is fetched again instead of displaying cached media.
+- Includes synchronized playback and empty-library fixes from the v2.2.0/v2.2.1
+  candidates; those candidate builds were superseded before publication.
+
 ## [v2.2.1] — 2026-10-28
 
 - Show a neutral `0/0` with No Videos/No Songs for an empty reachable

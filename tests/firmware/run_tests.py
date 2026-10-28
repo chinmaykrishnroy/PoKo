@@ -21,7 +21,7 @@ def main() -> int:
     for script in ("prepare_audio_test.py", "prepare_video_test.py", "prepare_music_test.py", "prepare_library_status_test.py"):
         subprocess.run([sys.executable, str(HERE / script)], cwd=ROOT, check=True)
     cases = {
-        "library-status": ["empty", "offline", "error", "missing", "loading", "populated"],
+        "library-status": ["empty", "offline", "error", "missing", "loading", "populated", "invalidated-cache"],
         "device-security": ["rotation-preserves-controls", "password-change-validation", "storage-failure-keeps-admin", "setup-cannot-rotate", "metadata-auth-required",
                             "browser-no-native-prompt", "browser-session-tab-return", "browser-session-password-revocation", "browser-remember-cookie"],
         "buttons": ["deferred-init", "double-left", "double-right", "info-hold", "power-click",

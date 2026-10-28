@@ -47,7 +47,7 @@ bool VideoApp::fetchVideoList(int index, bool loadThumb) {
             _dirty = true;
             return false;
         }
-        if (_videoCount > 0 && index >= _pageStart && index < _pageStart + _videoCount) {
+        if (_pageStart >= 0 && _videoCount > 0 && index >= _pageStart && index < _pageStart + _videoCount) {
             _catalogIndex = index;
             _selectedIdx = index - _pageStart;
             if (loadThumb) fetchThumbnail(_selectedIdx);
