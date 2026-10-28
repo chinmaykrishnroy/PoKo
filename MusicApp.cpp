@@ -607,13 +607,9 @@ void MusicApp::resumePlayback() {
 
 void MusicApp::stopPlaybackInternal() {
         requestStop();
-        if (audioPlugin) {
-            audioPlugin->unload();
-        }
-        _mode = MODE_BROWSE;
-        _paused = false;
-        _trackPos = 0;
-        _dirty = true;
+        // AudioManager owns the handoff; its callback must not recursively
+        // release ownership. Still retain the retry flag if shutdown times out.
+        stopAndReleaseMusic(false);
     }
 
 void MusicApp::stopPlayback() {
@@ -621,13 +617,13 @@ void MusicApp::stopPlayback() {
         stopAndReleaseMusic();
     }
 
-void MusicApp::stopAndReleaseMusic() {
+void MusicApp::stopAndReleaseMusic(bool releaseOwnership) {
         if (audioPlugin) {
             audioPlugin->stopStream();
             audioPlugin->unload();
         }
         _cleanupPending = audioPlugin && audioPlugin->isLoaded();
-        if (!_cleanupPending && audioManager) audioManager->release(AUDIO_MUSIC);
+        if (releaseOwnership && !_cleanupPending && audioManager) audioManager->release(AUDIO_MUSIC);
         _mode = MODE_BROWSE;
         _paused = false;
         _trackPos = 0;
@@ -685,12 +681,7 @@ void MusicApp::load() {
 void MusicApp::unload() {
         _active = false;
         if (_mode != MODE_PLAYING) {
-            if (audioManager) {
-                audioManager->release(AUDIO_MUSIC);
-            }
-            if (audioPlugin) {
-                audioPlugin->unload();
-            }
+            stopAndReleaseMusic();
         }
         if (_canvas) {
             delete _canvas;
@@ -748,8 +739,8 @@ void MusicApp::onEnter() {
     }
 
 void MusicApp::onPlaybackEnded() {
-        if (_mode == MODE_PLAYING && !_paused && _catalogTotal > 0 &&
-            !selectSong((_catalogIndex + 1) % _catalogTotal)) {
+        if (_mode == MODE_PLAYING && !_paused &&
+            (_catalogTotal <= 0 || !selectSong((_catalogIndex + 1) % _catalogTotal))) {
             stopPlayback();
             _dirty = true;
         }

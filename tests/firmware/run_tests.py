@@ -26,7 +26,7 @@ def main() -> int:
                     "busy-main-loop", "bounce", "overflow", "combo-click", "combo-double",
                     "combo-reboot", "combo-drivers", "combo-emergency"],
         "audio": ["suspend-transition", "suspend-timeout", "stop-all", "silent-video-is-not-audio"],
-        "music": ["terminal-release", "shutdown-timeout-retains-owner", "startup-timeout-releases", "blocked-loop-clock"],
+        "music": ["terminal-release", "handoff-defers-release", "handoff-timeout-retries", "shutdown-timeout-retains-owner", "startup-timeout-releases", "blocked-loop-clock"],
         "video": ["next", "next-page", "page-failure", "http-failure", "missing-refresh", "missing-empty", "load-failure", "stop-timeout", "next-stop-timeout", "fit-query", "async-rejected", "async-failed", "async-stale-result"],
         "marquee": ["scroll-and-wrap"],
         "pixel-toggle": ["preserves-color", "forces-solid", "turns-off"],

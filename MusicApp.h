@@ -104,7 +104,7 @@ private:
     bool requestPlay(int idx, uint32_t startSec = 0, bool retryMissing = true);
 
     void requestStop();
-    void stopAndReleaseMusic();
+    void stopAndReleaseMusic(bool releaseOwnership = true);
 
     bool selectSong(int index);
 

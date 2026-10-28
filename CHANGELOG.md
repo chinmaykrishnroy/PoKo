@@ -7,7 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [v2.0.0] — 2026-10-28
+## [v2.0.1] — 2026-10-28
+
+Includes the authenticated local/cloud architecture and review fixes below.
+The v2.0.0 candidate was superseded before publication or device flashing.
+
+- Unified the remaining Music browser-unload and source-handoff cleanup paths.
+  Shutdown timeouts retain ownership/protection and retry before releasing I2S.
+- Exhausted or emptied Music/Video catalogs now stop cleanly at end-of-stream.
+- Added ownership-handoff and shutdown-retry regression cases.
+
+## [v2.0.0 candidate] — 2026-10-28
 
 ### Security and compatibility
 - Separate browser-admin password, restricted device media token, and ESP32

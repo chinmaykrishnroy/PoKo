@@ -600,8 +600,8 @@ void VideoApp::onEnter() {
     }
 
 void VideoApp::onPlaybackEnded() {
-        if (_mode == MODE_PLAYING && _catalogTotal > 0 &&
-            !selectVideo((_catalogIndex + 1) % _catalogTotal)) {
+        if (_mode == MODE_PLAYING &&
+            (_catalogTotal <= 0 || !selectVideo((_catalogIndex + 1) % _catalogTotal))) {
             requestStop();
         }
     }

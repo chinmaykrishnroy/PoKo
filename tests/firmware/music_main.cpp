@@ -5,6 +5,16 @@ int main(int argc, char** argv) {
         app.stopAndReleaseMusic();
         CHECK(!player.loaded && manager.releases == 1);
         CHECK(app._mode == MusicApp::MODE_BROWSE);
+    } else if (!strcmp(argv[1], "handoff-defers-release")) {
+        app.stopAndReleaseMusic(false);
+        CHECK(!player.loaded && manager.releases == 0);
+    } else if (!strcmp(argv[1], "handoff-timeout-retries")) {
+        player.timeout = true;
+        app.stopAndReleaseMusic(false);
+        CHECK(app._cleanupPending && manager.releases == 0);
+        player.timeout = false;
+        app.update();
+        CHECK(!app._cleanupPending && manager.releases == 1);
     } else if (!strcmp(argv[1], "shutdown-timeout-retains-owner")) {
         player.timeout = true;
         app.stopAndReleaseMusic();

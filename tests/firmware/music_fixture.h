@@ -28,6 +28,6 @@ public:
     void requestStop() {}
     void onPlaybackEnded() { ++ended; }
     void stopPlayback();
-    void stopAndReleaseMusic();
+    void stopAndReleaseMusic(bool releaseOwnership = true);
     void update();
 };
