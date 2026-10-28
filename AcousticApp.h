@@ -3,17 +3,18 @@
 #include "CoreIApp.h"
 #include "PokoAppState.h"
 #include "AcousticDSP.h"
+#include "AcousticPresentation.h"
 
 // Two foreground tools sharing one microphone owner. DSP/canvas memory exists
 // only while a tool is open; no capture task or blocking read in the UI loop.
 class AcousticApp : public IApp {
 public:
     struct Status {
-        bool capturing, hasResult;
+        bool capturing, hasResult, automaticGain;
         uint8_t mode;
         uint32_t frames, lastDataAgeMs;
         const char* error;
-        AcousticDSP::Result signal;
+        AcousticDSP::Result signal, displayed;
     };
     AcousticApp(Arduino_GFX* gfx, AppSwitchFn exitFn, bool tuner);
     ~AcousticApp() override;
@@ -41,8 +42,11 @@ private:
     Arduino_Canvas* _canvas = nullptr;
     AcousticDSP* _dsp = nullptr;
     AcousticScale _scale;
-    uint8_t _mode = 0, _time = 3, _fft = 3, _octave = 0, _response = 0;
-    int _gain = 18;
+    AcousticSpectrumRange _spectrumRange;
+    AcousticTunerReading _reading;
+    AcousticAutoGain _autoGain;
+    uint8_t _mode = 0, _time = 1, _fft = 3, _octave = 0, _response = 0;
+    int _gain = 18, _preferredGain = 18;
     const char* _error = nullptr;
     uint32_t _lastData = 0, _lastAnalysis = 0, _lastDraw = 0, _lastEdit = 0;
     bool _hasResult = false;

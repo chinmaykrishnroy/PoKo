@@ -4,6 +4,7 @@ Run from the repository root:
 
 ```powershell
 python tests/firmware/run_tests.py
+python tests/firmware/run_tests.py --only acoustic-app --only acoustic-dsp
 python server/run_tests.py
 python tests/firmware/stream_smoke.py
 ```
@@ -82,3 +83,11 @@ After the user compiles and installs firmware, verify on the physical board:
 - Close/reopen repeatedly and inspect heap, audio handoff and absence of I²S errors.
 
 Synthetic chord matches do not certify instrument/microphone recognition quality.
+
+The acoustic groups reproduce the reported 435 Hz drift with a 440 Hz tone plus
+interference/transient while the FFT stays near 440 Hz. They also cover weak and
+uneven chords, rich-single-note rejection, silence/noise, auto gain with manual
+override and clipping recovery, bounded display holds, right-aligned Mode,
+connected scope rendering, 80% spectrum headroom and genuine decimated bass
+resolution/anti-alias rejection. `render-preview` writes production draw commands
+under `build/host-tests/` for inspection without resetting or flashing hardware.

@@ -14,6 +14,7 @@ BUILD = ROOT / "build" / "host-tests"
 def main() -> int:
     parser = argparse.ArgumentParser(__doc__)
     parser.add_argument("--onebutton", type=Path, default=Path.home() / "Documents/Arduino/libraries/OneButton/src")
+    parser.add_argument("--only", action="append", help="Run only this host group; repeat to select multiple")
     args = parser.parse_args()
     if not (args.onebutton / "OneButton.cpp").is_file():
         parser.error("Pass --onebutton with the installed OneButton source directory")
@@ -22,10 +23,10 @@ def main() -> int:
         subprocess.run([sys.executable, str(HERE / script)], cwd=ROOT, check=True)
     cases = {
         "capture-power": ["capture-pa-off-and-lock", "capture-stop-and-playback"],
-        "acoustic-app": ["modes-and-holds", "tuner-and-stale-input", "failure-and-retry", "external-stop-and-reload"],
+        "acoustic-app": ["auto-gain-persistence", "render-preview", "right-footer-and-fft-headroom", "quiet-placeholder", "scope-connected-trace", "modes-and-holds", "tuner-and-stale-input", "failure-and-retry", "external-stop-and-reload"],
         "microphone": ["no-clock-steal", "failure-cleanup", "capture-and-stop", "gain"],
         "launcher-window": ["scroll-and-wrap"],
-        "acoustic-dsp": ["pitch", "spectrum-levels", "chords", "silence-noise", "scope-period", "adaptive-scale"],
+        "acoustic-dsp": ["scope-trace-math", "fft-headroom", "reading-hysteresis", "auto-gain", "semantic-colors", "bass-resolution", "harmonic-note-rejection", "pitch", "spectrum-levels", "chords", "silence-noise", "scope-period", "adaptive-scale", "weak-chord", "uneven-chord", "pitch-with-transient", "scale-headroom"],
         "power-wake": ["held-power", "held-combo", "released", "rtc-restore-before-boot"],
         "boot-splash": ["white-first", "fusion-randomized", "allocation-fallback", "nonblocking-finish", "visible-duration", "slow-startup", "clock-wrap"],
         "library-status": ["empty", "offline", "error", "missing", "loading", "populated", "invalidated-cache"],
@@ -53,10 +54,10 @@ def main() -> int:
     }
     sources = {
         "capture-power": [ROOT / "build/capture-power-test.cpp", ROOT / "PowerPolicy.cpp"],
-        "acoustic-app": [ROOT / "build/acoustic-app-test.cpp", ROOT / "AcousticDSP.cpp"],
+        "acoustic-app": [ROOT / "build/acoustic-app-test.cpp", ROOT / "AcousticDSP.cpp", ROOT / "AcousticPresentation.cpp"],
         "microphone": [ROOT / "build/microphone-test.cpp"],
         "launcher-window": [HERE / "launcher_window.cpp", ROOT / "LauncherWindow.cpp"],
-        "acoustic-dsp": [HERE / "acoustic_dsp.cpp", ROOT / "AcousticDSP.cpp"],
+        "acoustic-dsp": [HERE / "acoustic_dsp.cpp", ROOT / "AcousticDSP.cpp", ROOT / "AcousticPresentation.cpp"],
         "power-wake": [HERE / "power_wake.cpp"],
         "boot-splash": [HERE / "boot_splash.cpp", ROOT / "BootSplash.cpp"],
         "library-status": [HERE / "library_status.cpp"],
@@ -85,7 +86,11 @@ def main() -> int:
     compiler = shutil.which("g++") or shutil.which("clang++")
     if not vcvars and not compiler:
         parser.error("MSVC Build Tools, g++, or clang++ is required")
+    if args.only and set(args.only) - set(sources):
+        parser.error("Unknown host group: " + ", ".join(sorted(set(args.only) - set(sources))))
     for name, files in sources.items():
+        if args.only and name not in args.only:
+            continue
         exe = BUILD / (name + (".exe" if os.name == "nt" else ""))
         case_includes = ([HERE / "security_stubs"] if name == "device-security" else []) + includes
         if name == "acoustic-app":
@@ -105,7 +110,7 @@ def main() -> int:
         for case in cases[name]:
             print(f"{name}: {case}", flush=True)
             subprocess.run([str(exe), case], cwd=ROOT, check=True, timeout=10)
-    print(f"PASS: {sum(map(len, cases.values()))} firmware regressions")
+    print(f"PASS: {sum(len(group) for name, group in cases.items() if not args.only or name in args.only)} firmware regressions")
     return 0
 
 

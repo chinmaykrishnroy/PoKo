@@ -70,28 +70,49 @@ window and first when moving back past it.
 These tools use the board's **ES7210 microphone input**, not a copy of playback.
 They work without a media server. `2R` cycles Analyzer's Scope → Log FFT → Octave
 → Level modes, or Tuner's Note → Chord modes; `2L` returns home. Single `L`/`R`
-adjusts microphone gain in 3 dB steps (0–30 dB; default 18 dB).
+adjusts microphone gain in 3 dB steps (0–30 dB; default 18 dB). Tuner also uses
+automatic gain: it raises quiet tonal input gradually, does not raise gain on
+silence/broadband noise, and reduces gain quickly on clipping. `AUTO` shows the current gain;
+manual changes override it for five seconds (`MAN`). Automatic gain changes are
+not saved to preferences; your explicit manual gain is saved.
 
 | Analyzer mode | Hold L / R |
 |---|---|
-| Oscilloscope | Shorter / longer window: 2, 5, 10, 20, 50, 100, 160 ms |
-| Log FFT | Smaller / larger Hann FFT: 1024, 2048, 4096, 8192 samples |
+| Oscilloscope | Shorter / longer window: 2, 5, 10, 20, 50, 100, 160 ms (new default 5 ms) |
+| Log FFT | 1024 → 2048 → 4096 → 8192 → Bass 8192 |
 | Octave | Full octave / third octave |
 | Level | Fast / slow RMS display response |
 
-Scope and spectral level ranges expand immediately and shrink after a quiet
-settling period. The scope also shows the smoothed measured period (`Avg T`, ms)
+Scope uses a connected, triggered waveform trace, with box-filtered resampling
+when multiple input samples occupy a pixel. Its vertical scale fits the displayed
+waveform with about 5% headroom and shrinks after a quiet settling period.
+Existing saved time windows are retained; 5 ms shows about two cycles of A440,
+whereas 20 ms shows about nine cycles on the same 118-pixel plotting width.
+FFT/octave plots initially place their tallest bar at **80% height**, reserve the
+upper 20% for growth, and expand/recenter only if a peak exceeds that headroom.
+Axes remain labeled in dBFS. The scope also shows the smoothed measured period (`Avg T`, ms)
 when a periodic signal is detected; FFT shows its strongest peak frequency in
-small type (`Pk`, Hz). FFT spans 20 Hz–20 kHz on a logarithmic axis; octave centers span
-31.25 Hz–16 kHz. Finite FFT windows limit bass resolution (8192 samples at 48 kHz
-give approximately 5.86 Hz bins). The level meter shows RMS and peak **dBFS** plus
+small type (`Pk`, Hz), including fractional Hz below 1 kHz. Normal FFT spans
+20 Hz–20 kHz on a logarithmic axis (8192 samples at 48 kHz give 5.86 Hz bins).
+Holding R beyond 8192 selects **Bass**: 20–2,000 Hz, a 63-tap anti-alias filter and
+12 kHz analysis rate give **1.46 Hz bins** from about **0.68 seconds** of history.
+Decimal peaks are sub-bin estimates, not a promise of 0.01 Hz resolution.
+Octave centers span 31.25 Hz–16 kHz. The level meter shows RMS and peak **dBFS** plus
 clipping, not calibrated acoustic dB SPL. Hold L/R in Tuner adjusts gain.
 
 Tuner uses A4=440 Hz and displays note, octave, frequency and cents (approximately
 40–2000 Hz). Chord mode is an estimate for a clearly played chord, not polyphonic
 transcription of a full song. Noise, weak/missing notes, distortion and ambiguous
 voicings can prevent or change a match; symmetric augmented chords are named
-using the detected bass. Silence or unavailable input clears the displayed note.
+using the detected bass. Two agreeing detections confirm a chord; a brief hold
+bridges missed frames, then clears to `--`. A rich single note is rejected as a
+chord. Silence or unavailable input shows `--` in the same fixed layout.
+Pitch uses [YIN](https://www.ee.columbia.edu/~dpwe/papers/deChevK02-yin.pdf) with
+spectral refinement; refinement uses spectral strength rather than an unrelated
+time-domain transient. Note readings are smoothed without snapping them to A440.
+Tuning color blends from green (within 2 cents) through amber toward red as error
+grows. Spectrum colors run from bass cyan through blue to treble violet; level
+meter warning colors follow actual dBFS/clipping, independently of autoscaling.
 
 Input is captured at 48 kHz/16-bit stereo; analysis uses MIC1 rather than averaging
 the two microphones and introducing phase cancellation. The microphone takes
@@ -103,7 +124,8 @@ on exit, and DSP/canvas buffers are released on exit. The tools do not auto-open
 after reboot.
 
 Authenticated `GET /api/acoustic` reports capture state, frame count, input age,
-level, peak frequency, period and speaker-PA state for on-device verification.
+level, peak frequency, period, FFT bin/range, raw versus displayed tuner readings,
+automatic-gain status and speaker-PA state for on-device verification.
 It exposes no raw microphone recording and requires the device admin login.
 
 Hardware references: [Waveshare board documentation](https://docs.waveshare.com/ESP32-S3-LCD-0.85),
@@ -346,6 +368,7 @@ Poko/
 ├── SettingsApp.h          # On-device settings
 ├── AcousticApp.*          # Microphone Analyzer and A440 Tuner screens
 ├── AcousticDSP.*          # FFT, YIN pitch, chroma/chord estimates, auto range
+├── AcousticPresentation.* # Reading stability, auto gain, scale and color policy
 ├── MicrophoneInput.*      # Exclusive ES7210 ADC / I²S RX driver
 ├── SnapPlayer.h           # Snapcast protocol client
 ├── SyncedAVPlayer.h       # Synchronized audio+video TCP player
@@ -362,9 +385,7 @@ Poko/
 │       ├── ffmpeg_tools.py
 │       ├── database.py
 │       └── config.py
-└── build/
-    └── esp32.esp32.esp32s3/
-        └── PoKo.ino.bin   # Pre-built release binary
+└── .github/workflows/ci-release.yml # Checks, firmware artifacts and tagged releases
 ```
 
 ---

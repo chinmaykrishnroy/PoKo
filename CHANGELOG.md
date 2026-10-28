@@ -7,6 +7,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v2.4.2] — 2026-10-28
+
+- Keep Tuner's empty layout stable with `--`; right-align the colored Mode hint
+  in both apps and color tuning error from green through amber to red.
+- Fix 440 Hz pitch drift caused by a time-domain transient disabling FFT
+  refinement. Improve quiet/uneven chord detection, reject rich single notes as
+  chords, and bridge brief detection gaps with bounded display holds.
+- Add conservative Tuner auto gain with tonal/noise checks, fast clipping
+  recovery, temporary manual override, and no persistence of automatic changes.
+- Draw a connected triggered scope trace. Fit FFT/octave peaks at 80% height,
+  spend their reserved headroom before expanding, and keep actual clipping
+  indicators independent of plot scaling.
+- Add fractional peak readouts and a filtered 12 kHz Bass FFT setting with
+  1.46 Hz bins across 20–2,000 Hz using about 0.68 seconds of history.
+
 ## [v2.4.1] — 2026-10-28
 
 - Add separate onboard-microphone Analyzer and A440 Tuner apps. Analyzer includes

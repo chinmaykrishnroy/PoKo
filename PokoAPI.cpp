@@ -48,7 +48,7 @@ void PokoAPI::begin() {
             json += "\"last_wake_cause\":" + String((int)esp_sleep_get_wakeup_cause()) + ",";
             json += "\"last_ext1_wake_mask\":" + String((unsigned long)esp_sleep_get_ext1_wakeup_status()) + ",";
             json += "\"cpu_mhz\":" + String(getCpuFrequencyMhz()) + ",";
-            json += "\"firmware_version\":\"v2.4.1\",";
+            json += "\"firmware_version\":\"v2.4.2\",";
             json += "\"app_state\":" + String((int)activeApp) + ",";
             json += "\"theme\":\"" + String(isDarkTheme() ? "dark" : "light") + "\",";
             json += "\"master_vol\":" + String(getMasterVolumeLimit()) + ",";
@@ -693,12 +693,21 @@ void PokoAPI::begin() {
             json += ",\"mode\":" + String(state.mode);
             json += ",\"sample_rate\":" + String(MicrophoneInput::SAMPLE_RATE);
             json += ",\"gain_db\":" + String(microphoneInput.gain());
+            json += ",\"auto_gain\":" + String(state.automaticGain ? "true" : "false");
             json += ",\"frames\":" + String(state.frames);
             json += ",\"last_data_age_ms\":" + String(state.lastDataAgeMs);
             json += ",\"rms_dbfs\":" + String(state.signal.rmsDb, 2);
             json += ",\"peak_hz\":" + String(state.signal.spectralPeakHz, 2);
             json += ",\"frequency_hz\":" + String(state.signal.frequency, 2);
             json += ",\"period_ms\":" + String(state.signal.periodMs, 3);
+            json += ",\"fft_bin_hz\":" + String(state.signal.binHz, 3);
+            json += ",\"fft_max_hz\":" + String(state.signal.maxHz, 0);
+            json += ",\"tonality\":" + String(state.signal.tonality, 2);
+            json += ",\"display_frequency_hz\":" + String(state.displayed.frequency, 2);
+            json += ",\"display_cents\":" + String(state.displayed.cents, 2);
+            String displayedChord = app && state.hasResult && state.displayed.chord != AcousticDSP::NONE ?
+                String(AcousticDSP::noteName(state.displayed.root)) + AcousticDSP::chordSuffix(state.displayed.chord) : "";
+            json += ",\"display_chord\":\"" + displayedChord + "\"";
             json += ",\"chord\":\"" + String(app && state.hasResult ? AcousticDSP::chordSuffix(state.signal.chord) : "") + "\"";
             json += ",\"speaker_amp\":" + String(isSpeakerAmpEnabled() ? "true" : "false");
             json += ",\"error\":\"" + escapeJson(state.error ? state.error : "") + "\"}";
