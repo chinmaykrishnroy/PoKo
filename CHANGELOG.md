@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## Unreleased
+
+- Server: preserve the origin of browser login/logout form submissions with
+  `Referrer-Policy: same-origin`. The previous `no-referrer` policy produced
+  `Origin: null` for native forms and incorrectly rejected legitimate logins.
+  Null and foreign origins remain blocked. Firmware is unchanged.
+
 ## [v2.1.2] — 2026-10-28
 
 - Includes the session/password features below, with Linux/Windows host tests.

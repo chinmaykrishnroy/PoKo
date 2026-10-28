@@ -94,7 +94,14 @@ class SessionTests(unittest.TestCase):
                 self.assertEqual(status, 303)
                 self.assertEqual(headers["Location"], "/login")
                 self.assertNotIn("WWW-Authenticate", headers)
+                status, headers, _ = request("/login")
+                self.assertEqual(status, 200)
+                # Native POST forms inherit this policy. no-referrer turns
+                # their Origin into null, unlike our earlier HTTP-only probes.
+                self.assertEqual(headers["Referrer-Policy"], "same-origin")
                 form = urllib.parse.urlencode({"username": "admin", "password": "correct horse test only", "remember": "1"}).encode()
+                self.assertEqual(request("/api/security/login", form, {"Origin": "null"})[0], 403)
+                self.assertEqual(request("/api/security/login", form, {"Origin": "https://other.example.com"})[0], 403)
                 status, headers, _ = request("/api/security/login", form, {"Origin": "https://poko.example.com"})
                 self.assertEqual(status, 303)
                 cookie = headers["Set-Cookie"]

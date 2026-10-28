@@ -37,6 +37,10 @@ for kind, base, filename, health in [
     status, headers, _ = request(base, "/")
     assert status == 303 and headers.get("Location") == "/login", (kind, status)
     assert "WWW-Authenticate" not in headers
+    status, headers, _ = request(base, "/login")
+    assert status == 200, (kind, status)
+    if kind == "server":
+        assert headers.get("Referrer-Policy") == "same-origin", "Browser form Origin must be preserved"
     status, headers, _ = request(base, "/api/security/login", data={"username": "admin", "password": password, "remember": "1"})
     assert status == 303, (kind, status)
     raw = headers.get("Set-Cookie", "")

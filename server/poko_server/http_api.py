@@ -389,7 +389,9 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
     def end_headers(self) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
+        # Native form POSTs under no-referrer send Origin: null and are rejected
+        # by our CSRF guard. Keep same-site origins without leaking referrers.
+        self.send_header("Referrer-Policy", "same-origin")
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
