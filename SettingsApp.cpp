@@ -89,7 +89,7 @@ void SettingsApp::renderToCanvas() {
                 _canvas->setCursor(3, 98); _canvas->print("Save it. Reboot OTA.");
             } else {
                 _canvas->print(_resetConfirm ? "Reset login password?" : "Change login in Web UI");
-                _canvas->setCursor(3, 85); _canvas->print("Pi controls preserved");
+                _canvas->setCursor(3, 85); _canvas->print("Server stays paired");
                 _canvas->setCursor(3, 101); _canvas->print(_resetConfirm ? "2R:Confirm reset" : "2R:Password recovery");
             }
             _canvas->setCursor(3, 122); _canvas->print("2L:Back");

@@ -7,6 +7,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v2.0.3] — 2026-10-28
+
+- Use “Server” in security messages so pairing guidance applies to any host.
+  Shortened the on-device message to fit the 128-pixel screen.
+
 ## [v2.0.2] — 2026-10-28
 
 - Added device Web UI password changes with current-password verification and

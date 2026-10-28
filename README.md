@@ -154,7 +154,7 @@ Allow your browser's password manager to save it if desired; persistence of the
 native Digest login is browser-controlled. PoKo never stores it in localStorage.
 For a forgotten password, open **Settings → Security** on the device, then choose
 password recovery and confirm. Write down the generated password shown on its
-screen; leaving that screen hides it. Existing Pi media controls remain paired
+screen; leaving that screen hides it. Existing server media controls remain paired
 using a restricted integration credential that cannot access administration or
 OTA. Reboot after a password change to update ArduinoOTA authentication too.
 Perform password changes on a trusted LAN: the device dashboard uses HTTP.

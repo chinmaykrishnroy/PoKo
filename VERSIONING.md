@@ -128,6 +128,7 @@ git push origin main --tags
 |---------|------|-----------|
 | v2.0.1 | 2026-10-28 | Authenticated local/cloud servers, device pairing, HTTPS and unified media cleanup |
 | v2.0.2 | 2026-10-28 | Device password management, physical recovery and restricted Pi integration credentials |
+| v2.0.3 | 2026-10-28 | Host-neutral server wording in security screens |
 | v1.6.0 | 2026-10-06 | Media-safe staged power management, Wi-Fi hibernation, codec shutdown, battery smoothing, and wake hardening |
 | v1.5.0 | 2026-10-02 | Race-free inter-task state, safe worker shutdown, and graceful allocation failure handling |
 | v1.4.0 | 2026-10-01 | Declaration-only firmware modules, media-aware low-battery shutdown, and stronger CI regression checks |

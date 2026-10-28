@@ -5,7 +5,7 @@ extern Preferences prefs;
 
 bool replaceDevicePassword(const String& password) {
     if (password.length() < 16 || password.length() > 128) return false;
-    // Migrate the existing Pi credential before changing the human login.
+    // Migrate the existing server credential before changing the human login.
     // It remains valid only for the explicit media-control allowlist.
     String previous = prefs.getString("device_pass", "");
     if (previous.length() && !prefs.getString("device_ctrl", "").length() &&
