@@ -11,6 +11,7 @@
 #include "PokoAppState.h"
 #include "ButtonInput.h"
 #include "PokoDrivers.h"
+#include "BootSplash.h"
 #include "PokoUI.h"
 #include "InfoApp.h"
 #include "ClockApp.h"
@@ -626,6 +627,19 @@ void setup() {
     esp_task_wdt_reconfigure(&twdt_config);
     esp_task_wdt_add(NULL);
 
+    // Keep the backlight off until a complete frame is ready. Skip the splash
+    // on normal sleep wakes, software/OTA resets, and crash recovery.
+    initBacklight();
+    createDisplay();
+    bool displayReady = initDisplay(pokoGfx);
+    BootSplash splash;
+    bool coldBoot = rstReason == ESP_RST_POWERON ||
+                    (rstReason == ESP_RST_DEEPSLEEP && cleanShutdown);
+    if (displayReady && coldBoot && splash.begin(pokoGfx, esp_random())) {
+        setBacklightPercent(prefs.getInt("brightness", 80));
+    }
+    Serial.println(displayReady ? "[display] 128x128 GC9107 ready" : "[display] init failed!");
+
     AppState initialApp = STATE_LAUNCHER;
     int savedApp = prefs.getInt("last_app", (int)STATE_LAUNCHER);
 
@@ -653,19 +667,9 @@ void setup() {
     }
 
     // 0. Theme Init
+    splash.update(60);
     String savedTheme = prefs.getString("ui_theme", "dark");
     setPokoTheme(savedTheme != "light");
-
-    // 1. Centralized Display Init
-    createDisplay();
-    if (!initDisplay(pokoGfx)) {
-        Serial.println("[display] init failed!");
-    } else {
-        Serial.println("[display] 128x128 GC9107 ready");
-    }
-
-    // 2. Backlight (attached, kept OFF until UI is drawn)
-    initBacklight();
 
     // 3. Cache audio settings without starting I2S/MCLK or the codec.
     // Each audio client initializes the output lazily when playback starts.
@@ -676,10 +680,12 @@ void setup() {
     setScaledVolume(savedVol);
     int savedBoost = prefs.getInt("amp_boost", 0);
     setAmpBoostDb(savedBoost);
+    splash.update(115);
 
     // 4. WS2812B LEDs
     initLEDs();
     pixelEngine.loadFromPreferences(prefs);
+    splash.update(175);
 
     // 5. Button Input Setup (3 physical buttons: DOWN=0, UP=4, PWR=5)
     btnInput.onPress([]() -> bool {
@@ -714,6 +720,8 @@ void setup() {
     btnInput.onBothVLong(onComboBothVLong);
     btnInput.onBothUltra(onComboBothUltra);
     btnInput.begin();
+    splash.update(230);
+    splash.finish(); // No hold or delay; logo remains until the app paints.
 
     // 6. Instantiate Central AudioManager & Background SnapPlayer Service
     audioManager = new AudioManager();

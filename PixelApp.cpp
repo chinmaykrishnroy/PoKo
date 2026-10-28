@@ -328,7 +328,7 @@ PixelApp::PixelApp(Arduino_GFX* gfx, AppSwitchFn exitFn)
 void PixelApp::begin() {
         if (!_canvas) {
             _canvas = new (std::nothrow) Arduino_Canvas(128, 128, _gfx, 0, 0);
-            if (_canvas) _canvas->begin();
+            if (_canvas) _canvas->begin(GFX_SKIP_OUTPUT_BEGIN);
         }
     }
 

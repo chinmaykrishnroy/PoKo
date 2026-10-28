@@ -288,7 +288,7 @@ PokoUI::PokoUI(Arduino_GFX* gfx, AppSwitchFn switchFn)
 
 void PokoUI::begin() {
         _statusCanvas = new (std::nothrow) Arduino_Canvas(128, 13, _gfx, 0, 0);
-        if (_statusCanvas) _statusCanvas->begin();
+        if (_statusCanvas) _statusCanvas->begin(GFX_SKIP_OUTPUT_BEGIN);
         _dirty = true;
     }
 

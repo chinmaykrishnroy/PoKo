@@ -50,7 +50,7 @@ void InfoApp::buildRows() {
         }
 
         // 2. Firmware Version & Build
-        add("Ver", "v2.3.0", pokoClrCyan());
+        add("Ver", "v2.3.1", pokoClrCyan());
         add("Build", __DATE__, currentTheme().muted);
 
         // 3. Reset Reason
@@ -264,7 +264,7 @@ InfoApp::InfoApp(Arduino_GFX* gfx, AppSwitchFn exitFn)
 void InfoApp::begin() {
         if (!_canvas) {
             _canvas = new (std::nothrow) Arduino_Canvas(128, 128, _gfx, 0, 0);
-            if (_canvas) _canvas->begin();
+            if (_canvas) _canvas->begin(GFX_SKIP_OUTPUT_BEGIN);
         }
     }
 

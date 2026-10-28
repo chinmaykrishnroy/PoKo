@@ -21,6 +21,7 @@ def main() -> int:
     for script in ("prepare_audio_test.py", "prepare_video_test.py", "prepare_music_test.py", "prepare_library_status_test.py"):
         subprocess.run([sys.executable, str(HERE / script)], cwd=ROOT, check=True)
     cases = {
+        "boot-splash": ["white-first", "fusion-randomized", "allocation-fallback"],
         "library-status": ["empty", "offline", "error", "missing", "loading", "populated", "invalidated-cache"],
         "device-security": ["rotation-preserves-controls", "password-change-validation", "default-password", "storage-failure-keeps-admin", "setup-cannot-rotate", "metadata-auth-required",
                             "browser-no-native-prompt", "browser-session-tab-return", "browser-session-password-revocation", "browser-remember-cookie"],
@@ -45,6 +46,7 @@ def main() -> int:
         "audio-activity": ["silence", "audible-positive", "audible-negative"],
     }
     sources = {
+        "boot-splash": [HERE / "boot_splash.cpp", ROOT / "BootSplash.cpp"],
         "library-status": [HERE / "library_status.cpp"],
         "device-security": [HERE / "device_security.cpp", ROOT / "DeviceSecurity.cpp", ROOT / "DeviceAccessPolicy.cpp", ROOT / "DeviceWebSession.cpp"],
         "buttons": [HERE / "buttons.cpp", ROOT / "ButtonInput.cpp", args.onebutton / "OneButton.cpp"],
@@ -74,6 +76,8 @@ def main() -> int:
     for name, files in sources.items():
         exe = BUILD / (name + (".exe" if os.name == "nt" else ""))
         case_includes = ([HERE / "security_stubs"] if name == "device-security" else []) + includes
+        if name == "boot-splash":
+            case_includes.insert(0, HERE / "splash_stubs")
         if vcvars:
             command = ["cl", "/nologo", "/EHsc", "/permissive-", "/std:c++17"]
             command += ["/I" + str(path) for path in case_includes] + [str(path) for path in files]

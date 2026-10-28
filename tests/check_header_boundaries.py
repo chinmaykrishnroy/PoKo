@@ -8,6 +8,7 @@ MIGRATED = (
     "AudioActivity",
     "AudioManager",
     "BatteryManager",
+    "BootSplash",
     "ButtonInput",
     "ClockApp",
     "GalleryApp",

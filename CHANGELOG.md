@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+- Show a white PoKo wordmark with brief randomized color fusion during cold
+  startup, driven by existing initialization milestones without a timed hold.
+- Initialize the panel with the backlight off and reuse it for app canvases,
+  avoiding redundant display resets during boot and app changes.
+
 ## [v2.3.0] — 2026-10-28
 
 - Create named media-only device tokens in server Settings, copy each token once,

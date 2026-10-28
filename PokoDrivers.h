@@ -22,6 +22,7 @@ extern uint8_t poko_i2s_bits;
 
 Arduino_GFX* createDisplay();
 bool initDisplay(Arduino_GFX* gfx);
+// Canvas clients use begin(GFX_SKIP_OUTPUT_BEGIN): the panel is already initialized.
 
 void initBacklight();
 void setBacklight(uint8_t duty);
