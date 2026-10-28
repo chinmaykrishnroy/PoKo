@@ -70,6 +70,9 @@ jobs:
       - name: Enforce inter-task synchronization contracts
         run: python tests/check_concurrency_contracts.py
 
+      - name: Enforce non-blocking boot connectivity
+        run: python tests/check_boot_startup.py
+
       - name: Run FFmpeg stream smoke test
         run: python tests/firmware/stream_smoke.py
 

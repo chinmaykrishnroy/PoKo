@@ -3,7 +3,6 @@
 #include <cassert>
 #include <cstdio>
 #include "splash_stubs/Arduino.h"
-#include "splash_stubs/esp_task_wdt.h"
 
 int main(int argc, char** argv) {
     assert(argc == 2);
@@ -34,25 +33,40 @@ int main(int argc, char** argv) {
         splash.begin(&display, 9876);
         splash.update(115);
         assert(display.pixels != first && display.beginCalls == 0);
+    } else if (!strcmp(argv[1], "nonblocking-finish")) {
+        BootSplash splash;
+        splash.begin(&display,1234);
+        uint32_t before=splashClock;
+        splash.finish();
+        if(splashClock!=before) { puts("FAIL: splash completion blocks connectivity servicing");return 1; }
+        assert(liveCanvases==0);
     } else if (!strcmp(argv[1], "visible-duration")) {
         BootSplash splash;
         splash.begin(&display,1234);
-        splash.finish();
-        if(splashClock < 1000 || splashClock > 1200) { puts("FAIL: cold-boot splash completes before it can be seen");return 1; }
-        assert(display.flushes>=20 && splashWatchdogFeeds>0 && liveCanvases==0);
+        int networkPolls=0;
+        for(uint32_t elapsed=0;elapsed<1100;elapsed+=10) {
+            splashClock=elapsed;
+            assert(splash.tick());
+            assert(splashClock==elapsed); // No service time consumed by waits.
+            ++networkPolls;
+        }
+        splashClock=1100;
+        assert(!splash.tick());
+        assert(networkPolls==110 && display.flushes>=20 && liveCanvases==0);
     } else if (!strcmp(argv[1], "slow-startup")) {
         BootSplash splash;
         splash.begin(&display,1234);
         splashClock+=2000;
-        splash.finish();
+        assert(!splash.tick());
         assert(splashClock==2000 && liveCanvases==0);
     } else if (!strcmp(argv[1], "clock-wrap")) {
         splashClock=0xfffffff0U;
         uint32_t started=splashClock;
         BootSplash splash;
         splash.begin(&display,1234);
-        splash.finish();
-        assert(uint32_t(splashClock-started)>=1100 && uint32_t(splashClock-started)<1200);
+        for(unsigned elapsed=0;elapsed<1100;elapsed+=10) { assert(splash.tick());splashClock+=10; }
+        assert(!splash.tick());
+        assert(uint32_t(splashClock-started)==1100);
         assert(liveCanvases==0);
     } else if (!strcmp(argv[1], "allocation-fallback")) {
         failCanvasBegin = true;

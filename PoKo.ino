@@ -61,6 +61,8 @@ AudioManager* audioManager       = nullptr;
 SnapPlayer*   snapService        = nullptr;
 
 AppState activeApp = STATE_LAUNCHER;
+BootSplash bootSplash;
+bool bootSplashVisible = false;
 
 // ── WiFi State Machine ────────────────────────────────────────
 WifiModeState wifiState = STATE_WIFI_CONNECTING;
@@ -264,7 +266,25 @@ void showThemedLoadingScreen(AppState state) {
 }
 
 // ── Central App Switcher (Exclusive Resource Model) ───────────
+void showInitialForeground() {
+    if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->renderDirect();
+    else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->load();
+    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->load();
+    else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->load();
+    else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->load();
+    else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)       pixelAppInstance->load();
+    else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->load();
+}
+
+void finishBootSplash() {
+    if (!bootSplashVisible) return;
+    bootSplash.finish();
+    bootSplashVisible = false;
+    showInitialForeground();
+}
+
 void onAppChange(AppState newState) {
+    finishBootSplash();
     if (newState == activeApp) return;
 
     if (!ensureNetworkReady(newState)) return;
@@ -639,13 +659,35 @@ void setup() {
     initBacklight();
     createDisplay();
     bool displayReady = initDisplay(pokoGfx);
-    BootSplash splash;
     bool coldBoot = rstReason == ESP_RST_POWERON ||
                     (rstReason == ESP_RST_DEEPSLEEP && cleanShutdown);
-    if (displayReady && coldBoot && splash.begin(pokoGfx, esp_random())) {
+    if (displayReady && coldBoot && (bootSplashVisible = bootSplash.begin(pokoGfx, esp_random()))) {
         setBacklightPercent(prefs.getInt("brightness", 80));
     }
     Serial.println(displayReady ? "[display] 128x128 GC9107 ready" : "[display] init failed!");
+
+    // Start radio association and NTP before app allocation; never wait for the splash.
+    // 7. WiFi & Network Services
+    savedSSID = prefs.getString("wifi_ssid", "");
+    savedPass = prefs.getString("wifi_pass", "");
+
+    // Configure NTP time sync for GMT+5:30 (19800s offset)
+    configTime(19800, 0, "pool.ntp.org", "time.google.com");
+
+    if (savedSSID.length() > 0) {
+        WiFi.mode(WIFI_STA);
+        WiFi.setSleep(false);
+        WiFi.begin(savedSSID.c_str(), savedPass.c_str());
+        wifiTimer = millis();
+        wifiState = STATE_WIFI_CONNECTING;
+        Serial.printf("[wifi] connecting to %s...\n", savedSSID.c_str());
+    } else {
+        if (startSetupAP()) {
+            Serial.println("[wifi] setup AP started");
+        } else {
+            Serial.println("[wifi] setup AP failed to start");
+        }
+    }
 
     AppState initialApp = STATE_LAUNCHER;
     int savedApp = prefs.getInt("last_app", (int)STATE_LAUNCHER);
@@ -674,7 +716,7 @@ void setup() {
     }
 
     // 0. Theme Init
-    splash.tick();
+    bootSplash.tick();
     String savedTheme = prefs.getString("ui_theme", "dark");
     setPokoTheme(savedTheme != "light");
 
@@ -687,15 +729,16 @@ void setup() {
     setScaledVolume(savedVol);
     int savedBoost = prefs.getInt("amp_boost", 0);
     setAmpBoostDb(savedBoost);
-    splash.tick();
+    bootSplash.tick();
 
     // 4. WS2812B LEDs
     initLEDs();
     pixelEngine.loadFromPreferences(prefs);
-    splash.tick();
+    bootSplash.tick();
 
     // 5. Button Input Setup (3 physical buttons: DOWN=0, UP=4, PWR=5)
     btnInput.onPress([]() -> bool {
+        finishBootSplash();
         if (!powerManager) return false;
         wakeNetwork();
         auto state = powerManager->getDisplayState();
@@ -727,8 +770,7 @@ void setup() {
     btnInput.onBothVLong(onComboBothVLong);
     btnInput.onBothUltra(onComboBothUltra);
     btnInput.begin();
-    splash.tick();
-    splash.finish(); // Complete the brief, time-paced fusion before app allocation.
+    bootSplash.tick();
 
     // 6. Instantiate Central AudioManager & Background SnapPlayer Service
     audioManager = new AudioManager();
@@ -785,6 +827,7 @@ void setup() {
     if (powerManager) {
         powerManager->setNetworkCallbacks(hibernateNetwork, wakeNetwork);
         powerManager->setWakeCallback([]() {
+            if (bootSplashVisible) { finishBootSplash(); return; }
             wakeNetwork();
             if (activeApp == STATE_LAUNCHER && pokoUI) {
                 pokoUI->renderDirect();
@@ -802,32 +845,10 @@ void setup() {
         });
     }
 
-    // 7. WiFi & Network Services
-    savedSSID = prefs.getString("wifi_ssid", "");
-    savedPass = prefs.getString("wifi_pass", "");
-
-    // Configure NTP time sync for GMT+5:30 (19800s offset)
-    configTime(19800, 0, "pool.ntp.org", "time.google.com");
-
-    if (savedSSID.length() > 0) {
-        WiFi.mode(WIFI_STA);
-        WiFi.setSleep(false);
-        WiFi.begin(savedSSID.c_str(), savedPass.c_str());
-        wifiTimer = millis();
-        wifiState = STATE_WIFI_CONNECTING;
-        Serial.printf("[wifi] connecting to %s...\n", savedSSID.c_str());
-    } else {
-        if (startSetupAP()) {
-            ensureWebServerStarted("first-time AP");
-            Serial.println("[wifi] setup AP started");
-        } else {
-            Serial.println("[wifi] setup AP failed to start");
-        }
-    }
-
     // 8. REST API & Web Dashboard
     masterApi = new PokoAPI(&server, &prefs);
     masterApi->begin();
+    if (wifiState == STATE_WIFI_AP) ensureWebServerStarted("first-time AP");
 
     // Captive portal redirect in AP mode
     server.onNotFound([]() {
@@ -848,13 +869,8 @@ void setup() {
                                   initialApp == STATE_MUSIC_UI || initialApp == STATE_VIDEO_UI ||
                                   initialApp == STATE_SETTINGS_UI);
     btnInput.suppressUntilAllReleased();
-    if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->renderDirect();
-    else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->load();
-    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->load();
-    else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->load();
-    else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->load();
-    else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->load();
-    else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->load();
+    if (bootSplashVisible && !bootSplash.tick()) bootSplashVisible = false;
+    if (!bootSplashVisible) showInitialForeground();
 
     // Turn ON Backlight now that the initial UI is fully rendered on screen
     int savedBr = prefs.getInt("brightness", 80);
@@ -940,7 +956,7 @@ void loop() {
                 otaInit = true;
             }
 
-            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
+            if (!bootSplashVisible && activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
 
             bool shouldAutoStartSnap = prefs.getBool("snap_auto", true) || (activeApp == STATE_SSYNC);
             if (shouldAutoStartSnap) {
@@ -974,7 +990,7 @@ void loop() {
                 wifiTimer = millis();
                 Serial.println("[wifi] AP fallback failed to start");
             }
-            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
+            if (!bootSplashVisible && activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
             if (networkWakeInProgress) {
                 networkWakeInProgress = false;
                 AppState failedApp = pendingNetworkApp;
@@ -991,7 +1007,7 @@ void loop() {
             WiFi.begin(savedSSID.c_str(), savedPass.c_str());
             wifiState = STATE_WIFI_CONNECTING;
             wifiTimer = millis();
-            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
+            if (!bootSplashVisible && activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
         } else if (WiFi.softAPgetStationNum() > 0) {
             wifiTimer = millis();
         }
@@ -1007,26 +1023,31 @@ void loop() {
             }
             wifiState = STATE_WIFI_CONNECTING;
             wifiTimer = millis();
-            if (activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
+            if (!bootSplashVisible && activeApp == STATE_LAUNCHER && pokoUI) pokoUI->updateStatusBar();
         }
     }
 
     // Web Server requests
     if (webServerStarted) server.handleClient();
 
-    // Active App execution
-    if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->update();
-    else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->update();
-    else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->update();
-    else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->update();
-    else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->update();
-    else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->update();
-    else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->update();
-    else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->update();
-    else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->update();
+    // Connectivity/OTA/HTTP above always run, even while the splash is visible.
+    if (bootSplashVisible) {
+        if (!bootSplash.tick()) finishBootSplash();
+    } else {
+        // Only foreground painting is deferred; background services stay live.
+        if (activeApp == STATE_LAUNCHER && pokoUI)                       pokoUI->update();
+        else if (activeApp == STATE_INFO && infoAppInstance)             infoAppInstance->update();
+        else if (activeApp == STATE_CLOCK && clockAppInstance)           clockAppInstance->update();
+        else if (activeApp == STATE_SSYNC && ssyncAppInstance)           ssyncAppInstance->update();
+        else if (activeApp == STATE_MUSIC_UI && musicAppInstance)        musicAppInstance->update();
+        else if (activeApp == STATE_VIDEO_UI && videoAppInstance)        videoAppInstance->update();
+        else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->update();
+        else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)       pixelAppInstance->update();
+        else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->update();
+    }
 
     // Background music update (track position, auto-advance, neopixel progress) when not in foreground
-    if (activeApp != STATE_MUSIC_UI && musicAppInstance) {
+    if (!bootSplashVisible && activeApp != STATE_MUSIC_UI && musicAppInstance) {
         musicAppInstance->update();
     }
 

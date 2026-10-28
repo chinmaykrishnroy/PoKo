@@ -1,6 +1,5 @@
 #include "BootSplash.h"
 #include <Arduino.h>
-#include <esp_task_wdt.h>
 #include <Arduino_GFX_Library.h>
 #include <U8g2lib.h>
 #include <math.h>
@@ -100,23 +99,19 @@ void BootSplash::update(uint8_t progress) {
     _canvas->flush();
 }
 
-void BootSplash::tick() {
-    if (!_canvas) return;
+bool BootSplash::tick() {
+    if (!_canvas) return false;
     uint32_t elapsed = millis() - _startedMs;
-    if (elapsed - _lastFrameMs < 33) return;
+    if (elapsed >= 1100) { finish(); return false; }
+    if (elapsed - _lastFrameMs < 33) return true;
     _lastFrameMs = elapsed;
     // White introduction, slower flowing color, then settle back to white.
     uint32_t progress = elapsed <= 120 ? 0 : (elapsed - 120) * 255 / 850;
     update(progress > 255 ? 255 : (uint8_t)progress);
+    return true;
 }
 
 void BootSplash::finish() {
-    while (_canvas && millis() - _startedMs < 1100) {
-        tick();
-        esp_task_wdt_reset();
-        delay(8);
-    }
-    update(255);
     delete _canvas;
     _canvas = nullptr;
 }

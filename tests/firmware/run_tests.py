@@ -22,7 +22,7 @@ def main() -> int:
         subprocess.run([sys.executable, str(HERE / script)], cwd=ROOT, check=True)
     cases = {
         "power-wake": ["held-power", "held-combo", "released", "rtc-restore-before-boot"],
-        "boot-splash": ["white-first", "fusion-randomized", "allocation-fallback", "visible-duration", "slow-startup", "clock-wrap"],
+        "boot-splash": ["white-first", "fusion-randomized", "allocation-fallback", "nonblocking-finish", "visible-duration", "slow-startup", "clock-wrap"],
         "library-status": ["empty", "offline", "error", "missing", "loading", "populated", "invalidated-cache"],
         "device-security": ["rotation-preserves-controls", "password-change-validation", "default-password", "storage-failure-keeps-admin", "setup-cannot-rotate", "metadata-auth-required",
                             "browser-no-native-prompt", "browser-session-tab-return", "browser-session-password-revocation", "browser-remember-cookie"],

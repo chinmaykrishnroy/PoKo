@@ -4,8 +4,8 @@
 class Arduino_GFX;
 class Arduino_Canvas;
 
-// Brief cold-boot animation. Setup advances it; finish completes its minimum
-// visible duration while yielding and servicing the watchdog. No background task.
+// Main-loop animation: tick draws at most one frame and never waits. Connectivity
+// and other background services continue throughout its visible duration.
 class BootSplash {
 public:
     BootSplash();
@@ -14,7 +14,7 @@ public:
     BootSplash& operator=(const BootSplash&) = delete;
     bool begin(Arduino_GFX* display, uint32_t seed);
     void update(uint8_t progress);
-    void tick();
+    bool tick();
     void finish();
 
 private:
