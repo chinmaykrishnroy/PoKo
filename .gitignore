@@ -1,8 +1,5 @@
 # ── Arduino build artefacts ───────────────────────────────────────────────────
-build/*
-!build/esp32.esp32.esp32s3/
-build/esp32.esp32.esp32s3/*
-!build/esp32.esp32.esp32s3/Poko.ino.bin
+build/
 *.elf
 *.map
 
