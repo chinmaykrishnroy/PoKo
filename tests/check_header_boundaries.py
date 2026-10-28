@@ -15,6 +15,7 @@ MIGRATED = (
     "MusicApp",
     "MediaServerRequest",
     "DeviceSecurity",
+    "DeviceAccessPolicy",
     "PixelApp",
     "PixelEngine",
     "PokoAPI",

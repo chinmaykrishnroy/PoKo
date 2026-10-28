@@ -4,7 +4,7 @@ The same firmware works with the public Pi server or a local server. It stores
 the server URL, device token, and optional private CA certificate in preferences.
 They are never part of a firmware release or exposed by the health API.
 
-For the public server, set the URL to `https://poko.prefect-sys.online:443`, use
+For your public server, set the URL to `https://poko.example.com:443`, use
 its device token, and leave the custom CA blank. The built-in CA bundle verifies
 the certificate. Clock sync must complete before HTTPS succeeds.
 

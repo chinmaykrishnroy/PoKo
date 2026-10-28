@@ -1,5 +1,8 @@
 #include "SettingsApp.h"
 #include <new>
+#include <WiFi.h>
+#include "DeviceSecurity.h"
+#include <esp_system.h>
 
 void SettingsApp::adjustScroll() {
         if (_selected < _scroll) {
@@ -71,6 +74,28 @@ void SettingsApp::adjustHeldValue(int direction) {
 void SettingsApp::renderToCanvas() {
         if (!_canvas) return;
         const auto& theme = currentTheme();
+        if (_securityPage) {
+            _canvas->fillScreen(theme.bg);
+            _canvas->setFont(u8g2_font_5x7_tf);
+            _canvas->setTextColor(theme.headerText);
+            _canvas->setCursor(3, 12); _canvas->print("Web UI Security");
+            _canvas->setCursor(3, 27); _canvas->print(WiFi.localIP().toString());
+            _canvas->setCursor(3, 40); _canvas->print("Username: admin");
+            _canvas->setCursor(3, 53); _canvas->print(prefs.getString("device_pass", "").length() ? "Paired" : "Not paired");
+            _canvas->setCursor(3, 69);
+            if (_recoveryPassword.length()) {
+                _canvas->print("New password:");
+                _canvas->setCursor(3, 82); _canvas->print(_recoveryPassword);
+                _canvas->setCursor(3, 98); _canvas->print("Save it. Reboot OTA.");
+            } else {
+                _canvas->print(_resetConfirm ? "Reset login password?" : "Change login in Web UI");
+                _canvas->setCursor(3, 85); _canvas->print("Pi controls preserved");
+                _canvas->setCursor(3, 101); _canvas->print(_resetConfirm ? "2R:Confirm reset" : "2R:Password recovery");
+            }
+            _canvas->setCursor(3, 122); _canvas->print("2L:Back");
+            _canvas->flush();
+            return;
+        }
 
         // Header (y=0..13)
         _canvas->fillRect(0, 0, 128, 14, theme.headerBg);
@@ -210,6 +235,7 @@ void SettingsApp::renderToCanvas() {
                 case 20: snprintf(valBuf, sizeof(valBuf), "Exec"); valCol = POKO_CLR_WARN; break;
                 case 21: snprintf(valBuf, sizeof(valBuf), "Shut"); valCol = POKO_CLR_ERR; break;
                 case 22: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
+                case 23: snprintf(valBuf, sizeof(valBuf), "Open"); break;
             }
 
             _canvas->setTextColor(valCol, isSel ? theme.surface : theme.bg);
@@ -244,6 +270,7 @@ void SettingsApp::renderToCanvas() {
 
 void SettingsApp::applyAction() {
         switch (_selected) {
+            case 23: _securityPage = true; _resetConfirm = false; _recoveryPassword = ""; break;
             case 0: { // Toggle Theme (Dark <-> Light)
                 bool nextDark = !isDarkTheme();
                 setPokoTheme(nextDark);
@@ -473,6 +500,8 @@ void SettingsApp::begin() {
 
 void SettingsApp::load() {
         _active   = true;
+        _securityPage = false;
+        _recoveryPassword = "";
         _selected = 0;
         _scroll   = 0;
         _dirty    = true;
@@ -482,6 +511,7 @@ void SettingsApp::load() {
 
 void SettingsApp::unload() {
         _active = false;
+        _recoveryPassword = "";
         flushHeldValue();
         if (_canvas) {
             delete _canvas;
@@ -494,6 +524,7 @@ bool SettingsApp::isLoaded() const { return _active; }
 void SettingsApp::refreshTheme() { if (_active) renderToCanvas(); }
 
 void SettingsApp::onLeft() {
+        if (_securityPage) return;
         flushHeldValue();
         _selected = (_selected == 0) ? (ITEM_COUNT - 1) : (_selected - 1);
         adjustScroll();
@@ -501,6 +532,7 @@ void SettingsApp::onLeft() {
     }
 
 void SettingsApp::onRight() {
+        if (_securityPage) return;
         flushHeldValue();
         _selected = (_selected + 1) % ITEM_COUNT;
         adjustScroll();
@@ -508,17 +540,31 @@ void SettingsApp::onRight() {
     }
 
 void SettingsApp::onBack() {
+        if (_securityPage) {
+            _securityPage = false; _resetConfirm = false; _recoveryPassword = "";
+            _dirty = true;
+            return;
+        }
         if (_exit) _exit(STATE_LAUNCHER);
     }
 
 void SettingsApp::onEnter() {
+        if (_securityPage) {
+            if (_recoveryPassword.length()) return;
+            if (!_resetConfirm) { _resetConfirm = true; _dirty = true; return; }
+            char password[17];
+            snprintf(password, sizeof(password), "%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());
+            if (replaceDevicePassword(String(password))) _recoveryPassword = password;
+            _dirty = true;
+            return;
+        }
         flushHeldValue();
         applyAction();
     }
 
-void SettingsApp::onHoldingLeft() { adjustHeldValue(-1); }
+void SettingsApp::onHoldingLeft() { if (!_securityPage) adjustHeldValue(-1); }
 
-void SettingsApp::onHoldingRight() { adjustHeldValue(1); }
+void SettingsApp::onHoldingRight() { if (!_securityPage) adjustHeldValue(1); }
 
 void SettingsApp::handleInput(InputEvent e) {
         switch (e) {

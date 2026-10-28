@@ -925,6 +925,19 @@ function renderSettings(){
       </div>
     </div>
     <div class="form-section">
+      <div class="form-title"><h3>Security</h3><p>Device login: admin. Your browser controls whether this Digest login is remembered. Use its password manager; PoKo does not save passwords in browser storage.</p></div>
+      <form id="devicePasswordForm" class="form-grid">
+        <input type="text" name="username" value="admin" autocomplete="username" readonly hidden>
+        <div class="field"><label for="current_password">Current password</label><input id="current_password" name="current_password" type="password" autocomplete="current-password" required maxlength="128"></div>
+        <div class="field"><label for="new_device_password">New password</label><input id="new_device_password" name="password" type="password" autocomplete="new-password" required minlength="16" maxlength="128"></div>
+        <div class="field"><label for="confirm_device_password">Confirm password</label><input id="confirm_device_password" name="confirmation" type="password" autocomplete="new-password" required minlength="16" maxlength="128"></div>
+        <p>Existing Pi media controls retain a separate, restricted integration credential. The previous password will no longer open this dashboard or authorize OTA. Forgot your password? Use Settings → Security on the physical device.</p>
+        <p>The device dashboard uses local HTTP: change passwords only on a trusted LAN. Reboot after changing the password to update ArduinoOTA authentication.</p>
+        <div class="form-foot"><button class="btn blue" type="submit">Change password</button></div>
+        <p id="passwordResult" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+    <div class="form-section">
       <div class="form-title"><h3>System</h3><p>Maintenance and OTA update.</p></div>
       <div style="padding:14px 15px;display:flex;gap:10px;flex-wrap:wrap">
         <a class="btn" href="/ota">${icon('upload')} OTA Update</a>
@@ -932,6 +945,22 @@ function renderSettings(){
         <button class="btn danger" onclick="rebootDevice()">${icon('reboot')} Reboot Device</button>
       </div>
     </div>`;
+  $('devicePasswordForm').onsubmit=changeDevicePassword;
+}
+
+let healthPollTimer=null;
+async function changeDevicePassword(event){
+  event.preventDefault();
+  const form=event.currentTarget,values=new FormData(form),result=$('passwordResult');
+  if(values.get('password')!==values.get('confirmation')){result.textContent='Passwords do not match.';return;}
+  const button=form.querySelector('button[type=submit]');button.disabled=true;
+  try{
+    await api('/api/security/password',{method:'POST',body:new URLSearchParams(values)});
+    clearInterval(healthPollTimer);
+    form.reset();
+    result.textContent='Password changed. Save the new password in your password manager. Reopen this page and sign in as admin with the new password. Pi media controls are preserved. Reboot to update ArduinoOTA.';
+  }catch(error){result.textContent=error.message;}
+  finally{button.disabled=false;}
 }
 
 async function renderSystem(){
@@ -1145,7 +1174,7 @@ async function pollHealth(){
   setupChrome();
   const hash=(location.hash||'').replace('#','');
   navigate(navItems.find(x=>x[0]===hash)?hash:'dashboard');
-  setInterval(pollHealth,3000);
+  healthPollTimer=setInterval(pollHealth,3000);
   pollHealth();
 })();
 </script>

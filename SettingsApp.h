@@ -37,8 +37,11 @@ private:
     uint32_t _lastHoldMs = 0;
     int8_t   _holdDirection = 0;
     int8_t   _pendingItem = -1;
+    bool _securityPage = false;
+    bool _resetConfirm = false;
+    String _recoveryPassword;
 
-    static constexpr uint8_t ITEM_COUNT   = 23;
+    static constexpr uint8_t ITEM_COUNT   = 24;
     static constexpr uint8_t ROW_H        = 16;
     static constexpr uint8_t TOP_Y        = 14;
     static constexpr uint8_t ROWS_VISIBLE = 6;
@@ -67,7 +70,8 @@ private:
         "Video View",
         "Reset Drivers",
         "Power Off",
-        "Reboot"
+        "Reboot",
+        "Security"
     };
 
     void adjustScroll();

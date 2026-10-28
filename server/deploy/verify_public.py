@@ -3,9 +3,12 @@ import base64
 from pathlib import Path
 import urllib.request
 import urllib.error
+from verification_config import verification_parser, load_verification_env, target_url, secret_directory
 
-base = "https://poko.prefect-sys.online"
-root = Path("/etc/poko")
+args = verification_parser(__doc__).parse_args()
+settings = load_verification_env(args.env)
+base = target_url(settings, "POKO_TEST_SERVER_URL", https=True)
+root = secret_directory(settings)
 admin = "Basic " + base64.b64encode(("admin:" + (root / "admin-password").read_text().strip()).encode()).decode()
 device = "Bearer " + (root / "device-token").read_text().strip()
 for auth, path, expected in [(None, "/health", 401), (admin, "/health", 200),

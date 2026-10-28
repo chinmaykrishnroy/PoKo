@@ -4,9 +4,12 @@ import json
 from pathlib import Path
 import urllib.error
 import urllib.request
+from verification_config import verification_parser, load_verification_env, target_url, secret_directory
 
-base = "http://127.0.0.1:8765"
-password = Path("/etc/poko/admin-password").read_text().strip()
+args = verification_parser(__doc__).parse_args()
+settings = load_verification_env(args.env)
+base = target_url(settings, "POKO_TEST_ORIGIN_URL")
+password = (secret_directory(settings) / "admin-password").read_text().strip()
 authorization = "Basic " + base64.b64encode(f"admin:{password}".encode()).decode()
 for path in ["/", "/health", "/api/server/config", "/api/library/audio"]:
     try:

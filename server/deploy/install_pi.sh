@@ -6,7 +6,7 @@ id poko >/dev/null 2>&1 || useradd --system --home-dir /var/lib/poko --shell /us
 install -d -m 755 /srv/poko /srv/poko/music /srv/poko/movies
 install -d -m 700 -o poko -g poko /var/lib/poko
 install -d -m 700 -o poko -g poko /var/lib/poko/uploads
-python3 /opt/poko/server/deploy/configure_pi.py
+python3 /opt/poko/server/deploy/configure_pi.py "$@"
 chown poko:poko /var/lib/poko/config.yml
 install -m 644 /opt/poko/server/deploy/poko.service /etc/systemd/system/poko.service
 systemctl daemon-reload

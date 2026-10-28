@@ -148,6 +148,22 @@ The media server uses a separate device token over HTTPS. See
 [persistent Pi/cloud deployment](server/deploy/README.md). The browser's server
 login password, device token, and device-admin password serve different roles.
 
+Use **Web UI → Settings → Security** to change the device-admin password.
+Enter the current password and confirm a new password of 16–128 characters.
+Allow your browser's password manager to save it if desired; persistence of the
+native Digest login is browser-controlled. PoKo never stores it in localStorage.
+For a forgotten password, open **Settings → Security** on the device, then choose
+password recovery and confirm. Write down the generated password shown on its
+screen; leaving that screen hides it. Existing Pi media controls remain paired
+using a restricted integration credential that cannot access administration or
+OTA. Reboot after a password change to update ArduinoOTA authentication too.
+Perform password changes on a trusted LAN: the device dashboard uses HTTP.
+
+For optional live verification, copy [.env.example](.env.example) to `.env`, edit
+your own targets and credential-file paths, and follow the
+[Pi reference architecture](server/deploy/README.md). Test scripts accept
+`--env /path/to/private.env`; your private deployment values stay outside Git.
+
 ### 2 — Build from source
 
 **Dependencies (Arduino CLI):**

@@ -33,8 +33,9 @@ RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 CapabilityBoundingSet=
 StateDirectory=poko
 ReadWritePaths=/var/lib/poko
-BindReadOnlyPaths=/home/roy/Music:/srv/poko/music
-BindReadOnlyPaths=/home/roy/Movies:/srv/poko/movies
+# Adapt the left-hand paths to the operator's media folders before installing.
+BindReadOnlyPaths=/srv/media/music:/srv/poko/music
+BindReadOnlyPaths=/srv/media/movies:/srv/poko/movies
 MemoryMax=512M
 TasksMax=64
 LimitNOFILE=256

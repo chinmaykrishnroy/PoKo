@@ -54,7 +54,7 @@ class SecurityTests(unittest.TestCase):
     def test_fail_closed_without_credentials(self):
         with patch.dict(os.environ, {"POKO_ADMIN_PASSWORD_HASH": ""}):
             with self.assertRaises(ValueError):
-                Authentication(True, "https://poko.prefect-sys.online")
+                Authentication(True, "https://poko.example.com")
 
     def test_authentication_and_origin_boundary_over_http(self):
         with workspace_tempdir() as root, patch.dict(os.environ, {
@@ -64,7 +64,7 @@ class SecurityTests(unittest.TestCase):
         }):
             config = load_config(Path(__file__).parents[1] / "config.example.yml")
             config = replace(config, host="127.0.0.1", port=0,
-                             security=SecurityConfig(True, "https://poko.prefect-sys.online"),
+                             security=SecurityConfig(True, "https://poko.example.com"),
                              library=LibraryConfig([root], root / "write", 5, db_path=root / "index.db"))
             server = make_server(config, dry_run=True)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -101,13 +101,13 @@ class SecurityTests(unittest.TestCase):
 
     def test_malformed_and_wrong_credentials(self):
         with patch.dict(os.environ, {"POKO_ADMIN_PASSWORD_HASH": password_hash("correct-password")}):
-            auth = Authentication(True, "https://poko.prefect-sys.online")
+            auth = Authentication(True, "https://poko.example.com")
             for header in ["", "Bearer anything", "Basic !!!", "Basic " + base64.b64encode(b"admin:wrong").decode()]:
                 self.assertFalse(auth.authorized(header))
             self.assertFalse(auth.same_origin({"Origin": "null"}))
 
     def test_secure_listener_cannot_be_public(self):
         config = load_config(Path(__file__).parents[1] / "config.example.yml")
-        config = replace(config, host="0.0.0.0", security=SecurityConfig(True, "https://poko.prefect-sys.online"))
+        config = replace(config, host="0.0.0.0", security=SecurityConfig(True, "https://poko.example.com"))
         with self.assertRaisesRegex(ValueError, "loopback"):
             make_server(config)

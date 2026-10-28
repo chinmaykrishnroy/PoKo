@@ -1,97 +1,186 @@
-# Persistent Pi deployment
+# Raspberry Pi deployment: a reference architecture
 
-The installed service is `poko.service`; the origin is **127.0.0.1:8765**.
-It runs as the unprivileged `poko` account, restarts on failure, starts at boot,
-and exposes no listener on the Pi's LAN or public interfaces.
+This case study describes one way to run an always-on PoKo media server. It is
+an adaptable example for self-hosters, not a hosted service, a required platform,
+or a description of a maintainer's private installation. Hostnames, device
+addresses, accounts, and media paths below are examples; choose your own.
 
-## Cloudflare Tunnel
+For a server used only at home, see [secure local hosting](../SECURE_LOCAL.md).
+Cloudflare and an internet domain are optional. Both approaches use the same
+firmware, API, and separate browser and device credentials.
 
-On the tunnel connector running on this Pi, add a public hostname:
+## The pattern
 
-- Hostname: `poko.prefect-sys.online`
-- Service: `http://127.0.0.1:8765`
-- Cache: bypass for all paths (the application also sends `Cache-Control: no-store`).
+```text
+Browser / PoKo HTTPS requests
+             |
+    Your HTTPS hostname
+             |
+  Cloudflare Tunnel connector
+             |
+      127.0.0.1:8765
+             |
+    Unprivileged PoKo service
+             |
+  Read-only media / private state
+```
 
-Do not use HTTPS for the loopback origin: Cloudflare terminates public HTTPS.
-If cloudflared runs in a container, its `127.0.0.1` is a different namespace;
-use host networking or put the origin and connector on the same private network.
-Do not solve that by exposing the unauthenticated legacy server.
+The example systemd service starts at boot and restarts on failure. Its HTTP
+origin listens only on loopback. The tunnel handles public TLS, while PoKo
+independently authenticates requests. No router port forwarding is needed.
 
-Optionally add Cloudflare Access restricted to your email for the browser UI
-and administration routes (`/`, `/api/server/*`, `/api/device/*`). Keep browser
-challenges off the device routes (`/health`, `/api/library/*`, `/api/audio/*`,
-`/api/video/*`, `/api/image/*`, `/api/playback/*`); their origin authentication
-requires the restricted device token. The ESP32 cannot complete interactive
-Cloudflare Access login. Alternatively provision separate Access service-token
-support before protecting the entire hostname; that is not configured here.
-The origin independently authenticates every request in either case.
-Do not publish the ESP32 dashboard, OTA handler, Snapcast, or TCP media ports.
+The Pi must also be able to reach the device on its trusted LAN: the current
+media transport sends PCM/MJPEG to the device's TCP ports 1234–1237. Publishing
+the server's HTTPS API does **not** make an ESP32 behind a remote NAT reachable.
+Travelling devices need a private routed VPN gateway or a future device-initiated
+TLS media transport. Never publish the device dashboard, OTA, Snapcast, or raw
+media ports to the internet.
 
-## Sign in
+## Adapt the example
 
-Username: `admin`. Retrieve the generated password on the Pi:
+The files in this directory illustrate a Linux/systemd installation. Review and
+adapt them before running with root privileges. They assume the server package
+has been copied to `/opt/poko/server`, Python dependencies from
+`server/requirements.txt` are installed for the service interpreter, and FFmpeg
+is installed. If using a virtual environment, adapt `ExecStart` in the unit.
+
+1. Choose a hostname you control, for example `poko.example.com`, and reserve
+   your device's LAN IP in DHCP. Example device addresses are not defaults for
+   anyone else's hardware.
+2. Edit `poko.service`: replace the left sides of `BindReadOnlyPaths` with your
+   existing music and movie directories. The sample uses `/srv/media/music` and
+   `/srv/media/movies`; create a movie directory if needed. The service sees
+   read-only mounts at `/srv/poko/music` and `/srv/poko/movies`. Ensure the `poko`
+   account can read the files and traverse their parent directories. Keep media
+   outside the source checkout.
+3. On first initialization, pass your own origin and device address:
+
+   ```sh
+   sudo sh /opt/poko/server/deploy/install_pi.sh \
+     --public-origin https://poko.example.com --device-host 192.168.1.50
+   ```
+
+   The script creates a dedicated `poko` account and private state, installs the
+   adapted unit, and enables the service. Existing configuration and credentials
+   are preserved; later command-line arguments do not overwrite them. Edit the
+   private config explicitly when changing an existing installation.
+4. Configure your tunnel to route your hostname to `http://127.0.0.1:8765`.
+   Bypass caching; the origin also sends `Cache-Control: no-store`. If the tunnel
+   connector is containerized, its loopback is a different network namespace:
+   use host networking or a private network shared with the origin. Keep the
+   origin inaccessible from public interfaces.
+5. Provision the device on your trusted LAN within its initial five-minute
+   pairing window:
+
+   ```sh
+   sudo python3 /opt/poko/server/deploy/pair_device.py 192.168.1.50 \
+     --server-url https://poko.example.com
+   ```
+
+   The helper sends an independent device-admin password and media token. It
+   does not print either secret. For a private-CA local server, provision its CA
+   in the device dashboard using the [local hosting guide](../SECURE_LOCAL.md).
+6. Copy the repository's `.env.example` to a private `.env` file and fill in your
+   own device/server/origin URLs, credential-file directory, and expected firmware
+   version. No passwords need to be copied into it: verification reads the private
+   files at `POKO_TEST_SECRETS_DIR`. Then verify the boundaries:
+
+   ```sh
+   sudo python3 /opt/poko/server/deploy/verify_pi.py --env /path/to/private.env
+   sudo python3 /opt/poko/server/deploy/verify_public.py --env /path/to/private.env
+   sudo python3 /opt/poko/server/deploy/verify_device.py --env /path/to/private.env
+   ```
+
+The public check expects anonymous requests to be rejected, valid browser and
+media credentials to work, and media credentials to be denied configuration.
+The device check verifies firmware and server selection. Set `POKO_TEST_PLAYBACK=1`
+to opt into Music/Video checks; these stop current playback, lower test volume,
+and restore the previous app and master volume afterward. Supply a song and a
+selected video longer than 30 seconds. The scripts do not create media. Process
+environment variables override `.env` values. `.env` is ignored by Git; the
+example contains illustrative targets only. Hermetic unit tests keep synthetic
+fixture values and do not require access to your deployment.
+
+Optional Cloudflare Access policies must cover only browser/admin routes such
+as `/`, `/api/server/*`, and `/api/device/*`. Keep interactive challenges off
+`/health`, `/api/library/*`, `/api/audio/*`, `/api/video/*`, `/api/image/*`, and
+`/api/playback/*`: the ESP32 cannot complete a browser login. These routes still
+require origin authentication with a restricted device token. Additional
+Cloudflare service-token support would be needed before protecting the entire
+hostname with Access.
+
+## Credentials and password changes
+
+This is a single-owner installation, not a multi-user media hosting platform.
+There are distinct credentials:
+
+| Credential | Purpose | Initial private file |
+| --- | --- | --- |
+| Server browser login (`admin`) | Manage the media server | `/etc/poko/admin-password` |
+| Media device token | Device catalog and playback requests over HTTPS | `/etc/poko/device-token` |
+| Device administrator (`admin`) | Local device dashboard, configuration and OTA | `/etc/poko/device-admin-password` |
+
+Root-only `/etc/poko/credentials.env` provides the server's scrypt password
+verifier, token hash, and device-control credential. Secrets must not be stored
+in Git, editable YAML, screenshots, or public configuration responses.
+
+Retrieve the server browser password locally as the operator:
 
 ```sh
 sudo cat /etc/poko/admin-password
 ```
 
-The browser uses its native sign-in prompt. Use the public HTTPS hostname.
-For local testing, use an SSH local forward rather than opening port 8765 to
-the LAN. Browser Basic credentials are cached by the browser; close its private
-session to sign out. This is a single-administrator deployment, not multi-user
-accounts or an account-isolated media hosting service.
+Rotate **only** that browser password without disturbing device playback:
 
-Only root can read `/etc/poko/credentials.env` and the password recovery file.
-The server gets only a salted scrypt verifier through its service environment;
-passwords are absent from YAML, HTTP configuration responses, and Git.
-To rotate, run a root shell, remove those two files, run `configure_pi.py`, and
-restart the service. Existing browser credentials then stop working.
+```sh
+sudo python3 /opt/poko/server/scripts/rotate_admin.py
+sudo systemctl restart poko
+```
 
-## Media and state
+Do not delete the whole credentials file to rotate one password; that can break
+pairing. Browser persistence of native HTTP authentication is browser-controlled.
+Use a private browser session on shared computers. Use an SSH local forward for
+origin administration instead of exposing plaintext Basic authentication on LAN.
 
-- Add music to `/home/roy/Music`.
-- Add movies to `/home/roy/Movies` (created if previously absent).
-- Inside the sandbox these are mounted read-only at `/srv/poko/music` and
-  `/srv/poko/movies`.
-- Editable configuration: `/var/lib/poko/config.yml`.
-- Database: `/var/lib/poko/catalog.db`.
-- Writable runtime/uploads: `/var/lib/poko/uploads`.
+Device firmware v2.0.2 adds **Web UI → Settings → Security** for human password
+changes and **Settings → Security** on the physical device for confirmed
+recovery. The generated recovery password is shown only on its screen. After a
+change, the initially provisioned device-admin recovery file is stale: save the
+new password in your password manager. Reboot to update ArduinoOTA's password.
 
-Use **Rescan** in the library after copying media. Security settings require a
-restart and cannot be disabled using the web config editor. Existing config
-and credentials are preserved on reinstall. The service deliberately cannot
-write to the original media folders or read the rest of `/home/roy`.
+On the first device password change, the existing Pi credential becomes a
+separate, restricted integration credential for media controls. It cannot open
+the dashboard, change security/server settings, reset drivers, or upload OTA.
+Further human password changes preserve it, so the Pi remains paired. This does
+not revoke a compromised integration credential; replace/re-provision that
+credential separately if needed. Device HTTP control remains LAN-only: Digest
+authenticates requests but does not encrypt the connection.
 
-## Operations
+## Private state and operation
+
+Example paths can be changed together in the configuration and service unit:
+
+- `/var/lib/poko/config.yml`: editable server configuration.
+- `/var/lib/poko/catalog.db`: media index.
+- `/var/lib/poko/uploads`: writable runtime uploads.
+- `/srv/poko/music` and `/srv/poko/movies`: read-only source media mounts.
+
+Use **Rescan** after copying media. Security configuration changes require a
+service restart and cannot be disabled from the web config editor. Back up
+private configuration and credentials separately from source media.
 
 ```sh
 sudo systemctl status poko
 sudo journalctl -u poko -n 50 --no-pager
 sudo systemctl restart poko
-sudo python3 /opt/poko/server/deploy/verify_pi.py
 ```
 
-The application has eight concurrent request slots and 15-second socket
-timeouts. systemd limits memory, processes, file descriptors, and privileges;
-FFmpeg child processes are killed together with the service on restart. Back up
-`/var/lib/poko/config.yml` and the credentials separately from the media itself.
+The example limits HTTP concurrency, socket timeouts, memory, processes, file
+descriptors, and privileges. FFmpeg children stop with the service. Tune resource
+limits for your machine and workload; an example configuration is not a capacity
+guarantee. Check free disk space before indexing or copying large libraries.
 
-## Transport limitations
-
-The internet hostname securely exposes the server's administration/catalog API.
-Firmware v2 uses a separate bearer device token for its HTTPS catalog and media-control requests. The admin browser password is never provisioned to the device. Device tokens cannot read configuration, access device administration, or change server settings. There is no anonymous bypass.
-
-The server can control and stream to a configured device on a network reachable
-from the Pi. It sends PCM/MJPEG to device TCP ports 1234–1237; an HTTP tunnel
-does not make a remote ESP32 behind NAT reachable. In secure mode playback
-always targets the configured device, never the Cloudflare proxy's source IP.
-Do not trust X-Forwarded-For as a media destination or authentication signal.
-
-Supporting a travelling device requires a device-initiated authenticated TLS
-stream (and provisioned per-device credentials), or a private routed VPN gateway.
-That is a firmware/protocol migration; public reverse TCP ports are not a safe
-replacement. HTTPS firmware must validate certificates; do not use setInsecure.
-
-Firmware v2 protects device control and web OTA using Digest authentication, and ArduinoOTA is enabled only after a device-admin password exists. Provision on a trusted LAN using `sudo python3 /opt/poko/server/deploy/pair_device.py 192.168.0.3` within five minutes after the first v2 boot. The local root dashboard also presents an initial password form during this window. All other unpaired device routes are blocked. Reboots do not clear provisioned credentials.
-
-The device username is `admin`; its separate password is in `/etc/poko/device-admin-password`. The media token is in `/etc/poko/device-token`. Changing the browser password does not break device playback. Keep raw media ports and the device dashboard LAN-only; Digest authenticates but does not encrypt device HTTP control. Firmware signatures, encrypted raw media transport, encrypted NVS and secure boot are not implemented by this release.
+TLS verification uses the device's CA bundle or a provisioned private CA and
+requires a valid device clock. Do not disable certificate verification. Secure
+boot, signed firmware, encrypted NVS, and encrypted raw LAN media transport are
+not implemented by this release. A tunnel alone does not add those properties.

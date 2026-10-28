@@ -7,6 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v2.0.2] — 2026-10-28
+
+- Added device Web UI password changes with current-password verification and
+  confirmation, password-manager fields, and no browser credential storage.
+- Added Settings → Security with device address, pairing status, and confirmed
+  password recovery displaying a generated password only on the device.
+- Preserve existing Pi media controls through a separate restricted integration
+  credential when the human login changes; deny it administration and OTA.
+- Added regressions for credential migration, access restrictions, validation,
+  failed preference writes, and rejection of password rotation via setup.
+
 ## [v2.0.1] — 2026-10-28
 
 Includes the authenticated local/cloud architecture and review fixes below.
