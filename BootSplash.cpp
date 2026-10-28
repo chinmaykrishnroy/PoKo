@@ -1,4 +1,6 @@
 #include "BootSplash.h"
+#include <Arduino.h>
+#include <esp_task_wdt.h>
 #include <Arduino_GFX_Library.h>
 #include <U8g2lib.h>
 #include <math.h>
@@ -25,13 +27,15 @@ void wordmark(Arduino_GFX& gfx) {
 }
 }
 
-BootSplash::BootSplash() : _canvas(nullptr), _progress(-1) {}
+BootSplash::BootSplash() : _canvas(nullptr), _progress(-1), _startedMs(0), _lastFrameMs(0) {}
 BootSplash::~BootSplash() { delete _canvas; }
 
 bool BootSplash::begin(Arduino_GFX* display, uint32_t seed) {
     delete _canvas;
     _canvas = nullptr;
     _progress = -1;
+    _startedMs = millis();
+    _lastFrameMs = 0;
     if (!display) return false;
     _canvas = new (std::nothrow) Arduino_Canvas(128, 128, display);
     if (!_canvas || !_canvas->begin(GFX_SKIP_OUTPUT_BEGIN)) {
@@ -96,7 +100,22 @@ void BootSplash::update(uint8_t progress) {
     _canvas->flush();
 }
 
+void BootSplash::tick() {
+    if (!_canvas) return;
+    uint32_t elapsed = millis() - _startedMs;
+    if (elapsed - _lastFrameMs < 33) return;
+    _lastFrameMs = elapsed;
+    // White introduction, slower flowing color, then settle back to white.
+    uint32_t progress = elapsed <= 120 ? 0 : (elapsed - 120) * 255 / 850;
+    update(progress > 255 ? 255 : (uint8_t)progress);
+}
+
 void BootSplash::finish() {
+    while (_canvas && millis() - _startedMs < 1100) {
+        tick();
+        esp_task_wdt_reset();
+        delay(8);
+    }
     update(255);
     delete _canvas;
     _canvas = nullptr;

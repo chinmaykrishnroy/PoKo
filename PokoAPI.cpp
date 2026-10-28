@@ -1,6 +1,8 @@
 #include "PokoAPI.h"
 #include "DeviceSecurity.h"
 #include "SyncedAVPlayer.h"
+#include <esp_sleep.h>
+#include <esp_system.h>
 extern SyncedAVPlayer* syncPlugin;
 
 bool PokoAPI::validateJpegBlock(int16_t, int16_t, uint16_t, uint16_t, uint16_t*) {
@@ -38,8 +40,11 @@ void PokoAPI::begin() {
             json += "\"heap_free\":" + String(ESP.getFreeHeap()) + ",";
             json += "\"psram_free\":" + String(ESP.getFreePsram()) + ",";
             json += "\"uptime_ms\":" + String(millis()) + ",";
+            json += "\"reset_reason\":" + String((int)esp_reset_reason()) + ",";
+            json += "\"last_wake_cause\":" + String((int)esp_sleep_get_wakeup_cause()) + ",";
+            json += "\"last_ext1_wake_mask\":" + String((unsigned long)esp_sleep_get_ext1_wakeup_status()) + ",";
             json += "\"cpu_mhz\":" + String(getCpuFrequencyMhz()) + ",";
-            json += "\"firmware_version\":\"v2.3.1\",";
+            json += "\"firmware_version\":\"v2.3.2\",";
             json += "\"app_state\":" + String((int)activeApp) + ",";
             json += "\"theme\":\"" + String(isDarkTheme() ? "dark" : "light") + "\",";
             json += "\"master_vol\":" + String(getMasterVolumeLimit()) + ",";

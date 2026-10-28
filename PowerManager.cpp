@@ -335,11 +335,19 @@ void PowerManager::powerOff(bool restart) {
         // 7. If USB power is attached, the board remains powered.
         // USB fallback: all three active-low RTC GPIO buttons can wake the chip.
         Serial.println("[power] Latch released; entering Deep Sleep with GPIO wake fallback");
-        // Wait for the shutdown gesture to release, otherwise ANY_LOW wakes
-        // immediately. RTC pull-ups keep the active-low inputs stable in sleep.
-        uint32_t releaseStart = millis();
-        while ((digitalRead(POKO_PIN_BTN_PWR) == LOW || digitalRead(POKO_PIN_BTN_DOWN) == LOW ||
-                digitalRead(POKO_PIN_BTN_UP) == LOW) && millis() - releaseStart < 3000) {
+        // On USB the CPU survives latch release. Do not drop a still-held
+        // shutdown button from the wake mask after an arbitrary timeout.
+        // Wait for a debounced release, then arm every button for the next press.
+        esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+        uint32_t releasedSince = 0;
+        bool settling = false;
+        for (;;) {
+            bool held = digitalRead(POKO_PIN_BTN_PWR) == LOW ||
+                        digitalRead(POKO_PIN_BTN_DOWN) == LOW ||
+                        digitalRead(POKO_PIN_BTN_UP) == LOW;
+            if (held) settling = false;
+            else if (!settling) { releasedSince = millis(); settling = true; }
+            else if (millis() - releasedSince >= 30) break;
             esp_task_wdt_reset();
             delay(10);
         }
@@ -347,9 +355,11 @@ void PowerManager::powerOff(bool restart) {
         for (int pin : {POKO_PIN_BTN_PWR, POKO_PIN_BTN_DOWN, POKO_PIN_BTN_UP}) {
             rtc_gpio_pullup_en((gpio_num_t)pin);
             rtc_gpio_pulldown_dis((gpio_num_t)pin);
-            if (digitalRead(pin) != LOW) wakeMask |= 1ULL << pin;
+            wakeMask |= 1ULL << pin;
         }
         if (wakeMask) esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
+        Serial.printf("[power] DEEP_SLEEP reason=power_off wake_mask=0x%llx buttons_released=true\n",
+                      (unsigned long long)wakeMask);
         esp_deep_sleep_start();
     }
 

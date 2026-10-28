@@ -9,10 +9,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-- Show a white PoKo wordmark with brief randomized color fusion during cold
-  startup, driven by existing initialization milestones without a timed hold.
+- Pace the white PoKo cold-boot wordmark and randomized color fusion over about
+  1.1 seconds, with a yielding, watchdog-serviced minimum display duration.
 - Initialize the panel with the backlight off and reuse it for app canvases,
   avoiding redundant display resets during boot and app changes.
+- Keep all shutdown buttons armed for USB deep-sleep wake even after long holds;
+  wait for a stable release instead of excluding held buttons after three seconds.
+- Restore RTC GPIO holds/mode before boot-time button reads, including the
+  charge-only decision, and clear stale sleep wake sources before power-off.
 
 ## [v2.3.0] — 2026-10-28
 

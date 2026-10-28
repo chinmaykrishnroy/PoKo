@@ -568,6 +568,13 @@ void enterChargeOnlySleep() {
 
 // ── Arduino Setup ─────────────────────────────────────────────
 void setup() {
+    // Deep-sleep GPIOs remain in RTC mode. Restore them before any boot-time
+    // button sampling (including the USB charge-only decision), not later in UI setup.
+    for (int pin : {POKO_PIN_BTN_PWR, POKO_PIN_BTN_DOWN, POKO_PIN_BTN_UP}) {
+        rtc_gpio_hold_dis((gpio_num_t)pin);
+        rtc_gpio_deinit((gpio_num_t)pin);
+        pinMode(pin, INPUT_PULLUP);
+    }
     if (completePendingIdlePowerOffWake()) return;
     powerLatchOn();
     Serial.begin(115200);
@@ -667,7 +674,7 @@ void setup() {
     }
 
     // 0. Theme Init
-    splash.update(60);
+    splash.tick();
     String savedTheme = prefs.getString("ui_theme", "dark");
     setPokoTheme(savedTheme != "light");
 
@@ -680,12 +687,12 @@ void setup() {
     setScaledVolume(savedVol);
     int savedBoost = prefs.getInt("amp_boost", 0);
     setAmpBoostDb(savedBoost);
-    splash.update(115);
+    splash.tick();
 
     // 4. WS2812B LEDs
     initLEDs();
     pixelEngine.loadFromPreferences(prefs);
-    splash.update(175);
+    splash.tick();
 
     // 5. Button Input Setup (3 physical buttons: DOWN=0, UP=4, PWR=5)
     btnInput.onPress([]() -> bool {
@@ -720,8 +727,8 @@ void setup() {
     btnInput.onBothVLong(onComboBothVLong);
     btnInput.onBothUltra(onComboBothUltra);
     btnInput.begin();
-    splash.update(230);
-    splash.finish(); // No hold or delay; logo remains until the app paints.
+    splash.tick();
+    splash.finish(); // Complete the brief, time-paced fusion before app allocation.
 
     // 6. Instantiate Central AudioManager & Background SnapPlayer Service
     audioManager = new AudioManager();

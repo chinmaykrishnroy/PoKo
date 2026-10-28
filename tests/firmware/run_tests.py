@@ -18,10 +18,11 @@ def main() -> int:
     if not (args.onebutton / "OneButton.cpp").is_file():
         parser.error("Pass --onebutton with the installed OneButton source directory")
     BUILD.mkdir(parents=True, exist_ok=True)
-    for script in ("prepare_audio_test.py", "prepare_video_test.py", "prepare_music_test.py", "prepare_library_status_test.py"):
+    for script in ("prepare_audio_test.py", "prepare_video_test.py", "prepare_music_test.py", "prepare_library_status_test.py", "prepare_power_wake_test.py"):
         subprocess.run([sys.executable, str(HERE / script)], cwd=ROOT, check=True)
     cases = {
-        "boot-splash": ["white-first", "fusion-randomized", "allocation-fallback"],
+        "power-wake": ["held-power", "held-combo", "released", "rtc-restore-before-boot"],
+        "boot-splash": ["white-first", "fusion-randomized", "allocation-fallback", "visible-duration", "slow-startup", "clock-wrap"],
         "library-status": ["empty", "offline", "error", "missing", "loading", "populated", "invalidated-cache"],
         "device-security": ["rotation-preserves-controls", "password-change-validation", "default-password", "storage-failure-keeps-admin", "setup-cannot-rotate", "metadata-auth-required",
                             "browser-no-native-prompt", "browser-session-tab-return", "browser-session-password-revocation", "browser-remember-cookie"],
@@ -46,6 +47,7 @@ def main() -> int:
         "audio-activity": ["silence", "audible-positive", "audible-negative"],
     }
     sources = {
+        "power-wake": [HERE / "power_wake.cpp"],
         "boot-splash": [HERE / "boot_splash.cpp", ROOT / "BootSplash.cpp"],
         "library-status": [HERE / "library_status.cpp"],
         "device-security": [HERE / "device_security.cpp", ROOT / "DeviceSecurity.cpp", ROOT / "DeviceAccessPolicy.cpp", ROOT / "DeviceWebSession.cpp"],

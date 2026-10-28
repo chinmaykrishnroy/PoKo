@@ -52,6 +52,7 @@ ButtonInput::ButtonInput() { _instance = this; }
 void ButtonInput::begin() {
 #ifdef ARDUINO_ARCH_ESP32
         for (int pin : {POKO_PIN_BTN_DOWN, POKO_PIN_BTN_UP, POKO_PIN_BTN_PWR}) {
+            rtc_gpio_hold_dis((gpio_num_t)pin);
             rtc_gpio_deinit((gpio_num_t)pin);
         }
 #endif
