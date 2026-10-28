@@ -18,9 +18,10 @@ def main() -> int:
     if not (args.onebutton / "OneButton.cpp").is_file():
         parser.error("Pass --onebutton with the installed OneButton source directory")
     BUILD.mkdir(parents=True, exist_ok=True)
-    for script in ("prepare_audio_test.py", "prepare_video_test.py", "prepare_music_test.py"):
+    for script in ("prepare_audio_test.py", "prepare_video_test.py", "prepare_music_test.py", "prepare_library_status_test.py"):
         subprocess.run([sys.executable, str(HERE / script)], cwd=ROOT, check=True)
     cases = {
+        "library-status": ["empty", "offline", "error", "missing", "loading", "populated"],
         "device-security": ["rotation-preserves-controls", "password-change-validation", "storage-failure-keeps-admin", "setup-cannot-rotate", "metadata-auth-required",
                             "browser-no-native-prompt", "browser-session-tab-return", "browser-session-password-revocation", "browser-remember-cookie"],
         "buttons": ["deferred-init", "double-left", "double-right", "info-hold", "power-click",
@@ -44,6 +45,7 @@ def main() -> int:
         "audio-activity": ["silence", "audible-positive", "audible-negative"],
     }
     sources = {
+        "library-status": [HERE / "library_status.cpp"],
         "device-security": [HERE / "device_security.cpp", ROOT / "DeviceSecurity.cpp", ROOT / "DeviceAccessPolicy.cpp", ROOT / "DeviceWebSession.cpp"],
         "buttons": [HERE / "buttons.cpp", ROOT / "ButtonInput.cpp", args.onebutton / "OneButton.cpp"],
         "audio": [ROOT / "build/audio-test.cpp"],

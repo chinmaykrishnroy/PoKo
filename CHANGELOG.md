@@ -7,6 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v2.2.1] — 2026-10-28
+
+- Show a neutral `0/0` with No Videos/No Songs for an empty reachable
+  library, instead of the incorrect Offline header. Clear stale artwork when
+  the catalog becomes empty; retain distinct offline, error and missing states.
+- Includes the synchronized remote playback fixes from the v2.2.0 candidate.
+
 ## [v2.2.0] — 2026-10-28
 
 - Synchronize remote Music/Video identity, title, artwork, catalog position and

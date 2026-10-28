@@ -124,6 +124,10 @@ bool MusicApp::fetchSongList(int index, bool loadArt) {
         _loadingList = false;
         if (parsed && total == 0) {
             _songCount = 0;
+            _selectedIdx = 0;
+            _artSize = 0;
+            _artBitmapValid = false;
+            _loadedId[0] = _artRequestedId[0] = 0;
             _catalogTotal = 0;
             _catalogIndex = 0;
             _pageStart = -1;
@@ -396,9 +400,9 @@ void MusicApp::renderToCanvas() {
             _canvas->setCursor(72, 11);
             _canvas->print("Loading...");
         } else {
-            _canvas->setTextColor(0xF800, theme.headerBg);
-            _canvas->setCursor(76, 11);
-            _canvas->print("Offline");
+            _canvas->setTextColor(theme.muted, theme.headerBg);
+            _canvas->setCursor(110, 11);
+            _canvas->print("0/0");
         }
 
         if (_mode == MODE_BROWSE) {

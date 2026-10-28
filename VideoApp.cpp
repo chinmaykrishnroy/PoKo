@@ -94,6 +94,9 @@ bool VideoApp::fetchVideoList(int index, bool loadThumb) {
         _loadingList = false;
         if (parsed && total == 0) {
             _videoCount = 0;
+            _selectedIdx = 0;
+            _thumbSize = 0;
+            _loadedId[0] = 0;
             _catalogTotal = 0;
             _catalogIndex = 0;
             _pageStart = -1;
@@ -379,9 +382,9 @@ void VideoApp::renderToCanvas() {
             _canvas->setCursor(72, 11);
             _canvas->print("Loading...");
         } else {
-            _canvas->setTextColor(0xF800, theme.headerBg);
-            _canvas->setCursor(76, 11);
-            _canvas->print("Offline");
+            _canvas->setTextColor(theme.muted, theme.headerBg);
+            _canvas->setCursor(110, 11);
+            _canvas->print("0/0");
         }
 
         // Single Video Card Frame (y=16..84)
