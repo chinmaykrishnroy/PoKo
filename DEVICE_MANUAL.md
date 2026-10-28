@@ -308,7 +308,7 @@ These combinations are globally active across every screen:
 |:---|:---:|:---|
 | **`PWR` Click** | Single click ($< 300\text{ ms}$) | **Toggle Screen Sleep / Wake** (shuts off backlight and GC9107 display controller). |
 | **`PWR` Hold** | Hold $\ge 2.0\text{ seconds}$ | **Graceful Power-Off** (flushes NVS, stops audio, puts amp in standby, cuts battery latch). |
-| **`L + R` Click** | Simultaneous quick click | **Audio Play/Pause / Mute Toggle** (or toggles LED ring if no audio is playing). |
+| **`L + R` Click** | Simultaneous quick click | Toggle Pixel **Solid / Off**, preserving RGB color, brightness, and selected LEDs. |
 | **`L + R` Double-Click** | Two quick clicks within 450 ms | **Jump Directly to InfoApp** (telemetry and system health). |
 | **`L + R` Hold** | Hold **2.5 seconds** | **Clean System Reboot** (displays "REBOOTING..." alert and calls `ESP.restart()`). |
 | **`L + R` Long Hold** | Hold **5.0 seconds** | **Emergency Driver Reset** (re-initializes I²C, ES8311, GC9107 display, and WS2812). |

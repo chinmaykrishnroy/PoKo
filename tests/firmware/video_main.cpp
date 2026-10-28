@@ -61,6 +61,23 @@ int main(int argc, char** argv) {
         prefs.videoFit = true;
         app.onRight();
         CHECK(lastUrl.find("aspect=fit") != std::string::npos);
+    } else if (!strcmp(argv[1], "async-rejected")) {
+        responseMalformed = true;
+        app.requestPlay(0);
+        CHECK(app._mode == VideoApp::MODE_BROWSE && app._serverError);
+    } else if (!strcmp(argv[1], "async-failed")) {
+        app.requestPlay(0);
+        testMillis += 1000;
+        secondHttpResult = 200;
+        responseStatus = "failed";
+        CHECK(!app.reconcileOperation());
+        CHECK(app._mode == VideoApp::MODE_BROWSE && app._serverError);
+    } else if (!strcmp(argv[1], "async-stale-result")) {
+        app.requestPlay(0);
+        testMillis += 1000;
+        secondHttpResult = 200;
+        responseRequestId = "older-generation";
+        CHECK(!app.reconcileOperation());
     }
     puts("PASS");
 }

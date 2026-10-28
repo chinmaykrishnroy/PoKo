@@ -565,8 +565,9 @@ void PowerManager::update() {
             }
         }
 
-        // 7. Layered idle power states. Always-on/ambient display choices are
-        // respected because radio hibernate and sleep require DISPLAY_POWER_OFF.
+        // 7. Display and radio are independent: local apps may keep the display
+        // visible while Wi-Fi hibernates (static pink status dot). Light/deep
+        // sleep require DISPLAY_POWER_OFF. Protected media blocks all three.
         uint32_t idleMs = powerIdleMs;
         bool blockingLowPowerLock = hasLock(
             POWER_LOCK_DISPLAY | POWER_LOCK_AUDIO | POWER_LOCK_REALTIME_NET |

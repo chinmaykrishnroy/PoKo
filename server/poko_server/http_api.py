@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import ssl
 import json
 import re
 import socket
@@ -21,12 +23,44 @@ from .media_index import MediaIndex
 from .models import MediaItem
 from .playback import PlaybackManager
 from .ui import ADMIN_HTML, FAVICON_SVG
+from .security import Authentication
 
 
 class PokoHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = not hasattr(socket, "SO_EXCLUSIVEADDRUSE")
     allow_reuse_port = False
     daemon_threads = True
+    request_queue_size = 16
+
+    def __init__(self, *args, **kwargs):
+        self._slots = threading.BoundedSemaphore(8)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(timeout=0.5):
+            try:
+                request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            except OSError:
+                pass
+            request.close()
+            return
+        request.settimeout(15)
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            context = getattr(self.RequestHandlerClass, "tls_context", None)
+            if context is not None:
+                request = context.wrap_socket(request, server_side=True)
+            super().process_request_thread(request, client_address)
+        except (ssl.SSLError, TimeoutError, ConnectionError):
+            request.close()
+        finally:
+            self._slots.release()
 
     def server_bind(self) -> None:
         # Windows SO_REUSEADDR can admit a second listener on the same port.
@@ -199,6 +233,8 @@ class PokoBackend:
         return self.audio_filters_json()
 
     def _apply_loaded_config(self, updated: AppConfig, *, rescan: bool = True) -> bool:
+        if updated.security != self.config.security:
+            raise ValueError("Security settings require a service restart")
         self.index.reconfigure(updated, restart_scan=False)
         self.config = updated
         self.device.config = updated
@@ -340,11 +376,21 @@ def _int_query(query: dict[str, list[str]], key: str, default: int = 0) -> int:
 
 class PokoRequestHandler(BaseHTTPRequestHandler):
     backend: PokoBackend
+    authentication: Authentication
 
     server_version = "PokoBackend/0.1"
 
     def log_message(self, format: str, *args: Any) -> None:
-        print("%s - - [%s] %s" % (self.client_address[0], self.log_date_time_string(), format % args))
+        # Never persist Authorization, query credentials, or attacker-controlled
+        # request text in terminal logs.
+        print(f"{self.client_address[0]} {self.command} status={getattr(self, '_last_status', 0)}")
+
+    def end_headers(self) -> None:
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
 
     def do_GET(self) -> None:
         self._handle_logged()
@@ -360,23 +406,37 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
         self._last_status = 200
         error = None
         try:
+            role = self.authentication.role(self.headers.get("Authorization", ""))
+            if role is None:
+                self._last_status = 401
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="PoKo", charset="UTF-8"')
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if role == "device" and not self.authentication.device_route_allowed(self.command, urlparse(self.path).path):
+                self._json({"ok": False, "error": "device credential cannot access administration"}, HTTPStatus.FORBIDDEN)
+                return
+            if not self.authentication.same_origin(self.headers):
+                self._json({"ok": False, "error": "cross-origin request refused"}, HTTPStatus.FORBIDDEN)
+                return
             self._handle()
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             error = str(exc)
             self._json({"ok": False, "error": f"invalid request: {error}"}, HTTPStatus.BAD_REQUEST)
         except Exception as exc:
             error = str(exc)
-            self._json({"ok": False, "error": error}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            self._json({"ok": False, "error": "internal server error"}, HTTPStatus.INTERNAL_SERVER_ERROR)
         finally:
             duration_ms = (time.time() - start) * 1000
             parsed = urlparse(self.path)
             self.backend.index.db.log_request(
                 self.command,
-                parsed.path + (("?" + parsed.query) if parsed.query else ""),
+                parsed.path if self.authentication.enabled else self.path,
                 int(getattr(self, "_last_status", 200)),
                 duration_ms,
                 self.client_address[0] if self.client_address else None,
-                error,
+                None if self.authentication.enabled else error,
             )
 
     def _handle(self) -> None:
@@ -564,7 +624,7 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                     item,
                     _float_query(query, "start", 0),
                     switch_device=switch_device,
-                    target_host=None if switch_device else self.client_address[0],
+                    target_host=None if switch_device or self.authentication.enabled else self.client_address[0],
                 )
                 self._json(result, HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_GATEWAY)
                 return
@@ -583,7 +643,7 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                     "profile": _first(query, "profile", "balanced"),
                     "fps": _float_query(query, "fps", 0) or None,
                     "jpeg_quality": _int_query(query, "jpeg_quality", 0) or None,
-                    "target_host": None if switch_device else self.client_address[0],
+                    "target_host": None if switch_device or self.authentication.enabled else self.client_address[0],
                 }
                 if async_request:
                     play_options["request_id"] = _first(query, "request_id", None)
@@ -655,18 +715,19 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                 }
                 if async_request:
                     seek_options["request_id"] = _first(query, "request_id", None)
-                self._json(
-                    seek(**seek_options),
-                    HTTPStatus.ACCEPTED if async_request else HTTPStatus.OK,
-                )
+                result = seek(**seek_options)
+                self._json(result, (HTTPStatus.ACCEPTED if async_request else HTTPStatus.OK)
+                           if result.get("ok") else HTTPStatus.CONFLICT)
                 return
             if path == "/api/playback/next":
                 switch_device = str(_first(query, "switch", "true")).lower() not in {"0", "false", "no", "off"}
-                self._json(self.backend.playback.skip("next", switch_device=switch_device))
+                result = self.backend.playback.skip("next", switch_device=switch_device)
+                self._json(result, HTTPStatus.OK if result.get("ok") else HTTPStatus.CONFLICT)
                 return
             if path == "/api/playback/previous":
                 switch_device = str(_first(query, "switch", "true")).lower() not in {"0", "false", "no", "off"}
-                self._json(self.backend.playback.skip("previous", switch_device=switch_device))
+                result = self.backend.playback.skip("previous", switch_device=switch_device)
+                self._json(result, HTTPStatus.OK if result.get("ok") else HTTPStatus.CONFLICT)
                 return
             if path == "/api/camera/list":
                 limit = max(1, min(50, int(_first(query, "limit", "20") or "20")))
@@ -751,7 +812,8 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
         self.send_response(self._last_status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        if not self.authentication.enabled:
+            self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
 
@@ -778,7 +840,8 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
         self.send_response(self._last_status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        if not self.authentication.enabled:
+            self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -798,11 +861,26 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
 
 
 def make_server(config: AppConfig, *, dry_run: bool = False, config_path: Path = DEFAULT_CONFIG_PATH) -> ThreadingHTTPServer:
+    cert = os.environ.get("POKO_TLS_CERT", "")
+    key = os.environ.get("POKO_TLS_KEY", "")
+    if bool(cert) != bool(key):
+        raise ValueError("Both POKO_TLS_CERT and POKO_TLS_KEY are required")
+    if config.security.enabled and not cert and config.host not in {"127.0.0.1", "::1", "localhost"}:
+        raise ValueError("Secured origins without TLS must bind to loopback")
+    authentication = Authentication(config.security.enabled, config.security.public_origin)
     class Handler(PokoRequestHandler):
         pass
 
+    Handler.authentication = authentication
+
     server = PokoHTTPServer((config.host, config.port), Handler)
     try:
+        if cert:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            context.load_cert_chain(cert, key)
+            # Handshakes happen in bounded workers with socket deadlines.
+            Handler.tls_context = context
         Handler.backend = PokoBackend(config, dry_run=dry_run, config_path=config_path)
     except Exception:
         server.server_close()

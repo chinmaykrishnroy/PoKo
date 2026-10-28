@@ -124,18 +124,29 @@ explicit exceptions.
 
 ### 1 — Flash the firmware
 
-Grab the latest binary from this repo and flash via the web OTA page or `esptool`:
+Download the application binary from a GitHub release for OTA; use a complete Arduino build for initial USB flashing:
 
 ```bash
 # OTA (device must already be running PoKo and on Wi-Fi)
-curl -X POST http://<DEVICE_IP>/ota/upload \
+curl --digest --user admin -X POST http://<DEVICE_IP>/ota/upload \
   -F "update=@build/esp32.esp32.esp32s3/PoKo.ino.bin"
 
 # First flash via USB
-esptool.py --chip esp32s3 write_flash 0x0 build/esp32.esp32.esp32s3/PoKo.ino.bin
+arduino-cli upload -p <SERIAL_PORT> --fqbn "esp32:esp32:esp32s3:FlashSize=8M,PSRAM=opi,PartitionScheme=default_8MB" --input-dir dist .
 ```
 
+For a first USB flash, use the complete Arduino build output (`dist`) so the
+uploader places the bootloader, partition table, and application correctly.
+The application-only `.ino.bin` is for OTA; do not flash it at offset `0x0`.
+
 On first boot the device creates a Wi-Fi AP named **PoKo-Setup** — connect to it and visit `http://192.168.4.1/` to set your Wi-Fi credentials.
+
+Firmware v2 first asks you to set a **device-admin password** during a five-minute
+pairing window. Sign in as `admin` to configure Wi-Fi, server settings, or OTA.
+The media server uses a separate device token over HTTPS. See
+[secure local-server setup](server/SECURE_LOCAL.md) and
+[persistent Pi/cloud deployment](server/deploy/README.md). The browser's server
+login password, device token, and device-admin password serve different roles.
 
 ### 2 — Build from source
 

@@ -699,6 +699,12 @@ async function renderControls(){
           <form onsubmit="saveMediaServer(event)">
             <label style="font-size:12px;color:var(--muted)">Media Server Address</label>
             <input type="text" id="server_addr" placeholder="hostname:port or 192.168.0.15:8765" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px" required>
+            <label>Device token (leave blank to keep saved token)</label>
+            <input type="password" id="server_token" autocomplete="new-password" placeholder="Separate device credential">
+            <label>Local server CA certificate (optional; public HTTPS uses built-in CAs)</label>
+            <textarea id="server_ca" placeholder="PEM CA certificate"></textarea>
+            <label><input type="checkbox" id="server_clear_ca"> Use built-in public CAs (clear saved private CA)</label>
+            <label><input type="checkbox" id="server_clear_token"> Clear saved device token</label>
             <button type="submit" class="btn blue" style="width:100%;margin-top:10px">${icon('save')} Update Server</button>
           </form>
           <div style="margin-top:18px">
@@ -1072,7 +1078,13 @@ async function saveMediaServer(e){
   const a=$('server_addr').value.trim();
   if(!a)return;
   try{
-    await api(`/api/server?addr=${encodeURIComponent(a)}`);
+    const body=new URLSearchParams({addr:a});
+    if($('server_token').value)body.set('token',$('server_token').value);
+    if($('server_ca').value)body.set('ca',$('server_ca').value);
+    if($('server_clear_ca').checked)body.set('ca','');
+    if($('server_clear_token').checked)body.set('token','');
+    await api('/api/server',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
+    $('server_token').value='';
     if(healthCache){healthCache.server_addr=a;}
     toast('Media server updated');
   }catch(err){

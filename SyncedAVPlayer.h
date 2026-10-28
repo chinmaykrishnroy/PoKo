@@ -72,6 +72,7 @@ private:
     std::atomic<uint32_t> _wallClockStartMs{0};
 
     std::atomic<uint32_t> _audioPackets{0};
+    std::atomic<uint32_t> _lastAudibleMs{0};
     std::atomic<uint32_t> _audioBytesDropped{0};
     std::atomic<uint32_t> _audioUnderruns{0};
     std::atomic<uint32_t> _videoPackets{0};
@@ -117,6 +118,10 @@ public:
     bool hasStarted() const;
     bool isConnected() const;
     bool isPlaying() const;
+    bool isAudioAudible() const;
+    uint32_t audioUnderruns() const;
+    uint32_t audioBytesDropped() const;
+    uint32_t videoFramesDropped() const;
     float getRenderFps() const;
 
     uint32_t audioClockMs() const;

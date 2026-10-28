@@ -1,0 +1,28 @@
+"""Probe public TLS/authentication without displaying any credentials."""
+import base64
+from pathlib import Path
+import urllib.request
+import urllib.error
+
+base = "https://poko.prefect-sys.online"
+root = Path("/etc/poko")
+admin = "Basic " + base64.b64encode(("admin:" + (root / "admin-password").read_text().strip()).encode()).decode()
+device = "Bearer " + (root / "device-token").read_text().strip()
+for auth, path, expected in [(None, "/health", 401), (admin, "/health", 200),
+                             (device, "/health", 200), (device, "/api/server/config", 403),
+                             (device, "/api/library/audio?icons=false&enrich=false&page_size=1", 200)]:
+    headers = {"User-Agent": "ESP32HTTPClient"}
+    if auth:
+        headers["Authorization"] = auth
+    request = urllib.request.Request(base + path, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            status = response.status
+    except urllib.error.HTTPError as error:
+        status = error.code
+        if status != expected:
+            print("Unexpected response type:", error.headers.get("Content-Type"),
+                  "challenge:", error.headers.get("cf-mitigated"))
+    print(path, "status=", status, "expected=", expected)
+    assert status == expected
+print("PASS public TLS/admin/device credential boundaries")

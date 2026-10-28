@@ -52,6 +52,7 @@ private:
     bool      _active       = false;
     bool      _dirty        = true;
     bool      _paused       = false;
+    bool      _cleanupPending = false;
     MusicMode _mode         = MODE_BROWSE;
 
     SongItem  _songs[PAGE_SIZE];
@@ -103,6 +104,7 @@ private:
     bool requestPlay(int idx, uint32_t startSec = 0, bool retryMissing = true);
 
     void requestStop();
+    void stopAndReleaseMusic();
 
     bool selectSong(int index);
 
@@ -142,6 +144,7 @@ public:
     void onPlaybackEnded();
 
     bool isPlaying() const;
+    bool isStopping() const;
     const char* getCurrentTitle() const;
     bool hasServerError() const;
 };

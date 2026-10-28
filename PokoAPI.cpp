@@ -1,4 +1,7 @@
 #include "PokoAPI.h"
+#include "DeviceSecurity.h"
+#include "SyncedAVPlayer.h"
+extern SyncedAVPlayer* syncPlugin;
 
 bool PokoAPI::validateJpegBlock(int16_t, int16_t, uint16_t, uint16_t, uint16_t*) {
         return true;
@@ -19,6 +22,7 @@ PokoAPI::PokoAPI(WebServer* srv, Preferences* prf)
         : _server(srv), _prefs(prf) {}
 
 void PokoAPI::begin() {
+        installDeviceAuthentication(*_server);
         // Web Dashboard root
         _server->on("/", HTTP_GET, [this]() {
             _server->sendHeader("Cache-Control", "no-store");
@@ -35,7 +39,7 @@ void PokoAPI::begin() {
             json += "\"psram_free\":" + String(ESP.getFreePsram()) + ",";
             json += "\"uptime_ms\":" + String(millis()) + ",";
             json += "\"cpu_mhz\":" + String(getCpuFrequencyMhz()) + ",";
-            json += "\"firmware_version\":\"v1.6.0\",";
+            json += "\"firmware_version\":\"v2.0.0\",";
             json += "\"app_state\":" + String((int)activeApp) + ",";
             json += "\"theme\":\"" + String(isDarkTheme() ? "dark" : "light") + "\",";
             json += "\"master_vol\":" + String(getMasterVolumeLimit()) + ",";
@@ -48,10 +52,14 @@ void PokoAPI::begin() {
             json += "\"snap_host\":\"" + escapeJson(snapHost) + "\",";
             json += "\"snap_port\":" + String(snapPort) + ",";
             String srvHost = _prefs->getString("server_host", "192.168.0.15");
+            json += "\"video_render_fps\":" + String(syncPlugin ? syncPlugin->getRenderFps() : 0, 1) + ",";
+            json += "\"video_frames_dropped\":" + String(syncPlugin ? syncPlugin->videoFramesDropped() : 0) + ",";
+            json += "\"audio_underruns\":" + String(syncPlugin ? syncPlugin->audioUnderruns() : 0) + ",";
+            json += "\"audio_bytes_dropped\":" + String(syncPlugin ? syncPlugin->audioBytesDropped() : 0) + ",";
             int srvPort = _prefs->getInt("server_port", 8765);
             json += "\"server_host\":\"" + escapeJson(srvHost) + "\",";
             json += "\"server_port\":" + String(srvPort) + ",";
-            json += "\"server_addr\":\"" + escapeJson(srvHost + ":" + String(srvPort)) + "\",";
+            json += "\"server_addr\":\"" + escapeJson(String(_prefs->getBool("server_tls", false) ? "https://" : "http://") + srvHost + ":" + String(srvPort)) + "\",";
             json += "\"pixel_mode\":" + String((int)pixelEngine.getMode()) + ",";
             json += "\"pixel_r\":" + String(pixelEngine.getR()) + ",";
             json += "\"pixel_g\":" + String(pixelEngine.getG()) + ",";
@@ -343,7 +351,7 @@ void PokoAPI::begin() {
                 _server->send(500, "application/json", "{\"ok\":false,\"error\":\"open failed\"}");
                 return;
             }
-            _server->sendHeader("Cache-Control", "max-age=86400");
+            _server->sendHeader("Cache-Control", "no-store");
             _server->streamFile(f, "image/jpeg");
             f.close();
         });
@@ -389,6 +397,7 @@ void PokoAPI::begin() {
                 _server->send(code, "application/json", "{\"ok\":false,\"error\":\"" + escapeJson(err) + "\"}");
             }
         }, [this]() {
+            if (!deviceRequestAuthorized(*_server, false)) return;
             HTTPUpload& upload = _server->upload();
             static File uploadFile;
             static String targetPath;
@@ -514,10 +523,21 @@ void PokoAPI::begin() {
         });
 
         // Media Streaming Server endpoint (Video & Audio backend)
-        _server->on("/api/server", HTTP_GET, [this]() {
+        _server->on("/api/server", HTTP_ANY, [this]() {
+            bool writeCredentials = _server->hasArg("token") || _server->hasArg("ca");
+            if (writeCredentials && _server->method() != HTTP_POST) {
+                _server->send(405, "application/json", "{\"ok\":false,\"error\":\"Use POST for credentials\"}");
+                return;
+            }
+            if ((_server->hasArg("token") && _server->arg("token").length() > 256) ||
+                (_server->hasArg("ca") && _server->arg("ca").length() > 4096)) {
+                _server->send(400, "application/json", "{\"ok\":false,\"error\":\"Credential too large\"}");
+                return;
+            }
             if (_server->hasArg("addr")) {
                 String addr = _server->arg("addr");
                 addr.trim();
+                bool tls = addr.startsWith("https://");
                 if (addr.startsWith("http://")) addr = addr.substring(7);
                 else if (addr.startsWith("https://")) addr = addr.substring(8);
                 int slashIdx = addr.indexOf('/');
@@ -525,7 +545,7 @@ void PokoAPI::begin() {
 
                 int colonIdx = addr.lastIndexOf(':');
                 String hostPart = addr;
-                int portPart = 8765;
+                int portPart = tls ? 443 : 8765;
                 if (colonIdx > 0) {
                     hostPart = addr.substring(0, colonIdx);
                     portPart = addr.substring(colonIdx + 1).toInt();
@@ -533,7 +553,10 @@ void PokoAPI::begin() {
                 }
                 _prefs->putString("server_host", hostPart);
                 _prefs->putInt("server_port", portPart);
+                _prefs->putBool("server_tls", tls);
             }
+            if (_server->hasArg("token")) _prefs->putString("server_token", _server->arg("token"));
+            if (_server->hasArg("ca")) _prefs->putString("server_ca", _server->arg("ca"));
             if (_server->hasArg("host")) {
                 _prefs->putString("server_host", _server->arg("host"));
             }
@@ -542,7 +565,8 @@ void PokoAPI::begin() {
             }
             String h = _prefs->getString("server_host", "192.168.0.15");
             int p = _prefs->getInt("server_port", 8765);
-            _server->send(200, "application/json", "{\"ok\":true,\"addr\":\"" + h + ":" + String(p) + "\",\"host\":\"" + h + "\",\"port\":" + String(p) + "}");
+            String scheme = _prefs->getBool("server_tls", false) ? "https://" : "http://";
+            _server->send(200, "application/json", "{\"ok\":true,\"addr\":\"" + scheme + escapeJson(h) + ":" + String(p) + "\",\"host\":\"" + escapeJson(h) + "\",\"port\":" + String(p) + ",\"token_configured\":" + String(_prefs->getString("server_token", "").length() ? "true" : "false") + "}");
         });
 
         // App switch

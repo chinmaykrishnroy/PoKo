@@ -1,0 +1,23 @@
+server:
+  host: 0.0.0.0
+  port: 8765
+security:
+  enabled: true
+  public_origin: https://192.168.0.5:8765
+poko:
+  ip: 192.168.0.3
+  base_url: http://192.168.0.3
+display:
+  width: 128
+  height: 128
+library:
+  read_folders:
+    - ./media/music
+    - ./media/videos
+  write_folder: ./uploads
+  db_path: ./poko.db
+  page_size: 8
+ffmpeg:
+  audio_rate: 44100
+  sync_audio_rate: 22050
+  video_fps: 30

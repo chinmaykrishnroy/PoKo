@@ -745,7 +745,8 @@ void setup() {
             []() { if (musicAppInstance) musicAppInstance->togglePlayPause(); },
             []() -> bool { return musicAppInstance ? musicAppInstance->isPlaying() : false; },
             []() -> const char* { return musicAppInstance ? musicAppInstance->getCurrentTitle() : "Music"; },
-            []() -> bool { return musicAppInstance ? musicAppInstance->hasServerError() : false; }
+            []() -> bool { return musicAppInstance ? musicAppInstance->hasServerError() : false; },
+            []() -> bool { return !audioPlugin || !audioPlugin->isLoaded(); }
         );
     }
 
@@ -864,7 +865,7 @@ void loop() {
     if (powerManager) {
         ProtectedActivityKind protectedKind = PROTECTED_NONE;
         if (snapService && snapService->isPlaying()) protectedKind = PROTECTED_SSYNC;
-        else if (musicAppInstance && musicAppInstance->isPlaying()) protectedKind = PROTECTED_MUSIC;
+        else if (musicAppInstance && (musicAppInstance->isPlaying() || musicAppInstance->isStopping())) protectedKind = PROTECTED_MUSIC;
         else if (videoAppInstance && videoAppInstance->isPlaying()) protectedKind = PROTECTED_VIDEO;
         else if (pixelEngine.getMode() == PIXEL_MODE_SOLID &&
                  pixelEngine.getBrightness() > 0 &&
@@ -916,7 +917,11 @@ void loop() {
                     p.putBool("clean_shutdown", true);
                     p.end();
                 });
-                ArduinoOTA.begin();
+                String otaPassword = prefs.getString("device_pass", "");
+                if (otaPassword.length() >= 16) {
+                    ArduinoOTA.setPassword(otaPassword.c_str());
+                    ArduinoOTA.begin();
+                }
                 otaInit = true;
             }
 
@@ -1006,7 +1011,7 @@ void loop() {
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->update();
 
     // Background music update (track position, auto-advance, neopixel progress) when not in foreground
-    if (activeApp != STATE_MUSIC_UI && musicAppInstance && musicAppInstance->isPlaying()) {
+    if (activeApp != STATE_MUSIC_UI && musicAppInstance) {
         musicAppInstance->update();
     }
 

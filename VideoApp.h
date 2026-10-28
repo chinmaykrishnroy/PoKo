@@ -67,6 +67,10 @@ private:
     uint32_t  _lastDrawMs   = 0;
     uint32_t  _playStartMs  = 0;
     bool      _streamStarted = false;
+    uint32_t  _requestGeneration = 0;
+    uint32_t  _operationId = 0;
+    uint32_t  _lastOperationPollMs = 0;
+    String    _requestId;
     TitleMarquee _marquee;
     uint16_t _titleWidth = 0;
 
@@ -81,6 +85,7 @@ private:
     void fetchThumbnail(int idx);
     void failPlayback(int httpCode = 0);
     void requestPlay(int idx, bool retryMissing = true);
+    bool reconcileOperation();
     void requestStopInternal();
     void requestStop();
     bool selectVideo(int index);

@@ -39,7 +39,7 @@ These controls are active across the entire system regardless of the open applic
 | Action / Combo | Timing | Effect |
 |:---|:---|:---|
 | **`L + R` Hold** | **2.5 seconds** | **Clean System Reboot** (`ESP.restart()` with on-screen "REBOOTING..." alert) |
-| **`L + R` Click** | Quick simultaneous press | **Audio Play/Pause / Mute** toggle |
+| **`L + R` Click** | Quick simultaneous press | Toggle Pixel **Solid / Off**, preserving RGB color, brightness, and selected LEDs |
 | **`L + R` Double-Click** | Double press within 450ms | **Jump to Device Info** (`InfoApp` telemetry screen) |
 | **`L + R` Long Hold** | **5.0 seconds** | **Hardware Driver Reset** (re-initializes I²C, ES8311 codec, GC9107 display, and WS2812 LEDs) |
 | **`PWR` Click** | Single click | **Toggle Screen Sleep / Wake** (backlight + GC9107 low-power sleep) |

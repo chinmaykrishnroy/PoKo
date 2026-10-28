@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import json
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -22,6 +23,15 @@ class DeviceClient:
     def __init__(self, config: AppConfig, enabled: bool = True) -> None:
         self.config = config
         self.enabled = enabled
+
+    def _open(self, request, timeout):
+        password = os.environ.get("POKO_DEVICE_PASSWORD", "")
+        if not password:
+            return urllib.request.urlopen(request, timeout=timeout)
+        manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+        manager.add_password(None, self.config.poko.base_url, "admin", password)
+        opener = urllib.request.build_opener(urllib.request.HTTPDigestAuthHandler(manager))
+        return opener.open(request, timeout=timeout)
 
     def switch(self, app: str) -> DeviceResponse:
         if not self.enabled:
@@ -52,7 +62,7 @@ class DeviceClient:
         headers = {"Content-Type": content_type} if data is not None else {}
         request = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with self._open(request, timeout) as response:
                 return response.status, response.read(), response.headers.get_content_type()
         except urllib.error.HTTPError as exc:
             return exc.code, exc.read(), exc.headers.get_content_type()
@@ -61,7 +71,7 @@ class DeviceClient:
             return 503, payload, "application/json"
     def _get(self, url: str, app: str) -> DeviceResponse:
         try:
-            with urllib.request.urlopen(url, timeout=1.0) as response:
+            with self._open(url, 3.0) as response:
                 body = response.read().decode("utf-8", errors="replace")
             payload = json.loads(body)
             if not isinstance(payload, dict) or payload.get("ok") is not True:
@@ -69,5 +79,5 @@ class DeviceClient:
             time.sleep(max(0, self.config.poko.switch_delay_ms) / 1000)
             return DeviceResponse(ok=True, app=app, body=body)
         except Exception:
-            return DeviceResponse(ok=True, app=app, body="standalone-av")
+            return DeviceResponse(ok=False, app=app, error="device unreachable or authentication failed")
 

@@ -25,6 +25,7 @@ bool AudioManager::deactivateSource(AudioSource src, bool suspend) {
             }
         } else if (src == AUDIO_MUSIC) {
             if (_musicStopFn) _musicStopFn();
+            if (_musicStoppedFn && !_musicStoppedFn()) return false;
         } else if (src == AUDIO_VIDEO) {
             if (_videoStopFn) _videoStopFn();
             if (_videoStoppedFn && !_videoStoppedFn()) return false;
@@ -98,17 +99,19 @@ void AudioManager::setSnapPlayer(SnapPlayer* p) {
         }
     }
 
-void AudioManager::setMusicHandlers(AudioActionFn stopFn, AudioActionFn toggleFn, AudioQueryFn isPlayingFn, AudioStrFn getTitleFn, AudioQueryFn errorFn) {
+void AudioManager::setMusicHandlers(AudioActionFn stopFn, AudioActionFn toggleFn, AudioQueryFn isPlayingFn, AudioStrFn getTitleFn, AudioQueryFn errorFn, AudioQueryFn stoppedFn) {
         _musicStopFn = stopFn;
         _musicToggleFn = toggleFn;
         _musicIsPlayingFn = isPlayingFn;
         _musicGetTitleFn = getTitleFn;
         _musicErrorFn = errorFn;
+        _musicStoppedFn = stoppedFn;
     }
 
-void AudioManager::setVideoHandlers(AudioActionFn stopFn, AudioQueryFn stoppedFn) {
+void AudioManager::setVideoHandlers(AudioActionFn stopFn, AudioQueryFn stoppedFn, AudioQueryFn audibleFn) {
         _videoStopFn = stopFn;
         _videoStoppedFn = stoppedFn;
+        _videoAudibleFn = audibleFn;
     }
 
 AudioSource AudioManager::activeSource() const { MutexLock lock(_mutex); return _activeSource; }
@@ -354,7 +357,7 @@ bool AudioManager::isSoundPlaying() const {
             return _musicIsPlayingFn();
         }
         if (_activeSource == AUDIO_VIDEO) {
-            return true;
+            return _videoAudibleFn && _videoAudibleFn();
         }
         return false;
     }

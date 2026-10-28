@@ -7,13 +7,14 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATED = (
     "AudioActivity",
     "AudioManager",
-    "AppManager",
     "BatteryManager",
     "ButtonInput",
     "ClockApp",
     "GalleryApp",
     "InfoApp",
     "MusicApp",
+    "MediaServerRequest",
+    "DeviceSecurity",
     "PixelApp",
     "PixelEngine",
     "PokoAPI",
@@ -40,7 +41,6 @@ MIGRATED = (
 HEADER_EXCEPTIONS = {
     "CoreIApp",
     "CoreInputEvent",
-    "CoreSystemContext",
     "PixelToggle",
     "PokoPins",
     "es8311",

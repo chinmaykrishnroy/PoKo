@@ -24,6 +24,8 @@ struct SnapPlayer {
     void (*releaseFn)() = nullptr;
     bool isLoaded() { return loaded; }
     bool isSuspended() { return suspended; }
+    bool isPlaying() { return loaded && !suspended; }
+    bool isMuted() { return false; }
     void load(bool initial) { loaded = true; suspended = initial; }
     void setAudioCallbacks(bool (*)(), void (*release)(), void (*)(int, bool)) { releaseFn = release; }
     void suspendAudio() {

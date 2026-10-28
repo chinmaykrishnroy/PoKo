@@ -49,7 +49,7 @@ git status
 arduino-cli compile -b "esp32:esp32:esp32s3:FlashSize=8M,PSRAM=opi,PartitionScheme=default_8MB" --output-dir ./build .
 
 # 3. OTA flash to the device and verify
-curl.exe -F "update=@./build/esp32.esp32.esp32s3/PoKo.ino.bin" http://<device-ip>/ota/upload
+curl.exe --digest --user admin -F "update=@./build/esp32.esp32.esp32s3/PoKo.ino.bin" http://<device-ip>/ota/upload
 curl.exe -s "http://<device-ip>/api/health"
 # Confirm uptime_ms is small (device rebooted with new firmware)
 ```
@@ -126,6 +126,7 @@ git push origin main --tags
 
 | Version | Date | Highlights |
 |---------|------|-----------|
+| v2.0.0 | 2026-10-28 | Authenticated local/cloud servers, device pairing, HTTPS and media lifecycle fixes |
 | v1.6.0 | 2026-10-06 | Media-safe staged power management, Wi-Fi hibernation, codec shutdown, battery smoothing, and wake hardening |
 | v1.5.0 | 2026-10-02 | Race-free inter-task state, safe worker shutdown, and graceful allocation failure handling |
 | v1.4.0 | 2026-10-01 | Declaration-only firmware modules, media-aware low-battery shutdown, and stronger CI regression checks |
@@ -142,7 +143,9 @@ git push origin main --tags
 
 If a firmware update changes the NVS keys or value types, document it here and provide a migration note in the changelog. Users upgrading from an incompatible version may need to wipe NVS via the Settings app (hold L+R for 5 s).
 
-Current NVS keys (reviewed for v1.6.0):
+New v2 NVS keys: `device_pass`, `server_tls`, `server_token`, and `server_ca`. Credentials remain on the device and are never compiled into release binaries.
+
+Existing NVS keys:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|

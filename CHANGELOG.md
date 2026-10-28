@@ -7,6 +7,44 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v2.0.0] — 2026-10-28
+
+### Security and compatibility
+- Separate browser-admin password, restricted device media token, and ESP32
+  device-admin password. Device credentials cannot administer the media server.
+- Verified HTTPS for Music, Video, and Gallery, using the built-in CA bundle
+  or a provisioned private CA for secure local servers. Tokens are refused on
+  plaintext HTTP and are never compiled into release images.
+- Device control and web OTA require Digest authentication. Upload callbacks
+  authenticate before writes; ArduinoOTA stays disabled until provisioning.
+  First pairing is available on the trusted LAN for five minutes after boot.
+- Added an isolated, restartable Pi service, private credential provisioning,
+  direct local TLS support, bounded HTTP concurrency, and cross-origin checks.
+- Existing unauthenticated device clients need provisioning after upgrading.
+  Raw PCM/MJPEG transports remain restricted to the trusted LAN.
+
+### Fixed
+- Music terminal errors, start timeouts, and exhausted auto-advance release
+  ownership only after worker shutdown is confirmed; timed-out shutdown retries.
+- Music progress follows a monotonic anchor through blocked main-loop updates.
+- Silent Video no longer reports audible audio; the A/V clock accounts for
+  confirmed I2S writes. Health telemetry includes frame drops and audio underruns.
+- Video validates asynchronous acceptance and reconciles operation/request IDs,
+  failed operations, cancellations, and mismatched generations.
+- Playback control failures return non-2xx statuses. Library pages are bounded
+  and thumbnails are cached by path, modification time, size and dimensions,
+  with bounded background producers and bounded disk retention.
+- Mutable device gallery images no longer retain stale browser thumbnails.
+- Corrected first-USB-flash instructions and the L+R Solid/Off documentation.
+- Removed the unused parallel AppManager and dependency-container scaffolding.
+- Corrected CI's nonexistent Arduino setup action alias to its published commit.
+
+### Policy
+- Display-on Wi-Fi hibernation remains intentional; the dot stays static pink.
+  Active media prevents hibernation, and light/deep sleep require display-off.
+
+---
+
 ## [v1.6.0] — 2026-10-06
 
 ### Added

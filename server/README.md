@@ -4,6 +4,12 @@ Python backend for the PoKo ESP32-S3 device. It indexes local media folders,
 serves paged JSON libraries for the firmware, switches the ESP32 app, and streams
 audio/video/image content in the formats the current firmware already understands.
 
+For a protected 24/7 Pi deployment behind Cloudflare Tunnel, see
+[deployment instructions](deploy/README.md). That profile authenticates every
+route and binds to loopback. The existing ESP32 push-stream transport requires
+a network route from the server to the device; exposing HTTP alone does not
+provide playback to devices on arbitrary remote networks.
+
 ## Quick Start
 
 ```powershell

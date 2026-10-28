@@ -2,6 +2,7 @@
 uint32_t testMillis = 100;
 int testPins[64];
 int testPinSetups = 0;
+bool videoAudible = false;
 #define CHECK(c) do { if (!(c)) { puts("FAIL: " #c); return 1; } } while (0)
 int main(int argc, char** argv) {
     SnapPlayer snap;
@@ -16,6 +17,15 @@ int main(int argc, char** argv) {
         return 0;
     }
     CHECK(manager.request(AUDIO_SSYNC));
+    if (!strcmp(argv[1], "silent-video-is-not-audio")) {
+        manager.setVideoHandlers(nullptr, nullptr, []() { return videoAudible; });
+        CHECK(manager.request(AUDIO_VIDEO));
+        CHECK(!manager.isSoundPlaying());
+        videoAudible = true;
+        CHECK(manager.isSoundPlaying());
+        videoAudible = false;
+        CHECK(!manager.isSoundPlaying());
+    } else
     if (!strcmp(argv[1], "suspend-transition")) {
         CHECK(manager.request(AUDIO_VIDEO));
         CHECK(snap.waitTimeouts == 0);

@@ -1,3 +1,4 @@
+#include "MediaServerRequest.h"
 #include "VideoApp.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -6,6 +7,7 @@
 #include <U8g2lib.h>
 #include <Arduino_GFX_Library.h>
 #include <Preferences.h>
+#include <esp_random.h>
 #include <new>
 #include "PokoTheme.h"
 #include "PokoDrivers.h"
@@ -58,7 +60,7 @@ bool VideoApp::fetchVideoList(int index, bool loadThumb) {
 
         _loadingList = true;
         int start = (index / PAGE_SIZE) * PAGE_SIZE;
-        HTTPClient http;
+        MediaServerRequest http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
                      "/api/library/video?page=" + String(start / PAGE_SIZE + 1) +
                      "&page_size=" + String(PAGE_SIZE) + "&icons=false";
@@ -128,7 +130,7 @@ void VideoApp::fetchThumbnail(int idx) {
         if (!_thumbBuf) return;
 
         _thumbSize = 0;
-        HTTPClient http;
+        MediaServerRequest http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
                      "/api/library/video/" + String(_videos[idx].id) + "/thumbnail.jpg?size=80";
         http.begin(url);
@@ -180,6 +182,8 @@ void VideoApp::failPlayback(int httpCode) {
 
 void VideoApp::requestPlay(int idx, bool retryMissing) {
         if (idx < 0 || idx >= _videoCount) return;
+        _operationId = 0;
+        _requestId = String(esp_random()) + "-" + String(++_requestGeneration);
         // Quiesce BOTH old transports and the audio consumer before clearing
         // their queues/clock. A live reset mixes old timestamps into the new clip.
         if (syncPlugin) syncPlugin->unload();
@@ -200,17 +204,26 @@ void VideoApp::requestPlay(int idx, bool retryMissing) {
             failPlayback();
             return;
         }
-        HTTPClient http;
+        MediaServerRequest http;
         bool fitVideo = prefs.getBool("video_fit", false);
         String aspect = fitVideo ? "fit" : "square";
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
                      "/api/video/" + String(_videos[idx].id) +
                      "/play?audio=true&aspect=" + aspect +
-                     "&profile=balanced&start=0&switch=false&notify=false&async=true";
+                     "&profile=balanced&start=0&switch=false&notify=false&async=true&request_id=" + _requestId;
         http.begin(url);
         http.setConnectTimeout(1000);
         http.setTimeout(3000);
         int httpCode = http.GET();
+        JsonDocument accepted;
+        if (httpCode == 202) {
+            if (deserializeJson(accepted, http.getStream()) || !accepted["ok"].as<bool>()) {
+                httpCode = 502;
+            } else {
+                _operationId = accepted["operation_id"] | 0;
+                if (_operationId == 0) httpCode = 502;
+            }
+        }
         http.end();
         if (httpCode >= 200 && httpCode < 300) {
             _mode = MODE_PLAYING;
@@ -254,8 +267,33 @@ void VideoApp::requestPlay(int idx, bool retryMissing) {
         }
     }
 
+bool VideoApp::reconcileOperation() {
+        if (!_operationId || millis() - _lastOperationPollMs < 750) return true;
+        _lastOperationPollMs = millis();
+        MediaServerRequest http;
+        http.begin("http://" + getServerHost() + ":" + String(getServerPort()) +
+                   "/api/playback/operation?id=" + String(_operationId));
+        http.setConnectTimeout(1000);
+        http.setTimeout(1500);
+        int code = http.GET();
+        JsonDocument doc;
+        bool parsed = code == 200 && !deserializeJson(doc, http.getStream());
+        http.end();
+        if (!parsed) return true; // startup deadline still bounds retries
+        String requestId = doc["request_id"] | "";
+        String status = doc["status"] | "";
+        if (requestId != _requestId || status == "failed" || status == "cancelled") {
+            failPlayback(502);
+            _operationId = 0;
+            return false;
+        }
+        if (status == "succeeded") _operationId = 0;
+        return true;
+    }
+
 void VideoApp::requestStopInternal() {
-        HTTPClient http;
+        _operationId = 0;
+        MediaServerRequest http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false&async=true";
         http.begin(url);
         http.setConnectTimeout(1000);
@@ -443,7 +481,8 @@ void VideoApp::begin() {
             if (_canvas) _canvas->begin();
         }
         if (audioManager) {
-            audioManager->setVideoHandlers(stopPlaybackStatic, playbackStoppedStatic);
+            audioManager->setVideoHandlers(stopPlaybackStatic, playbackStoppedStatic,
+                []() -> bool { return syncPlugin && syncPlugin->isAudioAudible(); });
         }
     }
 
@@ -571,6 +610,7 @@ void VideoApp::update() {
         if (!_active) return;
 
         if (_mode == MODE_PLAYING) {
+            if (!reconcileOperation()) return;
             if (syncPlugin) {
                 syncPlugin->update();
                 if (!_streamStarted && syncPlugin->hasStarted()) {

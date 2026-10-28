@@ -1,3 +1,4 @@
+#include "MediaServerRequest.h"
 #include "GalleryApp.h"
 #include <new>
 
@@ -47,8 +48,8 @@ void GalleryApp::scanPhotos() {
             int port = prefs.getInt("server_port", 8765);
             String url = "http://" + host + ":" + String(port) + "/api/library/image?page=1&page_size=1&icons=false&enrich=false";
             WiFiClient client;
-            HTTPClient http;
-            http.begin(client, url);
+            MediaServerRequest http;
+            http.begin(url);
             http.setConnectTimeout(1000);
             http.setTimeout(3000);
             esp_task_wdt_reset();
@@ -116,8 +117,8 @@ bool GalleryApp::selectCurrentPhoto() {
             String url = "http://" + host + ":" + String(port) + "/api/library/image?page=" +
                          String(_photoIdx - _localCount + 1) + "&page_size=1&icons=false&enrich=false";
             WiFiClient client;
-            HTTPClient http;
-            http.begin(client, url);
+            MediaServerRequest http;
+            http.begin(url);
             http.setConnectTimeout(1000);
             http.setTimeout(3000);
             bool found = false;
@@ -206,8 +207,8 @@ void GalleryApp::loadCurrentPhoto(bool retryMissing) {
                 String url = "http://" + host + ":" + String(port) + "/api/image/" + String(item.idOrPath) + "/jpeg?size=128&aspect=square";
 
                 WiFiClient client;
-                HTTPClient http;
-                http.begin(client, url);
+                MediaServerRequest http;
+                http.begin(url);
                 http.setConnectTimeout(1000);
                 http.setTimeout(1000);
                 esp_task_wdt_reset();

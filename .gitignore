@@ -24,6 +24,10 @@ server/config.yml
 uploads/
 .test-tmp/
 server/poko-server.*.log
+server-secrets/
+thumbnails/
+*.key
+credentials.env
 
 # ── IDE & OS ──────────────────────────────────────────────────────────────────
 .vscode/

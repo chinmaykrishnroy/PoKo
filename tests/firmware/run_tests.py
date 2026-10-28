@@ -18,15 +18,16 @@ def main() -> int:
     if not (args.onebutton / "OneButton.cpp").is_file():
         parser.error("Pass --onebutton with the installed OneButton source directory")
     BUILD.mkdir(parents=True, exist_ok=True)
-    for script in ("prepare_audio_test.py", "prepare_video_test.py"):
+    for script in ("prepare_audio_test.py", "prepare_video_test.py", "prepare_music_test.py"):
         subprocess.run([sys.executable, str(HERE / script)], cwd=ROOT, check=True)
     cases = {
         "buttons": ["deferred-init", "double-left", "double-right", "info-hold", "power-click",
                     "wake-left", "wake-right", "wake-power", "music-hold", "single-left", "single-right",
                     "busy-main-loop", "bounce", "overflow", "combo-click", "combo-double",
                     "combo-reboot", "combo-drivers", "combo-emergency"],
-        "audio": ["suspend-transition", "suspend-timeout", "stop-all"],
-    "video": ["next", "next-page", "page-failure", "http-failure", "missing-refresh", "missing-empty", "load-failure", "stop-timeout", "next-stop-timeout", "fit-query"],
+        "audio": ["suspend-transition", "suspend-timeout", "stop-all", "silent-video-is-not-audio"],
+        "music": ["terminal-release", "shutdown-timeout-retains-owner", "startup-timeout-releases", "blocked-loop-clock"],
+        "video": ["next", "next-page", "page-failure", "http-failure", "missing-refresh", "missing-empty", "load-failure", "stop-timeout", "next-stop-timeout", "fit-query", "async-rejected", "async-failed", "async-stale-result"],
         "marquee": ["scroll-and-wrap"],
         "pixel-toggle": ["preserves-color", "forces-solid", "turns-off"],
         "power-policy": ["active-above-threshold-inhibits", "inactive-delay",
@@ -43,6 +44,7 @@ def main() -> int:
     sources = {
         "buttons": [HERE / "buttons.cpp", ROOT / "ButtonInput.cpp", args.onebutton / "OneButton.cpp"],
         "audio": [ROOT / "build/audio-test.cpp"],
+        "music": [ROOT / "build/music-test.cpp"],
         "video": [ROOT / "build/video-test.cpp", ROOT / "TitleMarquee.cpp"],
         "marquee": [HERE / "marquee.cpp", ROOT / "TitleMarquee.cpp"],
         "pixel-toggle": [HERE / "pixel_toggle.cpp"],

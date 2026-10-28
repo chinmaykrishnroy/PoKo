@@ -322,7 +322,7 @@ class MediaIndex:
 
     def page(self, kind: str, page: int | None = None, page_size: int | None = None) -> dict[str, Any]:
         selected_page = max(1, int(page or 1))
-        selected_page_size = max(1, int(page_size or self.config.library.page_size))
+        selected_page_size = max(1, min(50, int(page_size or self.config.library.page_size)))
         offset = (selected_page - 1) * selected_page_size
         items = self.db.page(kind, selected_page_size, offset)
 

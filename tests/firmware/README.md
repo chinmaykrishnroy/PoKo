@@ -31,7 +31,9 @@ arduino-cli compile --fqbn "esp32:esp32:esp32s3:FlashSize=8M,PSRAM=opi,Partition
 
 For this fix, restart the media backend with the updated Python code as well as
 installing the new firmware; silent-video transport and blocked-sender cleanup
-are backend changes. Web/OTA authentication is intentionally unchanged.
+are backend changes. Firmware v2 adds device-admin Digest authentication to
+Web/OTA and a separate HTTPS media token. Pair before exercising those routes;
+see `server/deploy/README.md` and `server/SECURE_LOCAL.md`.
 
 ## Checks on the physical device after flashing
 

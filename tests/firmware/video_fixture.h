@@ -8,6 +8,7 @@ struct String : std::string {
     String(int value): std::string(std::to_string(value)) {}
 };
 void delay(int) {}
+uint32_t esp_random() { return 123; }
 bool ensureAudioOutput(int) { return true; }
 enum { AUDIO_VIDEO, POWER_LOCK_DISPLAY=1, POWER_LOCK_REALTIME_NET=2, LOCK_OWNER_VIDEO };
 struct AudioManager {
@@ -43,8 +44,21 @@ struct Preferences {
 struct HTTPClient {
     void begin(String url) { lastUrl = url; } void setConnectTimeout(int) {} void setTimeout(int) {}
     int GET() { ++requests; return requests == 1 ? httpResult : secondHttpResult; }
+    int getStream() { return 0; }
     void end() {}
 };
+using MediaServerRequest = HTTPClient;
+bool responseMalformed = false;
+const char* responseStatus = "succeeded";
+const char* responseRequestId = "123-1";
+struct JsonValue {
+    std::string key;
+    template<class T> T as() { return T(true); }
+    int operator|(int fallback) { return key == "operation_id" ? 1 : fallback; }
+    const char* operator|(const char*) { return key == "status" ? responseStatus : responseRequestId; }
+};
+struct JsonDocument { JsonValue operator[](const char* key) { return {key}; } };
+bool deserializeJson(JsonDocument&, int) { return responseMalformed; }
 class VideoApp {
 public:
     enum VideoMode { MODE_BROWSE, MODE_PLAYING };
@@ -53,6 +67,8 @@ public:
     using VideoItem = Item;
     int _videoCount = 2, _selectedIdx = 0, _pageStart = 0, _catalogIndex = 0, _catalogTotal = 2, thumbnails = 0;
     unsigned _lastScrollMs = 0, _playStartMs = 0;
+    uint32_t _operationId = 0, _requestGeneration = 0, _lastOperationPollMs = 0;
+    String _requestId;
     bool _serverError = false, _serverOffline = false, _contentMissing = false;
     bool _dirty = false, _streamStarted = false;
     TitleMarquee _marquee;

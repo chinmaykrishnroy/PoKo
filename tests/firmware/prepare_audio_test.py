@@ -6,9 +6,12 @@ header = (root / "AudioManager.h").read_text(encoding="utf-8")
 source = (root / "AudioManager.cpp").read_text(encoding="utf-8")
 declarations = header[header.index("enum AudioSource"):header.index("    bool isPlaying() const;")]
 definitions = source[source.index("AudioManager* AudioManager::_instance"):source.index("bool AudioManager::isPlaying() const")]
+start = source.index("bool AudioManager::isSoundPlaying() const")
+end = source.index("bool AudioManager::isSessionActive() const", start)
+definitions += source[start:end]
 output = root / "build/audio-test.cpp"
 output.write_text(
-    '#include "audio_fixture.h"\n' + declarations + '};\n' + definitions +
+    '#include "audio_fixture.h"\n' + declarations + 'bool isSoundPlaying() const;\n};\n' + definitions +
     '\n#include "audio_main.cpp"\n',
     encoding="utf-8",
 )

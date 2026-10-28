@@ -4,7 +4,7 @@
 //  CoreInputEvent — Typed input events dispatched to IApp
 //  Decouples button hardware from application logic.
 //  ButtonInput emits raw GPIO events; the main loop translates
-//  them to InputEvent values and calls AppManager::handleInput().
+//  them to InputEvent values for app handleInput() implementations.
 // ─────────────────────────────────────────────────────────────
 
 enum class InputEvent : uint8_t {

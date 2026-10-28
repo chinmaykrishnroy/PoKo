@@ -236,6 +236,12 @@ class FFmpegConfig:
 
 
 @dataclass(frozen=True)
+class SecurityConfig:
+    enabled: bool = False
+    public_origin: str = ""
+
+
+@dataclass(frozen=True)
 class AppConfig:
     host: str
     port: int
@@ -244,6 +250,7 @@ class AppConfig:
     defaults: DefaultsConfig
     ffmpeg: FFmpegConfig
     display: DisplayConfig = DisplayConfig()
+    security: SecurityConfig = SecurityConfig()
 
 def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
     config_path = Path(path)
@@ -277,6 +284,10 @@ def load_config(path: Path | str = DEFAULT_CONFIG_PATH) -> AppConfig:
         raise ValueError("PoKo synchronized audio must be 22050 Hz")
 
     return AppConfig(
+        security=SecurityConfig(
+            enabled=_as_bool(_get(raw, "security.enabled", False)),
+            public_origin=str(_get(raw, "security.public_origin", "")).rstrip("/"),
+        ),
         host=str(_get(raw, "server.host", "0.0.0.0")),
         port=int(_get(raw, "server.port", 8765)),
         display=DisplayConfig(width=disp_w, height=disp_h),
@@ -341,6 +352,10 @@ def config_to_yaml(config: AppConfig) -> str:
     return f"""server:
   host: {_yaml_string(config.host)}
   port: {config.port}
+
+security:
+  enabled: {str(config.security.enabled).lower()}
+  public_origin: {_yaml_string(config.security.public_origin)}
 
 display:
   width: {config.display.width}

@@ -1,3 +1,4 @@
+#include "MediaServerRequest.h"
 #include "MusicApp.h"
 #include <new>
 
@@ -88,7 +89,7 @@ bool MusicApp::fetchSongList(int index, bool loadArt) {
 
         _loadingList = true;
         int start = (index / PAGE_SIZE) * PAGE_SIZE;
-        HTTPClient http;
+        MediaServerRequest http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
                      "/api/library/audio?page=" + String(start / PAGE_SIZE + 1) +
                      "&page_size=" + String(PAGE_SIZE) + "&icons=false";
@@ -168,7 +169,7 @@ void MusicApp::fetchArtwork(int idx) {
         if (!_artBuf) return;
 
         _artSize = 0;
-        HTTPClient http;
+        MediaServerRequest http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
                      "/api/library/audio/" + String(_songs[idx].id) + "/thumbnail.jpg?size=60";
         http.begin(url);
@@ -210,6 +211,7 @@ void MusicApp::fetchArtwork(int idx) {
 
 bool MusicApp::requestPlay(int idx, uint32_t startSec, bool retryMissing) {
         if (idx < 0 || idx >= _songCount) return false;
+        if (_cleanupPending) return false;
         bool wasMusicActive = audioManager && audioManager->activeSource() == AUDIO_MUSIC;
 
         if (!audioManager || !audioManager->request(AUDIO_MUSIC)) {
@@ -222,8 +224,7 @@ bool MusicApp::requestPlay(int idx, uint32_t startSec, bool retryMissing) {
         }
 
         if (!ensureAudioOutput(44100)) {
-            if (wasMusicActive) requestStop();
-            else audioManager->release(AUDIO_MUSIC);
+            stopAndReleaseMusic();
             _mode = MODE_BROWSE;
             _serverError = true;
             _serverOffline = false;
@@ -240,8 +241,7 @@ bool MusicApp::requestPlay(int idx, uint32_t startSec, bool retryMissing) {
             }
         }
         if (!audioPlugin || !audioPlugin->isLoaded()) {
-            if (wasMusicActive) requestStop();
-            else audioManager->release(AUDIO_MUSIC);
+            stopAndReleaseMusic();
             _mode = MODE_BROWSE;
             _serverError = true;
             _serverOffline = false;
@@ -250,7 +250,7 @@ bool MusicApp::requestPlay(int idx, uint32_t startSec, bool retryMissing) {
             return false;
         }
 
-        HTTPClient http;
+        MediaServerRequest http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) +
                      "/api/audio/" + String(_songs[idx].id) + "/play?start=" + String(startSec) +
                      "&switch=false&notify=false";
@@ -296,9 +296,8 @@ bool MusicApp::requestPlay(int idx, uint32_t startSec, bool retryMissing) {
         _serverOffline = httpCode <= 0;
         _contentMissing = httpCode == HTTP_CODE_NOT_FOUND;
         _dirty = true;
-        audioPlugin->stopStream();
-        audioPlugin->unload();
-        if (!wasMusicActive) audioManager->release(AUDIO_MUSIC);
+        stopAndReleaseMusic();
+        if (_cleanupPending) return false;
         if (httpCode == HTTP_CODE_NOT_FOUND && retryMissing) {
             int target = _catalogIndex;
             _songCount = 0;
@@ -320,7 +319,7 @@ void MusicApp::requestStop() {
             audioPlugin->stopStream();
         }
 
-        HTTPClient http;
+        MediaServerRequest http;
         String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false";
         http.begin(url);
         http.setConnectTimeout(1000);
@@ -584,10 +583,11 @@ void MusicApp::begin() {
 
 void MusicApp::pausePlayback() {
         if (_mode == MODE_PLAYING && !_paused) {
+            _trackPos = (millis() - _playStartMs) / 1000UL;
             if (audioPlugin) {
                 audioPlugin->stopStream();
             }
-            HTTPClient http;
+            MediaServerRequest http;
             String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false";
             http.begin(url);
             http.setConnectTimeout(1000);
@@ -617,10 +617,21 @@ void MusicApp::stopPlaybackInternal() {
     }
 
 void MusicApp::stopPlayback() {
-        stopPlaybackInternal();
-        if (audioManager) {
-            audioManager->release(AUDIO_MUSIC);
+        requestStop();
+        stopAndReleaseMusic();
+    }
+
+void MusicApp::stopAndReleaseMusic() {
+        if (audioPlugin) {
+            audioPlugin->stopStream();
+            audioPlugin->unload();
         }
+        _cleanupPending = audioPlugin && audioPlugin->isLoaded();
+        if (!_cleanupPending && audioManager) audioManager->release(AUDIO_MUSIC);
+        _mode = MODE_BROWSE;
+        _paused = false;
+        _trackPos = 0;
+        _dirty = true;
     }
 
 void MusicApp::togglePlayPause() {
@@ -739,19 +750,20 @@ void MusicApp::onEnter() {
 void MusicApp::onPlaybackEnded() {
         if (_mode == MODE_PLAYING && !_paused && _catalogTotal > 0 &&
             !selectSong((_catalogIndex + 1) % _catalogTotal)) {
-            requestStop();
-            _mode = MODE_BROWSE;
+            stopPlayback();
             _dirty = true;
         }
     }
 
 void MusicApp::update() {
+        if (_cleanupPending) {
+            stopAndReleaseMusic();
+            if (_cleanupPending) return;
+        }
         if (_mode == MODE_PLAYING && !_paused) {
             if (!_streamStarted && audioPlugin && audioPlugin->isConnected()) _streamStarted = true;
             if (!_streamStarted && millis() - _streamRequestMs > 10000) {
-                requestStop();
-                if (audioPlugin) audioPlugin->unload();
-                _mode = MODE_BROWSE;
+                stopPlayback();
                 _serverError = true;
                 _dirty = true;
                 return;
@@ -764,7 +776,7 @@ void MusicApp::update() {
             uint32_t now = millis();
             if (now - _lastSecondMs >= 1000) {
                 _lastSecondMs = now;
-                _trackPos++;
+                _trackPos = (now - _playStartMs) / 1000UL;
                 _dirty = true;
 
                 if (_songs[_selectedIdx].duration_s > 0) {
@@ -801,6 +813,8 @@ void MusicApp::update() {
 bool MusicApp::isPlaying() const {
         return (_mode == MODE_PLAYING) && !_paused;
     }
+
+bool MusicApp::isStopping() const { return _cleanupPending; }
 
 const char* MusicApp::getCurrentTitle() const {
         if (_songCount > 0 && _selectedIdx >= 0 && _selectedIdx < _songCount) {

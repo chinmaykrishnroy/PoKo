@@ -1,4 +1,5 @@
 #include "PokoOTA.h"
+#include "DeviceSecurity.h"
 
 size_t PokoOTA::_otaTotal = 0;
 size_t PokoOTA::_otaWritten = 0;
@@ -74,6 +75,9 @@ void PokoOTA::begin(WebServer* server, AppSwitchFn switchCb, Arduino_GFX* gfx) {
             delay(1000);
             ESP.restart();
         }, [server, switchCb, gfx]() {
+            // Upload callbacks may run during multipart parsing, before normal
+            // request middleware. Reject BEFORE calling Update.begin/write.
+            if (!deviceRequestAuthorized(*server, false)) return;
             HTTPUpload& upload = server->upload();
             if (upload.status == UPLOAD_FILE_START) {
                 // Wake display to full brightness and hold power lock during OTA

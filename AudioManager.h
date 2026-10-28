@@ -52,8 +52,10 @@ private:
     AudioQueryFn  _musicIsPlayingFn   = nullptr;
     AudioStrFn    _musicGetTitleFn    = nullptr;
     AudioQueryFn  _musicErrorFn       = nullptr;
+    AudioQueryFn  _musicStoppedFn     = nullptr;
     AudioActionFn _videoStopFn        = nullptr;
     AudioQueryFn  _videoStoppedFn     = nullptr;
+    AudioQueryFn  _videoAudibleFn     = nullptr;
 
     // External producer operations may call back from another task. Never hold
     // _mutex while waiting for them; _transitioning serializes session changes.
@@ -73,8 +75,8 @@ public:
     void onSourceVolumeChanged(AudioSource src, int vol, bool muted = false);
 
     void setSnapPlayer(SnapPlayer* p);
-    void setMusicHandlers(AudioActionFn stopFn, AudioActionFn toggleFn, AudioQueryFn isPlayingFn, AudioStrFn getTitleFn = nullptr, AudioQueryFn errorFn = nullptr);
-    void setVideoHandlers(AudioActionFn stopFn, AudioQueryFn stoppedFn = nullptr);
+    void setMusicHandlers(AudioActionFn stopFn, AudioActionFn toggleFn, AudioQueryFn isPlayingFn, AudioStrFn getTitleFn = nullptr, AudioQueryFn errorFn = nullptr, AudioQueryFn stoppedFn = nullptr);
+    void setVideoHandlers(AudioActionFn stopFn, AudioQueryFn stoppedFn = nullptr, AudioQueryFn audibleFn = nullptr);
 
     AudioSource activeSource() const;
     AudioSource suspendedSource() const;

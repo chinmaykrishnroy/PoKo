@@ -6,9 +6,8 @@
 //  IApp — Pure virtual interface for all PoKo applications
 //
 //  Every app (InfoApp, ClockApp, MusicApp, VideoApp, …) implements
-//  this interface. AppManager dispatches all lifecycle, input, and
-//  rendering calls through it, eliminating the if/else chains in
-//  PoKo.ino that previously duplicated the same dispatch 8 times.
+//  this interface. PoKo.ino owns application dispatch. The unused parallel
+//  AppManager implementation was removed to keep one state authority.
 //
 //  Design notes:
 //  - begin()   : called once at startup (allocate persistent state)
@@ -56,7 +55,7 @@ public:
     /// True if this app uses hold-repeat gestures (volume, pixel colour adjust).
     virtual bool wantsHoldRepeat() const { return false; }
 
-    /// True if AppManager should persist this app as "last_app" across reboots.
+    /// Whether an app is eligible for generic last_app persistence.
     /// Streaming apps (Music, Video) return false — they require active network.
     virtual bool isSafeForRestore() const { return true; }
 

@@ -10,6 +10,7 @@ from typing import Any
 
 from .config import AppConfig
 from .models import Icon, MediaItem
+from .thumbnail_cache import thumbnail_cached
 
 
 AUDIO_EXTS = {".mp3", ".flac", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".wma"}
@@ -380,7 +381,7 @@ def _thumbnail_with_python_ffmpeg(path: Path, ffmpeg_path: str, timeout: float, 
         return None
 
 
-def thumbnail_icon(path: Path, kind: str, config: AppConfig, timeout: float = 5, size: int = 28) -> Icon:
+def _thumbnail_icon_uncached(path: Path, kind: str, config: AppConfig, timeout: float = 5, size: int = 28) -> Icon:
     ffmpeg = default_ffmpeg_executable(config.ffmpeg.executable)
     selected = max(16, min(int(size), 128))
     payload = _thumbnail_with_python_ffmpeg(path, ffmpeg, timeout, selected, kind)
@@ -420,7 +421,7 @@ def thumbnail_icon(path: Path, kind: str, config: AppConfig, timeout: float = 5,
     )
 
 
-def thumbnail_raw_jpeg(path: Path, kind: str, config: AppConfig, timeout: float = 6, size: int = 80) -> bytes | None:
+def _thumbnail_raw_jpeg_uncached(path: Path, kind: str, config: AppConfig, timeout: float = 6, size: int = 80) -> bytes | None:
     ffmpeg = default_ffmpeg_executable(config.ffmpeg.executable)
     selected = max(16, min(int(size), 128))
     seek_points = [None] if kind in {"audio", "image"} else ["1", "0.05", "0"]
@@ -446,6 +447,22 @@ def thumbnail_raw_jpeg(path: Path, kind: str, config: AppConfig, timeout: float 
         except (OSError, subprocess.TimeoutExpired):
             pass
     return None
+
+
+def thumbnail_icon(path: Path, kind: str, config: AppConfig, timeout: float = 5, size: int = 28) -> Icon:
+    selected = max(16, min(int(size), 128))
+    result = thumbnail_cached(path, kind, config, selected, "icon",
+                              lambda: _thumbnail_icon_uncached(path, kind, config, timeout, selected).to_json())
+    return Icon(**result) if result else generic_icon(kind, selected)
+
+
+def thumbnail_raw_jpeg(path: Path, kind: str, config: AppConfig, timeout: float = 6, size: int = 80) -> bytes | None:
+    selected = max(16, min(int(size), 128))
+    def generate():
+        data = _thumbnail_raw_jpeg_uncached(path, kind, config, timeout, selected)
+        return {"data": base64.b64encode(data).decode() if data else ""}
+    result = thumbnail_cached(path, kind, config, selected, "jpeg", generate)
+    return base64.b64decode(result["data"]) if result and result.get("data") else None
 
 
 def command_preview(cmd: list[str]) -> str:

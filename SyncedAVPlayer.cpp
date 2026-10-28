@@ -1,4 +1,5 @@
 #include "SyncedAVPlayer.h"
+#include "AudioActivity.h"
 
 SyncedAVPlayer* SyncedAVPlayer::_instance = nullptr;
 
@@ -70,6 +71,7 @@ void SyncedAVPlayer::resetPlaybackState() {
         _samplesPlayed = 0;
         _disconnectStartMs = 0;
         _audioPackets = 0;
+        _lastAudibleMs = 0;
         _audioBytesDropped = 0;
         _audioUnderruns = 0;
         _videoPackets = 0;
@@ -256,7 +258,7 @@ void SyncedAVPlayer::audioTask() {
                     if (poko_tx_handle) {
                         i2s_channel_write(poko_tx_handle, stereo, sizeof(stereo), &written, pdMS_TO_TICKS(20));
                     }
-                    _samplesPlayed.fetch_add(AUDIO_CHUNK_BYTES / 2, std::memory_order_relaxed);
+                    _samplesPlayed.fetch_add(written / 8, std::memory_order_relaxed);
                     _audioUnderruns.fetch_add(1, std::memory_order_relaxed);
                 }
                 continue;
@@ -285,7 +287,15 @@ void SyncedAVPlayer::audioTask() {
             if (poko_tx_handle && _isRunning) {
                 i2s_channel_write(poko_tx_handle, stereo, outIdx * sizeof(int16_t), &written, pdMS_TO_TICKS(30));
             }
-            _samplesPlayed.fetch_add(monoSamples, std::memory_order_relaxed);
+            // Account for confirmed DAC writes, not decoded-but-dropped PCM.
+            _samplesPlayed.fetch_add(written / 8, std::memory_order_relaxed);
+            if (written < outIdx * sizeof(int16_t)) {
+                _audioBytesDropped.fetch_add((outIdx * sizeof(int16_t) - written) / 4,
+                                             std::memory_order_relaxed);
+            }
+            if (written && vol > 0 && pcm16HasAudibleSignal(monoBytes, min(got, written / 4))) {
+                _lastAudibleMs.store(millis(), std::memory_order_release);
+            }
         }
 
         if (_audioTaskDone) xSemaphoreGive(_audioTaskDone);
@@ -346,7 +356,15 @@ bool SyncedAVPlayer::isConnected() const {
 
 bool SyncedAVPlayer::isPlaying() const { return _playReleased && isConnected(); }
 
+bool SyncedAVPlayer::isAudioAudible() const {
+        uint32_t last = _lastAudibleMs.load(std::memory_order_acquire);
+        return _isRunning && _audioConnected && last != 0 && millis() - last < 3000;
+    }
+
 float SyncedAVPlayer::getRenderFps() const { return _renderFps; }
+uint32_t SyncedAVPlayer::audioUnderruns() const { return _audioUnderruns.load(); }
+uint32_t SyncedAVPlayer::audioBytesDropped() const { return _audioBytesDropped.load(); }
+uint32_t SyncedAVPlayer::videoFramesDropped() const { return _videoFramesDropped.load(); }
 
 uint32_t SyncedAVPlayer::audioClockMs() const {
         if (!_playReleased.load(std::memory_order_acquire)) return 0;
