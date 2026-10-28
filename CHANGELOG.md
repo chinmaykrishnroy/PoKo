@@ -7,7 +7,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased]
+## [v2.3.1] — 2026-10-28
 
 - Pace the white PoKo cold-boot wordmark and randomized color fusion over about
   1.1 seconds, with a yielding, watchdog-serviced minimum display duration.
