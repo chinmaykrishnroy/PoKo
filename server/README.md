@@ -12,6 +12,10 @@ provide playback to devices on arbitrary remote networks.
 
 ## Quick Start
 
+For a new secure local installation, use [the HTTPS local profile](SECURE_LOCAL.md).
+The older instructions below preserve unauthenticated LAN compatibility; do not
+use that profile on the internet or a network you do not trust.
+
 ```powershell
 cd <project-root>
 python -m server.poko_server --config server\config.yml

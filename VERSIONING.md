@@ -20,13 +20,13 @@ Poko uses [Semantic Versioning 2.0.0](https://semver.org/): **`vMAJOR.MINOR.PATC
 
 ## 2. Where the Version Is Defined
 
-The displayed version string lives in **`InfoApp.h`** inside `buildRows()`:
+The displayed version string lives in **`InfoApp.cpp`** inside `buildRows()`:
 
 ```cpp
 add("Ver", "v1.3.2", pokoClrCyan());
 ```
 
-Mirror the same version in the `/api/health` response in **`PokoAPI.h`**:
+Mirror the same version in the `/api/health` response in **`PokoAPI.cpp`**:
 
 ```cpp
 json += "\"firmware_version\":\"v1.3.2\",";

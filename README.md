@@ -129,7 +129,7 @@ Download the application binary from a GitHub release for OTA; use a complete Ar
 ```bash
 # OTA (device must already be running PoKo and on Wi-Fi)
 curl --digest --user admin -X POST http://<DEVICE_IP>/ota/upload \
-  -F "update=@build/esp32.esp32.esp32s3/PoKo.ino.bin"
+  -F "update=@<DOWNLOADED_RELEASE_APPLICATION.bin>"
 
 # First flash via USB
 arduino-cli upload -p <SERIAL_PORT> --fqbn "esp32:esp32:esp32s3:FlashSize=8M,PSRAM=opi,PartitionScheme=default_8MB" --input-dir dist .

@@ -17,8 +17,14 @@ If cloudflared runs in a container, its `127.0.0.1` is a different namespace;
 use host networking or put the origin and connector on the same private network.
 Do not solve that by exposing the unauthenticated legacy server.
 
-Add a Cloudflare Access policy restricted to your email for an additional login
-and rate-limit layer. The origin still independently requires authentication.
+Optionally add Cloudflare Access restricted to your email for the browser UI
+and administration routes (`/`, `/api/server/*`, `/api/device/*`). Keep browser
+challenges off the device routes (`/health`, `/api/library/*`, `/api/audio/*`,
+`/api/video/*`, `/api/image/*`, `/api/playback/*`); their origin authentication
+requires the restricted device token. The ESP32 cannot complete interactive
+Cloudflare Access login. Alternatively provision separate Access service-token
+support before protecting the entire hostname; that is not configured here.
+The origin independently authenticates every request in either case.
 Do not publish the ESP32 dashboard, OTA handler, Snapcast, or TCP media ports.
 
 ## Sign in
