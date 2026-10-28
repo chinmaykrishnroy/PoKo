@@ -59,6 +59,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--focus)!important;box-
         <button class="icon-btn" title="Refresh" onclick="refreshView()" id="refreshBtn"></button>
         <button class="icon-btn" title="Toggle theme" onclick="toggleTheme()" id="themeBtn"></button>
         <a class="btn" href="/ota" id="otaTop"></a>
+        <form method="post" action="/api/security/logout"><button class="btn">Sign out</button></form>
       </div>
     </header>
     <main class="content">
@@ -158,7 +159,7 @@ async function applyTheme(mode){try{await api('/api/theme?mode='+mode);setTheme(
 function toggleTheme(){applyTheme(curTheme==='dark'?'light':'dark');}
 function updateThemeBtn(){if($('themeBtn'))$('themeBtn').innerHTML=icon(curTheme==='dark'?'sun':'moon');}
 
-async function api(path,opt={}){const r=await fetch(path,opt);const ct=r.headers.get('content-type')||'';const body=ct.includes('json')?await r.json():await r.text();if(!r.ok||body?.ok===false)throw new Error(body.error||body||`HTTP ${r.status}`);return body;}
+async function api(path,opt={}){const r=await fetch(path,opt);if(r.status===401){location.replace('/login');throw new Error('Sign in required');}const ct=r.headers.get('content-type')||'';const body=ct.includes('json')?await r.json():await r.text();if(!r.ok||body?.ok===false)throw new Error(body.error||body||`HTTP ${r.status}`);return body;}
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function fmtBytes(n){n=Number(n)||0;if(n<1024)return n+' B';if(n<1048576)return(n/1024).toFixed(1)+' KB';return(n/1048576).toFixed(2)+' MB'}
 function fmtUptime(ms){const s=Math.floor((ms||0)/1000);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),ss=s%60;return(h?h+'h ':'')+(m?m+'m ':'')+(ss+'s');}
@@ -925,7 +926,7 @@ function renderSettings(){
       </div>
     </div>
     <div class="form-section">
-      <div class="form-title"><h3>Security</h3><p>Device login: admin. Your browser controls whether this Digest login is remembered. Use its password manager; PoKo does not save passwords in browser storage.</p></div>
+      <div class="form-title"><h3>Security</h3><p>Device login: admin. Use Remember me on the login page and your browser's password manager. PoKo keeps browser sessions in HttpOnly cookies, never localStorage. The saved password is viewable only on the physical device.</p></div>
       <form id="devicePasswordForm" class="form-grid">
         <input type="text" name="username" value="admin" autocomplete="username" readonly hidden>
         <div class="field"><label for="current_password">Current password</label><input id="current_password" name="current_password" type="password" autocomplete="current-password" required maxlength="128"></div>
@@ -958,7 +959,7 @@ async function changeDevicePassword(event){
     await api('/api/security/password',{method:'POST',body:new URLSearchParams(values)});
     clearInterval(healthPollTimer);
     form.reset();
-    result.textContent='Password changed. Save the new password in your password manager. Reopen this page and sign in as admin with the new password. Server media controls are preserved. Reboot to update ArduinoOTA.';
+    result.textContent='Password changed. Save the new password in your password manager. Sign in again with the new password. Server media controls are preserved. Reboot to update ArduinoOTA.';
   }catch(error){result.textContent=error.message;}
   finally{button.disabled=false;}
 }

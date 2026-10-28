@@ -39,6 +39,8 @@ private:
     int8_t   _pendingItem = -1;
     bool _securityPage = false;
     bool _resetConfirm = false;
+    bool _securityReset = false;
+    uint8_t _passwordPage = 0;
     String _recoveryPassword;
 
     static constexpr uint8_t ITEM_COUNT   = 24;

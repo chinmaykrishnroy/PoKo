@@ -84,15 +84,19 @@ void SettingsApp::renderToCanvas() {
             _canvas->setCursor(3, 53); _canvas->print(prefs.getString("device_pass", "").length() ? "Paired" : "Not paired");
             _canvas->setCursor(3, 69);
             if (_recoveryPassword.length()) {
-                _canvas->print("New password:");
-                _canvas->setCursor(3, 82); _canvas->print(_recoveryPassword);
-                _canvas->setCursor(3, 98); _canvas->print("Save it. Reboot OTA.");
+                _canvas->print(_securityReset ? "New password:" : "Saved password:");
+                for (int line = 0; line < 3; ++line) {
+                    unsigned start = _passwordPage * 60 + line * 20;
+                    if (start >= _recoveryPassword.length()) break;
+                    _canvas->setCursor(3, 82 + line * 12);
+                    _canvas->print(_recoveryPassword.substring(start, start + 20));
+                }
             } else {
-                _canvas->print(_resetConfirm ? "Reset login password?" : "Change login in Web UI");
+                _canvas->print(_resetConfirm ? "Reset login password?" : "Saved on this device");
                 _canvas->setCursor(3, 85); _canvas->print("Server stays paired");
-                _canvas->setCursor(3, 101); _canvas->print(_resetConfirm ? "2R:Confirm reset" : "2R:Password recovery");
+                _canvas->setCursor(3, 101); _canvas->print(_resetConfirm ? "2R:Confirm reset" : (_securityReset ? "2R:Reset password" : "2R:Show password"));
             }
-            _canvas->setCursor(3, 122); _canvas->print("2L:Back");
+            _canvas->setCursor(3, 122); _canvas->print(_recoveryPassword.length() ? "L/R:Page  2L:Back" : "L/R:Option 2L:Back");
             _canvas->flush();
             return;
         }
@@ -270,7 +274,7 @@ void SettingsApp::renderToCanvas() {
 
 void SettingsApp::applyAction() {
         switch (_selected) {
-            case 23: _securityPage = true; _resetConfirm = false; _recoveryPassword = ""; break;
+            case 23: _securityPage = true; _resetConfirm = false; _securityReset = false; _passwordPage = 0; _recoveryPassword = ""; break;
             case 0: { // Toggle Theme (Dark <-> Light)
                 bool nextDark = !isDarkTheme();
                 setPokoTheme(nextDark);
@@ -524,7 +528,7 @@ bool SettingsApp::isLoaded() const { return _active; }
 void SettingsApp::refreshTheme() { if (_active) renderToCanvas(); }
 
 void SettingsApp::onLeft() {
-        if (_securityPage) return;
+        if (_securityPage) { onRight(); return; }
         flushHeldValue();
         _selected = (_selected == 0) ? (ITEM_COUNT - 1) : (_selected - 1);
         adjustScroll();
@@ -532,7 +536,12 @@ void SettingsApp::onLeft() {
     }
 
 void SettingsApp::onRight() {
-        if (_securityPage) return;
+        if (_securityPage) {
+            if (_recoveryPassword.length()) _passwordPage = (_passwordPage + 1) % ((_recoveryPassword.length() + 59) / 60);
+            else { _securityReset = !_securityReset; _resetConfirm = false; }
+            _dirty = true;
+            return;
+        }
         flushHeldValue();
         _selected = (_selected + 1) % ITEM_COUNT;
         adjustScroll();
@@ -551,6 +560,11 @@ void SettingsApp::onBack() {
 void SettingsApp::onEnter() {
         if (_securityPage) {
             if (_recoveryPassword.length()) return;
+            if (!_securityReset) {
+                _recoveryPassword = prefs.getString("device_pass", "");
+                _passwordPage = 0; _dirty = true;
+                return;
+            }
             if (!_resetConfirm) { _resetConfirm = true; _dirty = true; return; }
             char password[17];
             snprintf(password, sizeof(password), "%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());

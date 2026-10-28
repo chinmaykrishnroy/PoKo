@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 import json
 import os
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -23,8 +24,15 @@ class DeviceClient:
     def __init__(self, config: AppConfig, enabled: bool = True) -> None:
         self.config = config
         self.enabled = enabled
+        # ESP32 WebServer has one Digest nonce. Serialize each challenge/response
+        # exchange so parallel dashboard requests cannot invalidate one another.
+        self._auth_lock = threading.Lock()
 
     def _open(self, request, timeout):
+        with self._auth_lock:
+            return self._open_authenticated(request, timeout)
+
+    def _open_authenticated(self, request, timeout):
         password = os.environ.get("POKO_DEVICE_PASSWORD", "")
         if not password:
             return urllib.request.urlopen(request, timeout=timeout)

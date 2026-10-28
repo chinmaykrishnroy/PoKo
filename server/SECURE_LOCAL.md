@@ -32,6 +32,12 @@ environment variables from the generated file in your service configuration;
 do not check them into Git. The password recovery and device-token files are for
 you, not public downloads.
 
+The credential helper configures a private writable verifier file for password
+changes from **Server Settings → Browser login password**. Run the server under
+the account that owns that secrets directory. Browser login uses HttpOnly Secure
+cookies over HTTPS, with optional **Remember me**; API clients can still use their
+separate credentials. Server restarts require one fresh browser login.
+
 For a small private installation, generate a local certificate with OpenSSL:
 
 ```sh

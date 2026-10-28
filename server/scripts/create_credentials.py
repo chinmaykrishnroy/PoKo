@@ -17,6 +17,7 @@ def main():
         "POKO_ADMIN_USER": "admin",
         "POKO_ADMIN_PASSWORD_HASH": password_hash(password),
         "POKO_DEVICE_TOKEN_SHA256": hashlib.sha256(token.encode()).hexdigest(),
+        "POKO_ADMIN_PASSWORD_HASH_FILE": str((directory / "admin-verifier.json").resolve()),
     }
     (directory / "credentials.env").write_text("".join(f"{name}='{value}'\n" for name, value in values.items()))
     (directory / "admin-password").write_text(password + "\n")

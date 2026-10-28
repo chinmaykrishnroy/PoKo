@@ -7,7 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [v2.0.3] — 2026-10-28
+## [v2.1.0] — 2026-10-28
+
+- Replaced browser HTTP-auth prompts with login forms, HttpOnly session cookies,
+  Remember me, and logout on both dashboards. API credentials remain separate.
+- Serialized device Digest exchanges after reproducing parallel shared-nonce
+  failures. Upstream device authentication errors no longer trigger server login.
+- Added physical viewing/paging of the device's existing saved password, with
+  reset retained as a separate confirmed action.
+- Added server Web UI passphrase changes, private persisted scrypt verifiers,
+  operator recovery, and optional memorable six-word credential generation.
+- The wording-only v2.0.3 candidate was superseded before publication/flashing.
+
+## [v2.0.3 candidate] — 2026-10-28
 
 - Use “Server” in security messages so pairing guidance applies to any host.
   Shortened the on-device message to fit the 128-pixel screen.

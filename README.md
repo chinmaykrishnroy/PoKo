@@ -150,11 +150,16 @@ login password, device token, and device-admin password serve different roles.
 
 Use **Web UI → Settings → Security** to change the device-admin password.
 Enter the current password and confirm a new password of 16–128 characters.
-Allow your browser's password manager to save it if desired; persistence of the
-native Digest login is browser-controlled. PoKo never stores it in localStorage.
-For a forgotten password, open **Settings → Security** on the device, then choose
-password recovery and confirm. Write down the generated password shown on its
-screen; leaving that screen hides it. Existing server media controls remain paired
+Both dashboards use a normal login form with **Remember me** and **Sign out**.
+Sessions use HttpOnly cookies, never localStorage. A tab switch does not end a
+session. Remembered sessions last up to 30 days; server restarts require a fresh
+server login. Device remembered sessions can survive reboots after clock sync.
+The device already saves its password internally: open **Settings → Security**,
+then choose **Show password**. Long passwords have L/R pages. Password reset is
+a separate option requiring confirmation. Leaving the screen hides the password.
+The server dashboard's Settings also supports changing its browser passphrase;
+its private verifier path must be configured (the deployment helpers do this).
+Existing server media controls remain paired
 using a restricted integration credential that cannot access administration or
 OTA. Reboot after a password change to update ArduinoOTA authentication too.
 Perform password changes on a trusted LAN: the device dashboard uses HTTP.

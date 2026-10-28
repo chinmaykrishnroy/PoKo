@@ -21,7 +21,8 @@ def main() -> int:
     for script in ("prepare_audio_test.py", "prepare_video_test.py", "prepare_music_test.py"):
         subprocess.run([sys.executable, str(HERE / script)], cwd=ROOT, check=True)
     cases = {
-        "device-security": ["rotation-preserves-controls", "password-change-validation", "storage-failure-keeps-admin", "setup-cannot-rotate"],
+        "device-security": ["rotation-preserves-controls", "password-change-validation", "storage-failure-keeps-admin", "setup-cannot-rotate",
+                            "browser-no-native-prompt", "browser-session-tab-return", "browser-session-password-revocation", "browser-remember-cookie"],
         "buttons": ["deferred-init", "double-left", "double-right", "info-hold", "power-click",
                     "wake-left", "wake-right", "wake-power", "music-hold", "single-left", "single-right",
                     "busy-main-loop", "bounce", "overflow", "combo-click", "combo-double",
@@ -43,7 +44,7 @@ def main() -> int:
         "audio-activity": ["silence", "audible-positive", "audible-negative"],
     }
     sources = {
-        "device-security": [HERE / "device_security.cpp", ROOT / "DeviceSecurity.cpp", ROOT / "DeviceAccessPolicy.cpp"],
+        "device-security": [HERE / "device_security.cpp", ROOT / "DeviceSecurity.cpp", ROOT / "DeviceAccessPolicy.cpp", ROOT / "DeviceWebSession.cpp"],
         "buttons": [HERE / "buttons.cpp", ROOT / "ButtonInput.cpp", args.onebutton / "OneButton.cpp"],
         "audio": [ROOT / "build/audio-test.cpp"],
         "music": [ROOT / "build/music-test.cpp"],

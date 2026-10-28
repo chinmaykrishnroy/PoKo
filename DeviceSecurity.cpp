@@ -1,5 +1,6 @@
 #include "DeviceSecurity.h"
 #include "DeviceAccessPolicy.h"
+#include "DeviceWebSession.h"
 #include <Preferences.h>
 extern Preferences prefs;
 
@@ -10,10 +11,22 @@ bool replaceDevicePassword(const String& password) {
     String previous = prefs.getString("device_pass", "");
     if (previous.length() && !prefs.getString("device_ctrl", "").length() &&
         prefs.putString("device_ctrl", previous) != previous.length()) return false;
-    return prefs.putString("device_pass", password) == password.length();
+    bool saved = prefs.putString("device_pass", password) == password.length();
+    if (saved) clearDeviceBrowserSessions();
+    return saved;
 }
 
 bool deviceRequestAuthorized(WebServer& server, bool challenge) {
+    if (deviceBrowserSessionAuthorized(server)) return true;
+    if (deviceBrowserRequest(server)) {
+        if (challenge) {
+            if (server.method() == HTTP_GET && (server.uri() == "/" || server.uri() == "/ota")) {
+                server.sendHeader("Location", "/login");
+                server.send(303, "text/plain", "");
+            } else server.send(401, "application/json", "{\"ok\":false,\"error\":\"Sign in required\"}");
+        }
+        return false;
+    }
     String password = prefs.getString("device_pass", "");
     bool authorized = password.length() >= 16 && server.authenticate("admin", password.c_str());
     if (!authorized && deviceControlRoute(server.uri().c_str(), server.method() == HTTP_GET)) {
@@ -25,8 +38,8 @@ bool deviceRequestAuthorized(WebServer& server, bool challenge) {
 }
 
 void installDeviceAuthentication(WebServer& server) {
-    const char* headers[] = {"Origin", "Sec-Fetch-Site"};
-    server.collectHeaders(headers, 2);
+    const char* headers[] = {"Origin", "Sec-Fetch-Site", "Sec-Fetch-Mode", "Accept", "Cookie"};
+    server.collectHeaders(headers, 5);
     server.addMiddleware([](WebServer& request, Middleware::Callback next) -> bool {
         // First pairing is a local, five-minute boot window. Once provisioned,
         // all routes (including OTA) require the separate device admin password.
@@ -40,6 +53,8 @@ void installDeviceAuthentication(WebServer& server) {
             request.send(403, "text/plain", "Origin refused");
             return false;
         }
+        if ((request.uri() == "/login" && request.method() == HTTP_GET) ||
+            (request.uri() == "/api/security/login" && request.method() == HTTP_POST)) return next();
         if (unpaired && request.uri() == "/api/security/setup" &&
             request.method() == HTTP_POST && millis() < 300000) return next();
         if (unpaired && request.uri() == "/" && request.method() == HTTP_GET && millis() < 300000) {
@@ -51,6 +66,7 @@ void installDeviceAuthentication(WebServer& server) {
         request.sendHeader("Cache-Control", "no-store");
         return next();
     });
+    installDeviceBrowserSessions(server);
     server.on("/api/security/setup", HTTP_POST, [&server]() {
         String password = server.arg("password");
         if (password.length() < 16 || password.length() > 128) {

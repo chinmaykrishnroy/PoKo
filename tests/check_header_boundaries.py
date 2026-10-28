@@ -16,6 +16,7 @@ MIGRATED = (
     "MediaServerRequest",
     "DeviceSecurity",
     "DeviceAccessPolicy",
+    "DeviceWebSession",
     "PixelApp",
     "PixelEngine",
     "PokoAPI",

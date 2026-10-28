@@ -2,6 +2,7 @@
 #include "security_stubs/Preferences.h"
 #include "../../DeviceSecurity.h"
 #include "../../DeviceAccessPolicy.h"
+#include "../../DeviceWebSession.h"
 #include <cassert>
 #include <iostream>
 Preferences prefs;
@@ -49,6 +50,33 @@ int main(int argc, char** argv) {
         server.supplied = oldPassword; server.arguments["password"] = newPassword;
         server.dispatch(); assert(server.status == 409);
         assert(prefs.getString("device_pass", "") == oldPassword);
+    } else if (test == "browser-no-native-prompt") {
+        server.headers["Sec-Fetch-Mode"] = "cors";
+        server.path = "/api/health"; server.supplied = oldPassword;
+        assert(!deviceRequestAuthorized(server)); assert(server.status == 401);
+        assert(server.responseHeaders.count("WWW-Authenticate") == 0);
+        server.path = "/";
+        assert(!deviceRequestAuthorized(server)); assert(server.status == 303);
+        assert(server.responseHeaders["Location"] == "/login");
+    } else if (test == "browser-session-tab-return" || test == "browser-session-password-revocation" || test == "browser-remember-cookie") {
+        server.headers["Sec-Fetch-Mode"] = "navigate";
+        server.path = "/api/security/login"; server.verb = HTTP_POST;
+        server.arguments = {{"username", "admin"}, {"password", oldPassword}, {"remember", test == "browser-remember-cookie" ? "1" : "0"}};
+        server.dispatch(); assert(server.status == 303);
+        String cookie = server.responseHeaders["Set-Cookie"];
+        assert(cookie.indexOf("HttpOnly") >= 0 && cookie.indexOf("SameSite=Strict") >= 0);
+        assert((cookie.indexOf("Max-Age") >= 0) == (test == "browser-remember-cookie"));
+        server.headers["Cookie"] = cookie;
+        server.path = "/api/health"; server.verb = HTTP_GET;
+        for (int tab = 0; tab < 30; ++tab) assert(deviceRequestAuthorized(server));
+        if (test == "browser-session-password-revocation") {
+            assert(replaceDevicePassword(newPassword));
+            assert(!deviceRequestAuthorized(server, false));
+        } else {
+            server.path = "/api/security/logout"; server.verb = HTTP_POST;
+            server.dispatch(); assert(server.status == 303);
+            assert(!deviceBrowserSessionAuthorized(server));
+        }
     } else return 2;
     std::cout << "PASS " << test << '\n';
 }

@@ -54,6 +54,10 @@ for variable, filename, hashed in [
         secret_file.write_text(credential + "\n")
         os.chmod(secret_file, 0o600)
 
+if "POKO_ADMIN_PASSWORD_HASH_FILE=" not in env.read_text():
+    with env.open("a") as stream:
+        stream.write("POKO_ADMIN_PASSWORD_HASH_FILE='/var/lib/poko/admin-verifier.json'\n")
+
 if not config_path.exists():
     config = load_config("/opt/poko/server/config.example.yml")
     config = replace(config, host="127.0.0.1", port=8765,

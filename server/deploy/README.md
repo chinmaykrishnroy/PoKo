@@ -89,6 +89,7 @@ is installed. If using a virtual environment, adapt `ExecStart` in the unit.
    sudo python3 /opt/poko/server/deploy/verify_pi.py --env /path/to/private.env
    sudo python3 /opt/poko/server/deploy/verify_public.py --env /path/to/private.env
    sudo python3 /opt/poko/server/deploy/verify_device.py --env /path/to/private.env
+   sudo python3 /opt/poko/server/deploy/verify_browser.py --env /path/to/private.env
    ```
 
 The public check expects anonymous requests to be rejected, valid browser and
@@ -100,6 +101,9 @@ selected video longer than 30 seconds. The scripts do not create media. Process
 environment variables override `.env` values. `.env` is ignored by Git; the
 example contains illustrative targets only. Hermetic unit tests keep synthetic
 fixture values and do not require access to your deployment.
+The browser check verifies login, parallel tab requests and logout without native
+HTTP-auth prompts. Set `POKO_TEST_REBOOT=1` only when a device reboot is acceptable
+to additionally verify remembered login after reboot and clock sync.
 
 Optional Cloudflare Access policies must cover only browser/admin routes such
 as `/`, `/api/server/*`, and `/api/device/*`. Keep interactive challenges off
@@ -138,13 +142,20 @@ sudo systemctl restart poko
 ```
 
 Do not delete the whole credentials file to rotate one password; that can break
-pairing. Browser persistence of native HTTP authentication is browser-controlled.
-Use a private browser session on shared computers. Use an SSH local forward for
-origin administration instead of exposing plaintext Basic authentication on LAN.
+pairing.
+Use the login form's **Remember me** to keep a browser session across tabs and
+browser reopenings for up to 30 days. Server sessions are kept in bounded RAM;
+restarting the service requires signing in once again. **Sign out** revokes the
+current session. Password changes revoke all browser sessions. Programmatic
+Basic/Bearer authentication remains available independently of browser sessions.
+Use the HTTPS public/local address for browser login; origin HTTP is reserved
+for loopback API checks. Do not expose plaintext Basic authentication on LAN.
 
 Device firmware v2.0.2 adds **Web UI → Settings → Security** for human password
 changes and **Settings → Security** on the physical device for confirmed
-recovery. The generated recovery password is shown only on its screen. After a
+recovery. Firmware v2.1.0 also lets the owner **show the existing saved password**
+on that physical screen; viewing it does not change it or disconnect clients.
+Remembered device cookies survive reboots when clock sync is available. After a
 change, the initially provisioned device-admin recovery file is stale: save the
 new password in your password manager. Reboot to update ArduinoOTA's password.
 
@@ -155,6 +166,25 @@ Further human password changes preserve it, so the Pi remains paired. This does
 not revoke a compromised integration credential; replace/re-provision that
 credential separately if needed. Device HTTP control remains LAN-only: Digest
 authenticates requests but does not encrypt the connection.
+
+For an easier-to-type server password, use **Server Settings → Browser login
+password**, or choose one privately with:
+
+```sh
+sudo python3 /opt/poko/server/scripts/rotate_admin.py --prompt
+sudo systemctl restart poko
+```
+
+The tool also supports `--word-list /path/to/words.txt` to generate six random
+words from a list of at least 4096 distinct words. It never prints the password.
+The generated initial/recovery password is in the operator's private file; after
+choosing a new password in the Web UI, save it in your password manager because
+that initial file is stale. An operator CLI reset restores access if forgotten.
+`POKO_ADMIN_PASSWORD_HASH_FILE` names a private writable verifier file, outside
+editable YAML. Pi setup places it in `/var/lib/poko/admin-verifier.json`; local
+credential setup places it in the private secrets directory. Only salted scrypt
+verifiers are written there. An operator rotation of the base environment hash
+invalidates an old browser override, so CLI recovery always takes precedence.
 
 ## Private state and operation
 

@@ -1,8 +1,8 @@
 """Small, fail-closed HTTP authentication boundary for a tunnel origin.
 
 Credentials deliberately live outside editable YAML and the configuration API.
-Basic authentication provides the browser's native sign-in prompt; TLS belongs
-at Cloudflare. The origin is restricted to loopback in secured deployments.
+Browser sessions use HttpOnly cookies; Basic/Bearer remain for API clients.
+TLS belongs at the tunnel or the directly configured HTTPS listener.
 """
 from __future__ import annotations
 
@@ -11,6 +11,13 @@ import binascii
 import hashlib
 import hmac
 import os
+import secrets
+import threading
+import time
+import json
+from pathlib import Path
+import tempfile
+from http.cookies import SimpleCookie, CookieError
 from urllib.parse import urlsplit
 
 
@@ -26,11 +33,20 @@ class Authentication:
         self.origin = origin
         self.username = os.environ.get("POKO_ADMIN_USER", "admin")
         self.encoded = os.environ.get("POKO_ADMIN_PASSWORD_HASH", "")
+        self._base_encoded = self.encoded
+        self.password_file = os.environ.get("POKO_ADMIN_PASSWORD_HASH_FILE", "")
         self.device_digest = os.environ.get("POKO_DEVICE_TOKEN_SHA256", "")
+        self._sessions = {}
+        self._session_lock = threading.Lock()
+        self._failed_logins = []
         if enabled:
             parsed = urlsplit(origin)
             if parsed.scheme != "https" or not parsed.netloc or parsed.path or parsed.query or parsed.fragment:
                 raise ValueError("security.public_origin must be an HTTPS origin without a path")
+            if self.password_file and Path(self.password_file).exists():
+                saved = json.loads(Path(self.password_file).read_text())
+                if saved.get("base") == hashlib.sha256(self._base_encoded.encode()).hexdigest():
+                    self.encoded = saved["hash"]
             try:
                 algorithm, salt, digest = self.encoded.split("$")
                 self.salt = bytes.fromhex(salt)
@@ -40,8 +56,80 @@ class Authentication:
             except ValueError:
                 raise ValueError("Set a valid POKO_ADMIN_PASSWORD_HASH before enabling security") from None
 
+    def change_password(self, current: str, password: str, confirmation: str) -> None:
+        if not self.password_file:
+            raise ValueError("Configure POKO_ADMIN_PASSWORD_HASH_FILE for browser password changes")
+        if not 16 <= len(password) <= 128 or password != confirmation or password == current:
+            raise ValueError("Use a different 16-128 character passphrase with matching confirmation")
+        with self._session_lock:
+            header = "Basic " + base64.b64encode((self.username + ":" + current).encode()).decode()
+            if self.role(header) != "admin":
+                raise ValueError("Current password is incorrect")
+            encoded = password_hash(password)
+            path = Path(self.password_file)
+            descriptor, temporary = tempfile.mkstemp(prefix=".poko-password-", dir=path.parent)
+            try:
+                with os.fdopen(descriptor, "w") as stream:
+                    json.dump({"base": hashlib.sha256(self._base_encoded.encode()).hexdigest(), "hash": encoded}, stream)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, path)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+            self.encoded = encoded
+            _, salt, digest = encoded.split("$")
+            self.salt, self.digest = bytes.fromhex(salt), bytes.fromhex(digest)
+            self._sessions.clear()
+
     def authorized(self, header: str) -> bool:
         return self.role(header) is not None
+
+    def login(self, username: str, password: str, remember: bool) -> tuple[str | None, bool]:
+        now = time.time()
+        with self._session_lock:
+            self._failed_logins = [t for t in self._failed_logins if now - t < 60]
+            if len(self._failed_logins) >= 10:
+                return None, True
+        generation = self.encoded
+        header = "Basic " + base64.b64encode((username + ":" + password).encode()).decode()
+        if self.role(header) != "admin":
+            with self._session_lock:
+                self._failed_logins.append(now)
+            return None, False
+        token = secrets.token_urlsafe(32)
+        with self._session_lock:
+            if generation != self.encoded:
+                return None, False
+            self._sessions = {key: expiry for key, expiry in self._sessions.items() if expiry > now}
+            if len(self._sessions) >= 64:
+                del self._sessions[next(iter(self._sessions))]
+            self._sessions[hashlib.sha256(token.encode()).digest()] = now + (30 * 86400 if remember else 12 * 3600)
+            self._failed_logins.clear()
+        return token, False
+
+    def _cookie_token(self, header: str) -> str:
+        if len(header) > 4096:
+            return ""
+        try:
+            cookie = SimpleCookie()
+            cookie.load(header)
+            return cookie["poko_session"].value if "poko_session" in cookie else ""
+        except CookieError:
+            return ""
+
+    def cookie_role(self, header: str) -> str | None:
+        token = self._cookie_token(header)
+        if not token:
+            return None
+        key = hashlib.sha256(token.encode()).digest()
+        with self._session_lock:
+            return "admin" if self._sessions.get(key, 0) > time.time() else None
+
+    def logout(self, header: str) -> None:
+        token = self._cookie_token(header)
+        with self._session_lock:
+            self._sessions.pop(hashlib.sha256(token.encode()).digest(), None)
 
     def role(self, header: str) -> str | None:
         if not self.enabled:

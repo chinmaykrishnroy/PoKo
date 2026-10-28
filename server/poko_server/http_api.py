@@ -24,6 +24,7 @@ from .models import MediaItem
 from .playback import PlaybackManager
 from .ui import ADMIN_HTML, FAVICON_SVG
 from .security import Authentication
+from .login_page import LOGIN_HTML
 
 
 class PokoHTTPServer(ThreadingHTTPServer):
@@ -406,8 +407,45 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
         self._last_status = 200
         error = None
         try:
-            role = self.authentication.role(self.headers.get("Authorization", ""))
+            path = urlparse(self.path).path
+            browser = bool(self.headers.get("Sec-Fetch-Mode")) or "text/html" in self.headers.get("Accept", "")
+            if self.authentication.enabled and path == "/login" and self.command == "GET":
+                self._html(LOGIN_HTML.replace("__MESSAGE__", "Remembered sessions last up to 30 days, or until the server restarts."))
+                return
+            if self.authentication.enabled and path == "/api/security/login" and self.command == "POST":
+                if not self.authentication.same_origin(self.headers):
+                    self._json({"ok": False, "error": "cross-origin request refused"}, HTTPStatus.FORBIDDEN)
+                    return
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 2048:
+                    raise ValueError("invalid login form")
+                data = parse_qs(self.rfile.read(length).decode(), max_num_fields=4)
+                username, password = _first(data, "username", ""), _first(data, "password", "")
+                if len(username) > 64 or len(password) > 128:
+                    raise ValueError("invalid login form")
+                remember = _first(data, "remember", "") == "1"
+                token, limited = self.authentication.login(username, password, remember)
+                if token:
+                    cookie = "poko_session=" + token + "; Path=/; HttpOnly; Secure; SameSite=Strict"
+                    if remember:
+                        cookie += "; Max-Age=2592000"
+                    self._auth_redirect("/", cookie)
+                else:
+                    self._html(LOGIN_HTML.replace("__MESSAGE__", "Too many attempts. Wait a minute." if limited else "Username or password is incorrect."),
+                               HTTPStatus.TOO_MANY_REQUESTS if limited else HTTPStatus.UNAUTHORIZED)
+                return
+            role = self.authentication.cookie_role(self.headers.get("Cookie", ""))
+            if role is None and not browser:
+                role = self.authentication.role(self.headers.get("Authorization", ""))
+            if not self.authentication.enabled:
+                role = "admin"
             if role is None:
+                if browser:
+                    if path in {"/", "/ota"} and self.command == "GET":
+                        self._auth_redirect("/login")
+                    else:
+                        self._json({"ok": False, "error": "Sign in required"}, HTTPStatus.UNAUTHORIZED)
+                    return
                 self._last_status = 401
                 self.send_response(401)
                 self.send_header("WWW-Authenticate", 'Basic realm="PoKo", charset="UTF-8"')
@@ -419,6 +457,18 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                 return
             if not self.authentication.same_origin(self.headers):
                 self._json({"ok": False, "error": "cross-origin request refused"}, HTTPStatus.FORBIDDEN)
+                return
+            if path == "/api/security/logout" and self.command == "POST":
+                self.authentication.logout(self.headers.get("Cookie", ""))
+                self._auth_redirect("/login", "poko_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0")
+                return
+            if path == "/api/security/password" and self.command == "POST":
+                data = self._read_json_body()
+                current, password, confirmation = (data.get(key, "") for key in ("current_password", "password", "confirmation"))
+                if not all(isinstance(value, str) for value in (current, password, confirmation)):
+                    raise ValueError("invalid password form")
+                self.authentication.change_password(current, password, confirmation)
+                self._json({"ok": True, "sign_in_again": True})
                 return
             self._handle()
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
@@ -525,6 +575,11 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "error": "unexpected query"}, HTTPStatus.BAD_REQUEST)
                 return
             status, payload, content_type = self.backend.device.request(target)
+            if status in {401, 403}:
+                # Upstream device credentials are separate from this browser's
+                # server session. Never turn a pairing failure into login loops.
+                self._json({"ok": False, "error": "Device authentication failed; update the server's device-control credential"}, HTTPStatus.BAD_GATEWAY)
+                return
             self._binary(payload, content_type, HTTPStatus(status))
             return
         if path == "/api/device/app":
@@ -816,6 +871,15 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
+
+    def _auth_redirect(self, location: str, cookie: str | None = None) -> None:
+        self._last_status = 303
+        self.send_response(303)
+        self.send_header("Location", location)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _html(self, payload: str, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = payload.encode("utf-8")
