@@ -10,6 +10,7 @@ static const char* protectedKindName(ProtectedActivityKind kind) {
             case PROTECTED_MUSIC: return "MUSIC";
             case PROTECTED_VIDEO: return "VIDEO";
             case PROTECTED_TORCH: return "TORCH";
+            case PROTECTED_MIC: return "MIC";
             default: return "NONE";
         }
     }
@@ -141,6 +142,9 @@ void PowerManager::setLoopYieldMs(uint8_t ms, bool persist) {
 uint8_t PowerManager::getLoopYieldMs() const { return _loopYieldMs; }
 
 uint8_t PowerManager::recommendedLoopYieldMs() const {
+        // RX reads are non-blocking; let the idle task run between microphone
+        // polls even though capture holds the audio lock against system sleep.
+        if (_audio && _audio->activeSource() == AUDIO_MIC) return 1;
         if (_protectedActivity ||
             hasLock(POWER_LOCK_AUDIO | POWER_LOCK_REALTIME_NET | POWER_LOCK_OTA)) {
             return 0;
@@ -469,7 +473,15 @@ void PowerManager::update() {
                 (_audio->hasActiveSession() &&
                  (now - _lastAudioActiveMs) < 5000);
 
-            if (keepAudioPowered) {
+            if (src == AUDIO_MIC) {
+                // RX owns I2S0. Never restore the DAC/PA underneath capture.
+                // The normal low-battery policy can still override this lock.
+                acquireLock(POWER_LOCK_AUDIO, LOCK_OWNER_AUDIO);
+                releaseLock(POWER_LOCK_REALTIME_NET, LOCK_OWNER_AUDIO);
+                _lastAudioActiveMs = now;
+                if (isSpeakerAmpEnabled()) setSpeakerAmp(false);
+                _paStandbyDone = true;
+            } else if (keepAudioPowered) {
                 acquireLock(POWER_LOCK_AUDIO, LOCK_OWNER_AUDIO);
 
                 // SSync and Video only lock low-latency Wi-Fi while actively rendering

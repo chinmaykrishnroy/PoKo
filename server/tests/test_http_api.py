@@ -113,6 +113,12 @@ class HttpApiTests(unittest.TestCase):
                 with self.assertRaises(urllib.error.HTTPError) as error:
                     urllib.request.urlopen(base_url + "/api/device/app?set=stream", timeout=5)
                 self.assertEqual(error.exception.code, 400)
+                with mock.patch.object(server.RequestHandlerClass.backend.device, "switch") as switch:
+                    switch.return_value = type("Response", (), {"ok": True})()
+                    for app in ("analyzer", "tuner"):
+                        with urllib.request.urlopen(base_url + "/api/device/app?set=" + app, timeout=5) as response:
+                            self.assertTrue(json.load(response)["ok"])
+                        switch.assert_called_with(app)
                 with self.assertRaises(urllib.error.HTTPError) as error:
                     urllib.request.urlopen(base_url + "/api/device/sys?brightness=evil", timeout=5)
                 self.assertEqual(error.exception.code, 400)

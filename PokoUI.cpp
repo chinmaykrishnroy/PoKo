@@ -1,4 +1,5 @@
 #include "PokoUI.h"
+#include "LauncherWindow.h"
 #include <new>
 
 void PokoUI::drawStatusBar() {
@@ -201,6 +202,20 @@ void PokoUI::drawAppIcon(int cx, int cy, AppState state, uint16_t color, uint16_
             }
             _gfx->fillCircle(cx, cy, 3, color);
             break;
+        case STATE_ANALYZER:
+            _gfx->drawLine(cx-12,cy,cx-7,cy,color);
+            _gfx->drawLine(cx-7,cy,cx-3,cy-10,color);
+            _gfx->drawLine(cx-3,cy-10,cx+3,cy+10,color);
+            _gfx->drawLine(cx+3,cy+10,cx+7,cy,color);
+            _gfx->drawLine(cx+7,cy,cx+12,cy,color);
+            break;
+        case STATE_TUNER:
+            _gfx->drawFastVLine(cx-7,cy-11,12,color);
+            _gfx->drawFastVLine(cx+7,cy-11,12,color);
+            _gfx->drawLine(cx-7,cy+1,cx,cy+6,color);
+            _gfx->drawLine(cx+7,cy+1,cx,cy+6,color);
+            _gfx->drawFastVLine(cx,cy+6,7,color);
+            break;
         case STATE_SETTINGS_UI:
             // ── 4-tooth gear
             _gfx->fillRect(cx - 2, cy - 13, 4, 5, color);
@@ -271,11 +286,13 @@ void PokoUI::drawTile(uint8_t idx) {
 void PokoUI::drawNavIndicator() {
         const auto& theme = currentTheme();
         _gfx->fillRect(0, 102, 128, 11, theme.bg);
-        int totalW = TILE_COUNT * 8 + (TILE_COUNT - 1) * 4;
+        constexpr uint8_t visible = 8;
+        _navStart = launcherWindowStart(_selected, _navStart, TILE_COUNT, visible);
+        int totalW = visible * 8 + (visible - 1) * 4;
         int startX = (128 - totalW) / 2;
-        for (uint8_t i = 0; i < TILE_COUNT; i++) {
+        for (uint8_t i = 0; i < visible; i++) {
             int x = startX + i * 12;
-            if (i == _selected) {
+            if (i + _navStart == _selected) {
                 _gfx->fillRoundRect(x, 105, 8, 4, 2, theme.accent);
             } else {
                 _gfx->fillCircle(x + 4, 107, 2, theme.line);
@@ -380,6 +397,8 @@ uint16_t getTileAccentColor(AppState state) {
             case STATE_GALLERY_UI:  return 0xFD20; // Orange
             case STATE_PIXELS_UI:   return 0xFBE0; // Yellow
             case STATE_SETTINGS_UI: return 0x8410; // Mid Grey
+            case STATE_ANALYZER:    return 0x07FF;
+            case STATE_TUNER:       return 0xFD20;
             default:                return 0x07FF;
         }
     } else {
@@ -393,6 +412,8 @@ uint16_t getTileAccentColor(AppState state) {
             case STATE_GALLERY_UI:  return 0xCA20; // Burnt Orange
             case STATE_PIXELS_UI:   return 0xB360; // Dark Amber / Goldenrod
             case STATE_SETTINGS_UI: return 0x4228; // Dark Charcoal
+            case STATE_ANALYZER:    return 0x01F4;
+            case STATE_TUNER:       return 0xCA20;
             default:                return 0x01F4;
         }
     }

@@ -21,6 +21,8 @@
 #include "SyncedAVPlayer.h"
 #include "GalleryApp.h"
 #include "PixelApp.h"
+#include "AcousticApp.h"
+#include "MicrophoneInput.h"
 #include "PixelToggle.h"
 #include "SettingsApp.h"
 #include "PokoOTA.h"
@@ -54,6 +56,8 @@ VideoApp*    videoAppInstance    = nullptr;
 GalleryApp*  galleryAppInstance  = nullptr;
 PixelApp*    pixelAppInstance    = nullptr;
 SettingsApp* settingsAppInstance = nullptr;
+AcousticApp* analyzerAppInstance = nullptr;
+AcousticApp* tunerAppInstance = nullptr;
 SyncedAVPlayer* syncPlugin       = nullptr;
 TCPAudio*       audioPlugin      = nullptr;
 PokoAPI*     masterApi           = nullptr;
@@ -180,6 +184,8 @@ const char* getAppName(AppState state) {
         case STATE_GALLERY_UI:  return "Gallery";
         case STATE_PIXELS_UI:   return "Pixels";
         case STATE_SETTINGS_UI: return "Settings";
+        case STATE_ANALYZER:    return "Analyzer";
+        case STATE_TUNER:       return "Tuner";
         case STATE_LAUNCHER:    return "Launcher";
         default:                return "App";
     }
@@ -274,6 +280,8 @@ void showInitialForeground() {
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->load();
     else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)       pixelAppInstance->load();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->load();
+    else if (activeApp == STATE_ANALYZER && analyzerAppInstance) analyzerAppInstance->load();
+    else if (activeApp == STATE_TUNER && tunerAppInstance) tunerAppInstance->load();
 }
 
 void finishBootSplash() {
@@ -311,11 +319,13 @@ void onAppChange(AppState newState) {
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->unload();
     else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->unload();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->unload();
+    else if (activeApp == STATE_ANALYZER && analyzerAppInstance) analyzerAppInstance->unload();
+    else if (activeApp == STATE_TUNER && tunerAppInstance) tunerAppInstance->unload();
 
     activeApp = newState;
     btnInput.setHoldRepeatEnabled(newState == STATE_PIXELS_UI || newState == STATE_SSYNC ||
                                   newState == STATE_MUSIC_UI || newState == STATE_VIDEO_UI ||
-                                  newState == STATE_SETTINGS_UI);
+                                  newState == STATE_SETTINGS_UI || newState == STATE_ANALYZER || newState == STATE_TUNER);
     // Do not replay a held gesture into the newly opened application.
     btnInput.suppressUntilAllReleased();
 
@@ -336,6 +346,8 @@ void onAppChange(AppState newState) {
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->load();
     else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->load();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->load();
+    else if (activeApp == STATE_ANALYZER && analyzerAppInstance) analyzerAppInstance->load();
+    else if (activeApp == STATE_TUNER && tunerAppInstance) tunerAppInstance->load();
 }
 
 void refreshActiveAppTheme() {
@@ -348,6 +360,8 @@ void refreshActiveAppTheme() {
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)   galleryAppInstance->refreshTheme();
     else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->refreshTheme();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance) settingsAppInstance->refreshTheme();
+    else if (activeApp == STATE_ANALYZER && analyzerAppInstance) analyzerAppInstance->refreshTheme();
+    else if (activeApp == STATE_TUNER && tunerAppInstance) tunerAppInstance->refreshTheme();
 }
 
 // ── Driver Reset Handler (Combo: Both held 5s) ────────────────
@@ -364,6 +378,8 @@ bool handleDriverReset() {
     } else if (activeApp == STATE_VIDEO_UI && videoAppInstance) {
         videoAppInstance->unload();
     }
+    if (analyzerAppInstance) analyzerAppInstance->unload();
+    if (tunerAppInstance) tunerAppInstance->unload();
     if (audioPlugin) audioPlugin->unload();
     if (syncPlugin) syncPlugin->unload();
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -386,6 +402,8 @@ bool handleDriverReset() {
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->load();
     else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->load();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->load();
+    else if (activeApp == STATE_ANALYZER && analyzerAppInstance) analyzerAppInstance->load();
+    else if (activeApp == STATE_TUNER && tunerAppInstance) tunerAppInstance->load();
     return true;
 }
 
@@ -419,6 +437,8 @@ void onBtnLeft() {
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->onLeft();
     else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->onLeft();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->onLeft();
+    else if (activeApp == STATE_ANALYZER && analyzerAppInstance) analyzerAppInstance->onLeft();
+    else if (activeApp == STATE_TUNER && tunerAppInstance) tunerAppInstance->onLeft();
 }
 
 void onBtnRight() {
@@ -433,6 +453,8 @@ void onBtnRight() {
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->onRight();
     else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->onRight();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->onRight();
+    else if (activeApp == STATE_ANALYZER && analyzerAppInstance) analyzerAppInstance->onRight();
+    else if (activeApp == STATE_TUNER && tunerAppInstance) tunerAppInstance->onRight();
 }
 
 int acceleratedVolumeStep(bool increasing) {
@@ -461,6 +483,10 @@ void onBtnLeftHolding() {
         videoAppInstance->volumeRampDown(acceleratedVolumeStep(false));
     } else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance) {
         settingsAppInstance->onHoldingLeft();
+    } else if (activeApp == STATE_ANALYZER && analyzerAppInstance) {
+        analyzerAppInstance->onHoldingLeft();
+    } else if (activeApp == STATE_TUNER && tunerAppInstance) {
+        tunerAppInstance->onHoldingLeft();
     }
 }
 
@@ -476,6 +502,10 @@ void onBtnRightHolding() {
         videoAppInstance->volumeRampUp(acceleratedVolumeStep(true));
     } else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance) {
         settingsAppInstance->onHoldingRight();
+    } else if (activeApp == STATE_ANALYZER && analyzerAppInstance) {
+        analyzerAppInstance->onHoldingRight();
+    } else if (activeApp == STATE_TUNER && tunerAppInstance) {
+        tunerAppInstance->onHoldingRight();
     }
 }
 
@@ -517,6 +547,8 @@ void onBtnRightDouble() {
     else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->onEnter();
     else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)      pixelAppInstance->onEnter();
     else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->onEnter();
+    else if (activeApp == STATE_ANALYZER && analyzerAppInstance) analyzerAppInstance->onEnter();
+    else if (activeApp == STATE_TUNER && tunerAppInstance) tunerAppInstance->onEnter();
 }
 
 void onBtnLongRight() {
@@ -695,7 +727,8 @@ void setup() {
     // Restore previous safe foreground app unless recovering from crash or in safe mode
     if (!isCrashRecovery && !safeMode) {
         if (savedApp >= 0 && savedApp < STATE_COUNT && 
-            savedApp != STATE_VIDEO_UI && savedApp != STATE_MUSIC_UI) {
+            savedApp != STATE_VIDEO_UI && savedApp != STATE_MUSIC_UI &&
+            savedApp != STATE_ANALYZER && savedApp != STATE_TUNER) {
             initialApp = (AppState)savedApp;
             Serial.printf("[poko] restoring previous safe foreground app: %d\n", (int)initialApp);
         }
@@ -819,6 +852,11 @@ void setup() {
     settingsAppInstance = new SettingsApp(pokoGfx, onAppChange);
     settingsAppInstance->begin();
 
+    analyzerAppInstance = new AcousticApp(pokoGfx, onAppChange, false);
+    analyzerAppInstance->begin();
+    tunerAppInstance = new AcousticApp(pokoGfx, onAppChange, true);
+    tunerAppInstance->begin();
+
     // Streaming Audio & Synced AV Players
     syncPlugin = new SyncedAVPlayer(pokoGfx, 1236);
     audioPlugin = new TCPAudio(1235);
@@ -841,6 +879,10 @@ void setup() {
                 settingsAppInstance->renderToCanvas();
             } else if (activeApp == STATE_PIXELS_UI && pixelAppInstance) {
                 pixelAppInstance->renderToCanvas();
+            } else if (activeApp == STATE_ANALYZER && analyzerAppInstance) {
+                analyzerAppInstance->renderToCanvas();
+            } else if (activeApp == STATE_TUNER && tunerAppInstance) {
+                tunerAppInstance->renderToCanvas();
             }
         });
     }
@@ -867,7 +909,7 @@ void setup() {
     activeApp = initialApp;
     btnInput.setHoldRepeatEnabled(initialApp == STATE_PIXELS_UI || initialApp == STATE_SSYNC ||
                                   initialApp == STATE_MUSIC_UI || initialApp == STATE_VIDEO_UI ||
-                                  initialApp == STATE_SETTINGS_UI);
+                                  initialApp == STATE_SETTINGS_UI || initialApp == STATE_ANALYZER || initialApp == STATE_TUNER);
     btnInput.suppressUntilAllReleased();
     if (bootSplashVisible && !bootSplash.tick()) bootSplashVisible = false;
     if (!bootSplashVisible) showInitialForeground();
@@ -898,6 +940,7 @@ void loop() {
         if (snapService && snapService->isPlaying()) protectedKind = PROTECTED_SSYNC;
         else if (musicAppInstance && (musicAppInstance->isPlaying() || musicAppInstance->isStopping())) protectedKind = PROTECTED_MUSIC;
         else if (videoAppInstance && videoAppInstance->isPlaying()) protectedKind = PROTECTED_VIDEO;
+        else if (microphoneInput.running()) protectedKind = PROTECTED_MIC;
         else if (pixelEngine.getMode() == PIXEL_MODE_SOLID &&
                  pixelEngine.getBrightness() > 0 &&
                  pixelEngine.getTargetMask() != 0 &&
@@ -1044,6 +1087,8 @@ void loop() {
         else if (activeApp == STATE_GALLERY_UI && galleryAppInstance)    galleryAppInstance->update();
         else if (activeApp == STATE_PIXELS_UI && pixelAppInstance)       pixelAppInstance->update();
         else if (activeApp == STATE_SETTINGS_UI && settingsAppInstance)  settingsAppInstance->update();
+        else if (activeApp == STATE_ANALYZER && analyzerAppInstance) analyzerAppInstance->update();
+        else if (activeApp == STATE_TUNER && tunerAppInstance) tunerAppInstance->update();
     }
 
     // Background music update (track position, auto-advance, neopixel progress) when not in foreground

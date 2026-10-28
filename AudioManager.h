@@ -21,7 +21,8 @@ enum AudioSource {
     AUDIO_SSYNC,
     AUDIO_MUSIC,
     AUDIO_VIDEO,
-    AUDIO_BLUETOOTH
+    AUDIO_BLUETOOTH,
+    AUDIO_MIC
 };
 
 typedef void (*AudioActionFn)();

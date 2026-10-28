@@ -1,9 +1,13 @@
 #include "PokoAPI.h"
 #include "DeviceSecurity.h"
 #include "SyncedAVPlayer.h"
+#include "AcousticApp.h"
+#include "MicrophoneInput.h"
 #include <esp_sleep.h>
 #include <esp_system.h>
 extern SyncedAVPlayer* syncPlugin;
+extern AcousticApp* analyzerAppInstance;
+extern AcousticApp* tunerAppInstance;
 
 bool PokoAPI::validateJpegBlock(int16_t, int16_t, uint16_t, uint16_t, uint16_t*) {
         return true;
@@ -44,7 +48,7 @@ void PokoAPI::begin() {
             json += "\"last_wake_cause\":" + String((int)esp_sleep_get_wakeup_cause()) + ",";
             json += "\"last_ext1_wake_mask\":" + String((unsigned long)esp_sleep_get_ext1_wakeup_status()) + ",";
             json += "\"cpu_mhz\":" + String(getCpuFrequencyMhz()) + ",";
-            json += "\"firmware_version\":\"v2.3.1\",";
+            json += "\"firmware_version\":\"v2.4.0\",";
             json += "\"app_state\":" + String((int)activeApp) + ",";
             json += "\"theme\":\"" + String(isDarkTheme() ? "dark" : "light") + "\",";
             json += "\"master_vol\":" + String(getMasterVolumeLimit()) + ",";
@@ -649,6 +653,8 @@ void PokoAPI::begin() {
                 else if (appName == "gallery" || appName == "gallery_ui") onAppChange(STATE_GALLERY_UI);
                 else if (appName == "pixels" || appName == "pixel") onAppChange(STATE_PIXELS_UI);
                 else if (appName == "settings" || appName == "settings_ui") onAppChange(STATE_SETTINGS_UI);
+                else if (appName == "analyzer") onAppChange(STATE_ANALYZER);
+                else if (appName == "tuner") onAppChange(STATE_TUNER);
                 else if (appName == "sync") {
                     onAppChange(STATE_VIDEO_UI);
                     if (!videoAppInstance || !videoAppInstance->prepareRemoteStream()) {
@@ -672,6 +678,31 @@ void PokoAPI::begin() {
                 return;
             }
             _server->send(200, "application/json", "{\"ok\":true,\"app\":" + String((int)activeApp) + "}");
+        });
+
+        // Admin-only live diagnostics. No raw microphone audio is exposed.
+        _server->on("/api/acoustic", HTTP_GET, [this]() {
+            AcousticApp* app = activeApp == STATE_ANALYZER ? analyzerAppInstance :
+                               (activeApp == STATE_TUNER ? tunerAppInstance : nullptr);
+            AcousticApp::Status state = {};
+            state.signal.rmsDb = -120;
+            if (app) state = app->status();
+            String json = "{\"app_state\":" + String((int)activeApp);
+            json += ",\"capturing\":" + String(app && state.capturing ? "true" : "false");
+            json += ",\"has_result\":" + String(app && state.hasResult ? "true" : "false");
+            json += ",\"mode\":" + String(state.mode);
+            json += ",\"sample_rate\":" + String(MicrophoneInput::SAMPLE_RATE);
+            json += ",\"gain_db\":" + String(microphoneInput.gain());
+            json += ",\"frames\":" + String(state.frames);
+            json += ",\"last_data_age_ms\":" + String(state.lastDataAgeMs);
+            json += ",\"rms_dbfs\":" + String(state.signal.rmsDb, 2);
+            json += ",\"peak_hz\":" + String(state.signal.spectralPeakHz, 2);
+            json += ",\"frequency_hz\":" + String(state.signal.frequency, 2);
+            json += ",\"period_ms\":" + String(state.signal.periodMs, 3);
+            json += ",\"chord\":\"" + String(app && state.hasResult ? AcousticDSP::chordSuffix(state.signal.chord) : "") + "\"";
+            json += ",\"speaker_amp\":" + String(isSpeakerAmpEnabled() ? "true" : "false");
+            json += ",\"error\":\"" + escapeJson(state.error ? state.error : "") + "\"}";
+            _server->send(200, "application/json", json);
         });
 
         // Audio service control (/api/audio/stop)

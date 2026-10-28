@@ -23,6 +23,7 @@
 #define POKO_PIN_I2S_MCLK   8
 #define POKO_PIN_I2S_BCLK   9
 #define POKO_PIN_I2S_DOUT   12   // DAC out to ES8311
+#define POKO_PIN_I2S_DIN    11   // ES7210 dual-microphone SDOUT1
 #define POKO_PIN_I2S_LRC    10   // LR clock
 
 // ── WS2812B RGB LEDs (8 LEDs) ────────────────────────────────

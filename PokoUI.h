@@ -12,7 +12,7 @@
 extern BatteryManager batteryManager;
 
 // ─────────────────────────────────────────────────────────────
-//  PokoUI — Launcher carousel (7 tiles) + status bar (128×128)
+//  PokoUI — Launcher carousel with eight visible dots + status bar (128×128)
 // ─────────────────────────────────────────────────────────────
 
 uint16_t getTileAccentColor(AppState state);
@@ -34,10 +34,11 @@ private:
     Arduino_Canvas* _statusCanvas = nullptr;
 
     uint8_t       _selected = 0;
+    uint8_t       _navStart = 0;
     bool          _dirty    = true;
     uint32_t      _lastStatusMs = 0;
 
-    static constexpr uint8_t TILE_COUNT = 8;
+    static constexpr uint8_t TILE_COUNT = 10;
     PokoTile _tiles[TILE_COUNT] = {
         { "Info",     "System Info",     0x07E0, STATE_INFO,         "i"  },
         { "Clock",    "IST Clock",       0x07FF, STATE_CLOCK,        "12" },
@@ -46,7 +47,9 @@ private:
         { "Video",    "Video Stream",    0x001F, STATE_VIDEO_UI,     ">"  },
         { "Gallery",  "Photo Viewer",    0xFD20, STATE_GALLERY_UI,   "#"  },
         { "Pixels",   "NeoPixel Ring",   0xFBE0, STATE_PIXELS_UI,    "*"  },
-        { "Settings", "Preferences",     0x8410, STATE_SETTINGS_UI,  "*"  }
+        { "Settings", "Preferences",     0x8410, STATE_SETTINGS_UI,  "*"  },
+        { "Analyzer", "Microphone Tools", 0x07FF, STATE_ANALYZER,     "~"  },
+        { "Tuner",    "Notes & Chords",   0xFD20, STATE_TUNER,        "A"  }
     };
 
     void drawStatusBar();

@@ -7,6 +7,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v2.4.0] — 2026-10-28
+
+- Add separate onboard-microphone Analyzer and A440 Tuner apps. Analyzer includes
+  scope with averaged period, log FFT with dominant frequency, full/third-octave
+  bands and dBFS level meter. Tuner includes note/cents and eight chord families.
+- Keep eight launcher dots while scrolling across ten apps; preserve existing
+  app IDs and expose both tools in device/server dashboards.
+- Give ES7210 capture exclusive I²S ownership, keep the speaker off, suspend/resume
+  SSync and stop Music/Video safely at handoff. Protect capture against idle sleep
+  while retaining low-battery overrides and allowing a one-tick loop yield.
+- Add authenticated capture diagnostics and host regressions for DSP, app inputs,
+  ADC cleanup, audio ownership and capture power policy. Hardware sound/accuracy
+  remains subject to microphone/instrument testing.
+
 ## [v2.3.1] — 2026-10-28
 
 - Pace the white PoKo cold-boot wordmark and randomized color fusion over about

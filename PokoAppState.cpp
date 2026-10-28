@@ -10,6 +10,8 @@ int stateToTile(AppState state) {
         case STATE_GALLERY_UI: return 5;
         case STATE_PIXELS_UI: return 6;
         case STATE_SETTINGS_UI: return 7;
+        case STATE_ANALYZER: return 8;
+        case STATE_TUNER: return 9;
         default: return -1;
     }
 }

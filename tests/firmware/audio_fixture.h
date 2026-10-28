@@ -16,6 +16,13 @@ int getCurrentAppVolume() { return 50; }
 void es8311Mute(bool) {} void setScaledVolume(int) {}
 int outputReleased = 0;
 void deinitI2S() { ++outputReleased; }
+struct MicrophoneInput {
+    bool active=false,fail=false;
+    int stops=0;
+    bool start() { if(fail) return false;active=true;return true; }
+    void stop() { if(active) ++stops;active=false; }
+    bool running() const { return active; }
+} microphoneInput;
 struct SnapPlayer {
     bool loaded = true, suspended = false, forceTimeout = false;
     std::atomic<bool> done{false};

@@ -12,7 +12,7 @@ The host runner needs MSVC Build Tools, g++, or clang++. It uses the real instal
 OneButton library, ahead of the optional test double in `stubs/`. Override its
 location with `--onebutton PATH/TO/OneButton/src`.
 
-The 30 host cases exercise the production ButtonInput class with simulated GPIO
+The host cases exercise the production ButtonInput class with simulated GPIO
 levels/time, the production AudioManager core with a worker thread and mutex,
 the production VideoApp start/stop/navigation methods with transport doubles,
 and the title marquee. The extraction scripts copy those methods directly from
@@ -55,3 +55,30 @@ see `server/deploy/README.md` and `server/SECURE_LOCAL.md`.
 
 Host and loopback tests cannot certify electrical button behavior, display
 appearance, I2S timing, or hardware wake. Those require the device checks above.
+
+## Microphone apps
+
+The host suite additionally exercises production DSP with A440/tuning offsets,
+notes from 41–1760 Hz, spectrum/octave/RMS calibration, all 12 roots for eight
+chord templates, silence/noise rejection and auto-range hysteresis. App tests use
+the production screens and DSP with bus/display doubles, covering mode/hold
+controls, stale-input clearing, failure/retry and buffer cleanup. Driver tests
+replace only I²C/I²S/GPIO, checking clock ownership, 48 kHz stereo configuration,
+MIC1 extraction, non-blocking reads and failed-initialization cleanup. The actual
+AudioManager core tests SSync → MIC → SSync, timeout refusal and stop-all cleanup.
+
+After the user compiles and installs firmware, verify on the physical board:
+
+- Open Analyzer from Home; all ten tiles remain reachable through eight dots.
+- Speak/tap near MIC1: scope and FFT respond; cycle all four modes with `2R`.
+  Hold each direction to adjust time, FFT length, octave spacing and meter response.
+- Play an external A440 reference: Tuner should show A4 near 440 Hz and 0 cents.
+  Check a quiet room, several lower/upper notes and clean major/minor/suspended/
+  seventh/augmented chords. Stop the reference: readings must clear.
+- Open each tool during SSync: playback suspends, PA stays off; `2L` resumes SSync.
+  Repeat after Music/Video playback and after Wi-Fi reconnect/driver reset.
+- Leave capture running beyond power deadlines; it must keep capturing while the
+  display may sleep. Low-battery policy must still override as configured.
+- Close/reopen repeatedly and inspect heap, audio handoff and absence of I²S errors.
+
+Synthetic chord matches do not certify instrument/microphone recognition quality.

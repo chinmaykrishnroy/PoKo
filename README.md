@@ -3,7 +3,7 @@
   <h1>PoKo</h1>
   <p><strong>Possibly the smallest video-playing device ever built on a microcontroller.</strong></p>
   <p>
-    Music · Video · Gallery · Snapclient · Clock · OTA · Web UI<br>
+    Music · Video · Gallery · Snapclient · Analyzer · Tuner · Web UI<br>
     all running on a <b>128 × 128 px</b> display the size of a coin.
   </p>
 
@@ -31,8 +31,8 @@ PoKo is a **full-featured pocket media device** running on an ESP32-S3 microcont
 |-----------|--------|
 | SoC | ESP32-S3 (dual-core 240 MHz, OPI PSRAM 8 MB, Flash 8 MB) |
 | Display | 0.85" GC9107 IPS LCD — **128 × 128 px** |
-| Audio codec | ES8311 (I²S DAC/ADC, hardware volume control) |
-| Microphones | Dual MEMS microphone array |
+| Audio output codec | ES8311 (I²S DAC, hardware volume control) |
+| Microphones | Dual microphone array through ES7210 ADC (I²C 0x40, I²S DIN GPIO11) |
 | LED ring | Surround RGB LEDs |
 | Connectivity | Wi-Fi 802.11 b/g/n |
 
@@ -56,7 +56,59 @@ PoKo is a **full-featured pocket media device** running on an ESP32-S3 microcont
 | 🎵 **Music** | Browse & stream MP3 audio from the media server with album art |
 | 🎬 **Video** | Stream MJPEG video with synchronized PCM audio |
 | 🖼️ **Gallery** | View LittleFS-stored photos + server-indexed images |
+| **Pixels** | NeoPixel ring studio and audio-reactive effects |
 | ⚙️ **Settings** | Brightness, volume, theme, Wi-Fi, button controls, and more |
+| **Analyzer** | Microphone oscilloscope, logarithmic FFT, octave/third-octave bands, dBFS level meter |
+| **Tuner** | A440 note/cents tuner and major, minor, sus2, sus4, 7, maj7, m7, augmented chord estimates |
+
+The launcher keeps **eight visible navigation dots** for ten apps. The represented
+window scrolls at its edges: the selected dot stays last when advancing past the
+window and first when moving back past it.
+
+### Microphone Analyzer and Tuner
+
+These tools use the board's **ES7210 microphone input**, not a copy of playback.
+They work without a media server. `2R` cycles Analyzer's Scope → Log FFT → Octave
+→ Level modes, or Tuner's Note → Chord modes; `2L` returns home. Single `L`/`R`
+adjusts microphone gain in 3 dB steps (0–30 dB; default 18 dB).
+
+| Analyzer mode | Hold L / R |
+|---|---|
+| Oscilloscope | Shorter / longer window: 2, 5, 10, 20, 50, 100, 160 ms |
+| Log FFT | Smaller / larger Hann FFT: 1024, 2048, 4096, 8192 samples |
+| Octave | Full octave / third octave |
+| Level | Fast / slow RMS display response |
+
+Scope and spectral level ranges expand immediately and shrink after a quiet
+settling period. The scope also shows the smoothed measured period (`Avg T`, ms)
+when a periodic signal is detected; FFT shows its strongest peak frequency in
+small type (`Pk`, Hz). FFT spans 20 Hz–20 kHz on a logarithmic axis; octave centers span
+31.25 Hz–16 kHz. Finite FFT windows limit bass resolution (8192 samples at 48 kHz
+give approximately 5.86 Hz bins). The level meter shows RMS and peak **dBFS** plus
+clipping, not calibrated acoustic dB SPL. Hold L/R in Tuner adjusts gain.
+
+Tuner uses A4=440 Hz and displays note, octave, frequency and cents (approximately
+40–2000 Hz). Chord mode is an estimate for a clearly played chord, not polyphonic
+transcription of a full song. Noise, weak/missing notes, distortion and ambiguous
+voicings can prevent or change a match; symmetric augmented chords are named
+using the detected bass. Silence or unavailable input clears the displayed note.
+
+Input is captured at 48 kHz/16-bit stereo; analysis uses MIC1 rather than averaging
+the two microphones and introducing phase cancellation. The microphone takes
+exclusive ownership of I²S0: SSync is suspended and resumed on exit; Music/Video
+use their existing stop/handoff path. The speaker PA remains off during capture.
+Active capture blocks idle system sleep/auto-off above the configured battery
+threshold; display timeouts and low-battery protection still apply. Settings save
+on exit, and DSP/canvas buffers are released on exit. The tools do not auto-open
+after reboot.
+
+Authenticated `GET /api/acoustic` reports capture state, frame count, input age,
+level, peak frequency, period and speaker-PA state for on-device verification.
+It exposes no raw microphone recording and requires the device admin login.
+
+Hardware references: [Waveshare board documentation](https://docs.waveshare.com/ESP32-S3-LCD-0.85),
+[board schematic](https://files.waveshare.com/wiki/ESP32-S3-LCD-0.85/ESP32-S3-LCD-0.85-Schematic.pdf),
+and [Espressif ES7210 register/clock reference](https://github.com/espressif/esp-adf/blob/master/components/esp_codec_dev/device/es7210/es7210.c).
 
 ### Web Control Panel (`http://<device-ip>/`)
 
@@ -99,6 +151,7 @@ explicit exceptions.
 │               ├─ SSyncApp   (Snapclient)     │
 │               ├─ ClockApp   (NTP)            │
 │               ├─ InfoApp                     │
+│               ├─ AcousticApp (Analyzer/Tuner) │
 │               └─ SettingsApp                 │
 │                                              │
 │  PokoAPI ──► HTTP endpoints (/api/*)         │
@@ -265,7 +318,7 @@ are for USB provisioning and are not OTA images.
 
 ## Documentation
 
-- [**Complete Device & Microcontroller Manual (DEVICE_MANUAL.md)**](DEVICE_MANUAL.md) — Comprehensive reference covering ESP32-S3 architecture, FreeRTOS tasks, layered idle power management, on-screen dots (Wi-Fi, audio, carousel), detailed walkthrough of all 8 apps, power telemetry, all 23 Settings entries, reboot/shutdown procedures, and REST API.
+- [**Complete Device & Microcontroller Manual (DEVICE_MANUAL.md)**](DEVICE_MANUAL.md) — Comprehensive reference covering ESP32-S3 architecture, FreeRTOS tasks, layered idle power management, on-screen dots (Wi-Fi, audio, carousel), detailed walkthrough of all 10 apps, power telemetry, all 23 Settings entries, reboot/shutdown procedures, and REST API.
 - [**Button Controls & Navigation Guide (BUTTON_CONTROLS.md)**](BUTTON_CONTROLS.md) — Physical button layout, debounce timings, and quick gesture matrix.
 - [**Release Versioning & Git Tags (VERSIONING.md)**](VERSIONING.md) — Semantic versioning policy and automated release workflows.
 
@@ -291,6 +344,9 @@ Poko/
 ├── ClockApp.h             # NTP clock
 ├── InfoApp.h              # System info
 ├── SettingsApp.h          # On-device settings
+├── AcousticApp.*          # Microphone Analyzer and A440 Tuner screens
+├── AcousticDSP.*          # FFT, YIN pitch, chroma/chord estimates, auto range
+├── MicrophoneInput.*      # Exclusive ES7210 ADC / I²S RX driver
 ├── SnapPlayer.h           # Snapcast protocol client
 ├── SyncedAVPlayer.h       # Synchronized audio+video TCP player
 ├── TCPAudio.h             # Raw TCP audio listener

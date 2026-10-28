@@ -42,6 +42,27 @@ test('token settings show paste instructions and escape device names without exp
   assert.match(html,/data-token-revoke="abc123"/);
 });
 
+test('Analyzer and Tuner are separate application tiles',async()=>{
+  const d=dashboard();
+  const html=await d.run('appTiles()');
+  assert.match(html,/data-app="analyzer"/);
+  assert.match(html,/data-app="tuner"/);
+});
+
+test('device dashboard parses and exposes both microphone apps in quick launch',()=>{
+  const text=fs.readFileSync('PokoWebUI.cpp','utf8');
+  const script=text.match(/<script>([\s\S]*?)<\/script>/)[1];
+  new vm.Script(script);
+  const constants=['APP_NAMES','APP_ICONS','APP_COLORS'].map(name=>script.match(new RegExp('const '+name+'=.*;'))[0]).join('\n');
+  const quickLaunch=script.match(/function quickLaunchApps\(\)\{[\s\S]*?\n\}/)[0];
+  const html=vm.runInNewContext(constants+'\n'+quickLaunch+'\nquickLaunchApps()', {icon:()=>'',esc:String});
+  assert.match(html,/data-state="9"/);
+  assert.match(html,/data-state="10"/);
+  assert.match(html,/>Analyzer</);
+  assert.match(html,/>Tuner</);
+  assert.equal((html.match(/data-state=/g)||[]).length,11);
+});
+
 test('failed and mismatched operations never present Playing',async()=>{
   for(const operation of [{status:'failed',result:{error:'Device unavailable'}},{status:'succeeded',result:{playback:{item_id:'different'}}}]){
     const d=dashboard();d.state.operation=operation;

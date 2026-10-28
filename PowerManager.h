@@ -66,7 +66,8 @@ enum ProtectedActivityKind : uint8_t {
     PROTECTED_SSYNC,
     PROTECTED_MUSIC,
     PROTECTED_VIDEO,
-    PROTECTED_TORCH
+    PROTECTED_TORCH,
+    PROTECTED_MIC
 };
 
 class PowerManager {

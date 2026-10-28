@@ -615,7 +615,7 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/device/app":
             app = _first(query, "set", "home") or "home"
-            allowed = {"home", "launcher", "info", "clock", "video", "video_ui", "audio", "music", "audio_ui", "music_ui", "ssync", "snap", "snapclient", "gallery", "gallery_ui", "pixels", "pixel", "settings", "settings_ui", "sync"}
+            allowed = {"home", "launcher", "info", "clock", "video", "video_ui", "audio", "music", "audio_ui", "music_ui", "ssync", "snap", "snapclient", "gallery", "gallery_ui", "pixels", "pixel", "settings", "settings_ui", "sync", "analyzer", "tuner"}
             if app not in allowed:
                 self._json({"ok": False, "error": "unsupported PoKo app"}, HTTPStatus.BAD_REQUEST)
                 return

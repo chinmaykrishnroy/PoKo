@@ -88,6 +88,7 @@ let activeView='dashboard',healthCache=null,croppedBlob=null,galleryImage=null,g
 
 const paths={
   dashboard:'<path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/>',
+  activity:'<path d="M2 12h4l3-8 6 16 3-8h4"/>',
   apps:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   controls:'<path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="9"/>',
   gallery:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>',
@@ -206,12 +207,12 @@ async function renderDashboard(){
   try{await syncDashboard(await getHealth(true));}catch(e){setOnline(false);liveText('dashOnline','Unavailable');}
 }
 
-const APP_NAMES={0:'Launcher',1:'Info',2:'Clock',3:'Video',4:'Music',5:'SSync',6:'Gallery',7:'Pixels',8:'Settings'};
-const APP_ICONS={0:'home',1:'info',2:'clock',3:'video',4:'music',5:'snapcast',6:'gallery',7:'sparkle',8:'settings'};
-const APP_COLORS={0:'#3aba7d',1:'#3aba7d',2:'#00c8ff',3:'#6d9ff5',4:'#ef6a73',5:'#e4b94d',6:'#f18450',7:'#b05cf5',8:'#9da6b0'};
+const APP_NAMES={0:'Launcher',1:'Info',2:'Clock',3:'Video',4:'Music',5:'SSync',6:'Gallery',7:'Pixels',8:'Settings',9:'Analyzer',10:'Tuner'};
+const APP_ICONS={0:'home',1:'info',2:'clock',3:'video',4:'music',5:'snapcast',6:'gallery',7:'sparkle',8:'settings',9:'activity',10:'music'};
+const APP_COLORS={0:'#3aba7d',1:'#3aba7d',2:'#00c8ff',3:'#6d9ff5',4:'#ef6a73',5:'#e4b94d',6:'#f18450',7:'#b05cf5',8:'#9da6b0',9:'#00c8ff',10:'#e4b94d'};
 
 function quickLaunchApps(){
-  return Object.entries(APP_NAMES).slice(0,9).map(([state,name])=>
+  return Object.entries(APP_NAMES).map(([state,name])=>
     `<button class="app-tile" data-state="${state}" onclick="launchApp(${state})">
       <span class="app-icon" style="background:${APP_COLORS[state]||'#666'}">${icon(APP_ICONS[state]||'info')}</span>
       <strong>${esc(name)}</strong>
@@ -306,7 +307,9 @@ const APP_DESC={
   5:'Snapcast multi-room audio sync',
   6:'Photo frame & slideshow',
   7:'WS2812 8-LED light studio',
-  8:'Device settings & power profiles'
+  8:'Device settings & power profiles',
+  9:'Microphone scope, FFT, octave & level meter',
+  10:'A440 microphone note & chord tuner'
 };
 
 // ── Applications ──────────────────────────────────────────────────────────────

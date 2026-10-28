@@ -18,9 +18,14 @@ def main() -> int:
     if not (args.onebutton / "OneButton.cpp").is_file():
         parser.error("Pass --onebutton with the installed OneButton source directory")
     BUILD.mkdir(parents=True, exist_ok=True)
-    for script in ("prepare_audio_test.py", "prepare_video_test.py", "prepare_music_test.py", "prepare_library_status_test.py", "prepare_power_wake_test.py"):
+    for script in ("prepare_audio_test.py", "prepare_microphone_test.py", "prepare_acoustic_app_test.py", "prepare_capture_power_test.py", "prepare_video_test.py", "prepare_music_test.py", "prepare_library_status_test.py", "prepare_power_wake_test.py"):
         subprocess.run([sys.executable, str(HERE / script)], cwd=ROOT, check=True)
     cases = {
+        "capture-power": ["capture-pa-off-and-lock", "capture-stop-and-playback"],
+        "acoustic-app": ["modes-and-holds", "tuner-and-stale-input", "failure-and-retry", "external-stop-and-reload"],
+        "microphone": ["no-clock-steal", "failure-cleanup", "capture-and-stop", "gain"],
+        "launcher-window": ["scroll-and-wrap"],
+        "acoustic-dsp": ["pitch", "spectrum-levels", "chords", "silence-noise", "scope-period", "adaptive-scale"],
         "power-wake": ["held-power", "held-combo", "released", "rtc-restore-before-boot"],
         "boot-splash": ["white-first", "fusion-randomized", "allocation-fallback", "nonblocking-finish", "visible-duration", "slow-startup", "clock-wrap"],
         "library-status": ["empty", "offline", "error", "missing", "loading", "populated", "invalidated-cache"],
@@ -30,7 +35,7 @@ def main() -> int:
                     "wake-left", "wake-right", "wake-power", "music-hold", "single-left", "single-right",
                     "busy-main-loop", "bounce", "overflow", "combo-click", "combo-double",
                     "combo-reboot", "combo-drivers", "combo-emergency"],
-        "audio": ["suspend-transition", "suspend-timeout", "stop-all", "silent-video-is-not-audio"],
+        "audio": ["mic-from-music", "mic-from-video", "mic-handoff", "mic-failure-restores-ssync", "mic-stop-all", "mic-handoff-timeout", "suspend-transition", "suspend-timeout", "stop-all", "silent-video-is-not-audio"],
         "music": ["terminal-release", "handoff-defers-release", "handoff-timeout-retries", "shutdown-timeout-retains-owner", "startup-timeout-releases", "blocked-loop-clock", "remote-metadata", "remote-listener-failure", "server-handoff-no-stop"],
         "video": ["next", "next-page", "page-failure", "http-failure", "missing-refresh", "missing-empty", "load-failure", "stop-timeout", "next-stop-timeout", "fit-query", "async-rejected", "async-failed", "async-stale-result", "remote-metadata", "remote-listener-failure", "server-handoff-no-stop"],
         "marquee": ["scroll-and-wrap"],
@@ -47,6 +52,11 @@ def main() -> int:
         "audio-activity": ["silence", "audible-positive", "audible-negative"],
     }
     sources = {
+        "capture-power": [ROOT / "build/capture-power-test.cpp", ROOT / "PowerPolicy.cpp"],
+        "acoustic-app": [ROOT / "build/acoustic-app-test.cpp", ROOT / "AcousticDSP.cpp"],
+        "microphone": [ROOT / "build/microphone-test.cpp"],
+        "launcher-window": [HERE / "launcher_window.cpp", ROOT / "LauncherWindow.cpp"],
+        "acoustic-dsp": [HERE / "acoustic_dsp.cpp", ROOT / "AcousticDSP.cpp"],
         "power-wake": [HERE / "power_wake.cpp"],
         "boot-splash": [HERE / "boot_splash.cpp", ROOT / "BootSplash.cpp"],
         "library-status": [HERE / "library_status.cpp"],
@@ -78,6 +88,8 @@ def main() -> int:
     for name, files in sources.items():
         exe = BUILD / (name + (".exe" if os.name == "nt" else ""))
         case_includes = ([HERE / "security_stubs"] if name == "device-security" else []) + includes
+        if name == "acoustic-app":
+            case_includes.insert(0, HERE / "acoustic_stubs")
         if name == "boot-splash":
             case_includes.insert(0, HERE / "splash_stubs")
         if vcvars:

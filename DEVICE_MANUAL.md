@@ -29,7 +29,7 @@
    - [Graceful Power-Off & Hardware Latch](#how-to-switch-off-power-off)
    - [Display Sleep, Inactivity Dimming & Ambient Clock](#display-sleep--ambient-clock)
    - [Peripheral Driver Reset](#peripheral-driver-reset)
-5. [Complete Application Suite (All 8 On-Device Apps)](#5-complete-application-suite)
+5. [Complete Application Suite (All 10 On-Device Apps)](#5-complete-application-suite)
    - [App 0: Launcher (Home Carousel)](#app-0-launcher-home-carousel)
    - [App 1: Info (Hardware & Telemetry)](#app-1-info-hardware--telemetry)
    - [App 2: Clock (NTP IST Timekeeper)](#app-2-clock-ntp-ist-timekeeper)
@@ -39,6 +39,7 @@
    - [App 6: Gallery (Photo Viewer & Slideshow)](#app-6-gallery-photo-viewer--slideshow)
    - [App 7: Pixels (NeoPixel Studio & Audio Reactive Ring)](#app-7-pixels-neopixel-studio--audio-reactive-ring)
    - [App 8: Settings (System Preferences)](#app-8-settings-system-preferences)
+   - [Apps 9–10: Analyzer and Tuner](#apps-910-analyzer-and-tuner)
 6. [System Information Reference (All 28 Info Metrics)](#6-system-information-reference)
 7. [System Settings Reference (All 16 Preference Options)](#7-system-settings-reference)
 8. [Web Control Panel & REST API Reference](#8-web-control-panel--rest-api-reference)
@@ -249,8 +250,10 @@ This dot indicates **which audio pipeline currently owns the hardware I²S bus a
 ### Carousel Navigation Pagination Dots
 
 Located at the bottom of the Home Launcher card area (`y = 105..107`):
-- A horizontal track of **8 indicators** representing each of the 8 installed apps:
-  `[Info]  [Clock]  [SSync]  [Music]  [Video]  [Gallery]  [Pixels]  [Settings]`
+- A horizontal track of **8 indicators** showing a moving window over ten apps:
+  `[Info] [Clock] [SSync] [Music] [Video] [Gallery] [Pixels] [Settings] [Analyzer] [Tuner]`
+- Advancing beyond the visible window keeps selection on the last dot while apps
+  scroll; moving back beyond the window keeps selection on the first dot.
 - **Unselected Apps**: Rendered as subtle 4-pixel circular dots (`r = 2`).
 - **Selected App**: Expands into an elongated **8 × 4 pixel rounded capsule / pill** filled with the theme accent color, providing immediate spatial awareness of your position in the app carousel.
 
@@ -590,6 +593,22 @@ Central on-device control panel for all firmware preferences, power management o
   - `2R`: Toggle value, cycle preset, or execute action.
   - **Hold `L` / Hold `R`**: Fine-tune values for Master Vol, Brightness, Dim Timeout, Sleep Timeout, and Auto-Off.
   - `2L`: Exit to Launcher.
+
+---
+
+### Apps 9–10: Analyzer and Tuner
+
+These offline tools use the onboard ES7210 microphone ADC. Analyzer cycles Scope,
+Log FFT, Octave and Level with `2R`; Tuner cycles Note and Chord at fixed A4=440 Hz.
+`2L` exits. Single L/R adjusts gain. Analyzer holds change the time window, FFT
+length, full/third-octave spacing or fast/slow meter response; Tuner holds adjust
+gain. See [microphone controls and limitations](README.md#microphone-analyzer-and-tuner).
+
+Capture exclusively owns I²S0 with the speaker PA off. Opening suspends SSync;
+exiting resumes it. Active capture prevents idle system shutdown above the
+configured battery threshold; display sleep and low-battery overrides still apply.
+Levels are dBFS, not measured dB SPL. Chords are estimates for clean chords, with
+uncertain/no-input states cleared. App IDs are 9 and 10; existing IDs are unchanged.
 
 ---
 

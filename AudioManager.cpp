@@ -1,4 +1,5 @@
 #include "AudioManager.h"
+#include "MicrophoneInput.h"
 
 AudioManager* AudioManager::_instance = nullptr;
 
@@ -30,6 +31,7 @@ bool AudioManager::deactivateSource(AudioSource src, bool suspend) {
             if (_videoStopFn) _videoStopFn();
             if (_videoStoppedFn && !_videoStoppedFn()) return false;
         }
+        if (src == AUDIO_MIC) microphoneInput.stop();
         return true;
     }
 
@@ -57,6 +59,7 @@ bool AudioManager::activateSource(AudioSource src) {
             }
             return true;
         }
+        if (src == AUDIO_MIC && !microphoneInput.start()) return false;
         MutexLock lock(_mutex);
         _activeSource = _physicalOwner = src;
         return true;
@@ -140,7 +143,7 @@ bool AudioManager::request(AudioSource requested) {
             _transitioning = true;
         }
         bool canSuspend = previous == AUDIO_SSYNC &&
-                          (requested == AUDIO_MUSIC || requested == AUDIO_VIDEO);
+                          (requested == AUDIO_MUSIC || requested == AUDIO_VIDEO || requested == AUDIO_MIC);
         if (previous != AUDIO_NONE && previous != requested) {
             if (!deactivateSource(previous, canSuspend)) {
                 MutexLock lock(_mutex);
@@ -194,6 +197,7 @@ void AudioManager::releaseOutput(AudioSource src) {
         Serial.printf("[audioMgr] releaseOutput called by %d (owner=%d, active=%d, susp=%d)\n",
                       (int)src, (int)_physicalOwner, (int)_activeSource, (int)_suspendedSource);
         if (_physicalOwner == src || (_physicalOwner == AUDIO_NONE && _activeSource == src)) {
+            if (src == AUDIO_MIC) microphoneInput.stop();
             ::deinitI2S();
             _physicalOwner = AUDIO_NONE;
         }
@@ -335,6 +339,7 @@ const char* AudioManager::getSourceName() const {
             case AUDIO_MUSIC: return "Music";
             case AUDIO_VIDEO: return "Video";
             case AUDIO_BLUETOOTH: return "Bluetooth";
+            case AUDIO_MIC: return "Microphone";
             default: return "Idle";
         }
     }
@@ -363,6 +368,7 @@ bool AudioManager::isSoundPlaying() const {
     }
 
 bool AudioManager::isSessionActive() const {
+        if (_activeSource == AUDIO_MIC) return microphoneInput.running();
         if (_activeSource == AUDIO_SSYNC && _snapPlayer) {
             return _snapPlayer->isLoaded();
         }
