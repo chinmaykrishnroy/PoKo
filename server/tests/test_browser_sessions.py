@@ -13,7 +13,7 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from helpers import workspace_tempdir
-from server.poko_server.config import LibraryConfig, SecurityConfig, load_config
+from server.poko_server.config import LibraryConfig, SecurityConfig, load_config, config_to_yaml
 from server.poko_server.http_api import make_server
 from server.poko_server.security import Authentication, password_hash
 
@@ -71,7 +71,9 @@ class SessionTests(unittest.TestCase):
             config = replace(config, host="127.0.0.1", port=0,
                              security=SecurityConfig(True, "https://poko.example.com"),
                              library=LibraryConfig([root], root / "write", 5, db_path=root / "index.db"))
-            server = make_server(config, dry_run=True)
+            config_path = root / "config.yml"
+            config_path.write_text(config_to_yaml(config), encoding="utf-8")
+            server = make_server(config, dry_run=True, config_path=config_path)
             threading.Thread(target=server.serve_forever, daemon=True).start()
             base = f"http://127.0.0.1:{server.server_address[1]}"
             class NoRedirect(urllib.request.HTTPRedirectHandler):

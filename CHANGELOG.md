@@ -7,7 +7,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [v2.1.0] — 2026-10-28
+## [v2.1.1] — 2026-10-28
+
+- Includes the session/password features below. The v2.1.0 candidate was
+  superseded after CI identified a test depending on an ignored local config;
+  the regression now creates and uses its own isolated configuration.
+
+## [v2.1.0 candidate] — 2026-10-28
 
 - Replaced browser HTTP-auth prompts with login forms, HttpOnly session cookies,
   Remember me, and logout on both dashboards. API credentials remain separate.
