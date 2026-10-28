@@ -7,7 +7,17 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## Unreleased
+## [v2.2.0] — 2026-10-28
+
+- Synchronize remote Music/Video identity, title, artwork, catalog position and
+  playback mode before acknowledging stream startup. Web playback requires
+  matching v2.2+ firmware; legacy raw-listener routes remain available.
+- Suppress device-to-server Stop echoes during server-owned handoffs and
+  distinguish an explicit Stop from natural end-of-stream advancement.
+- Show Starting/Playing/Failed operation state, reject stale UI responses and
+  coalesce refreshes. Keep one pending latest command and bound operation history.
+- Group Sign out with Refresh at the right edge of the server dashboard.
+- Remove generated firmware binaries from Git; ignore the whole build directory.
 
 - Server: preserve the origin of browser login/logout form submissions with
   `Referrer-Policy: same-origin`. The previous `no-referrer` policy produced

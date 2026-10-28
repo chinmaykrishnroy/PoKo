@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import AppConfig
-from .device import DeviceClient
+from .device import DeviceClient, DeviceResponse
 from .ffmpeg_tools import (
     command_preview,
     audio_tcp_command,
@@ -61,6 +61,8 @@ class PlaybackState:
     item_id: str | None = None
     kind: str | None = None
     title: str | None = None
+    artist: str | None = None
+    duration_s: float | None = None
     path: str | None = None
     started_at: float | None = None
     start_s: float = 0
@@ -81,6 +83,8 @@ class PlaybackState:
             "item_id": self.item_id,
             "kind": self.kind,
             "title": self.title,
+            "artist": self.artist,
+            "duration_s": self.duration_s,
             "path": self.path,
             "start_s": round(self.start_s, 3),
             "position_s": round(self.position_s(), 3),
@@ -523,12 +527,19 @@ class PlaybackManager:
                 self._operation_keys[selected_request_id] = operation_id
             response = dict(operation)
             self._operation_queue.put((operation_id, action))
+            self._prune_operations_locked()
         return response
 
     def operation_status(self, operation_id: int) -> dict[str, Any] | None:
         with self._operation_lock:
             operation = self._operations.get(operation_id)
             return dict(operation) if operation is not None else None
+
+    def submit_audio(self, item: MediaItem, start_s: float = 0, *, switch_device: bool = True,
+                     target_host: str | None = None, request_id: str | None = None) -> dict[str, Any]:
+        return self._submit_operation("play_audio", lambda: self.play_audio(item, start_s,
+                                      switch_device=switch_device, target_host=target_host),
+                                      mode="audio_player", request_id=request_id)
 
     def submit_video(
         self,
@@ -578,6 +589,9 @@ class PlaybackManager:
 
     def submit_stop(self, *, notify_device: bool = False) -> dict[str, Any]:
         return self._submit_operation("stop", lambda: self.stop(notify_device=notify_device))
+
+    def submit_skip(self, direction: str, *, switch_device: bool = True, request_id: str | None = None) -> dict[str, Any]:
+        return self._submit_operation("skip", lambda: self.skip(direction, switch_device=switch_device), request_id=request_id)
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -649,7 +663,7 @@ class PlaybackManager:
             self.stop()
             time.sleep(0.05)
             start_s = max(0.0, float(start_s))
-            device = self.device.switch("audio") if switch_device else None
+            device = self._prepare_device(item, start_s) if switch_device else None
             if device is not None and not device.ok:
                 return self._device_switch_failure(device)
             selected_host = target_host or self.config.poko.ip
@@ -691,7 +705,7 @@ class PlaybackManager:
             selected_profile, selected_fps, selected_quality = resolve_video_tuning(
                 self.config, synced=True, profile=profile, fps=fps, jpeg_quality=jpeg_quality,
             )
-            device = self.device.switch("sync") if switch_device else None
+            device = self._prepare_device(item, start_s) if switch_device else None
             if device is not None and not device.ok:
                 return self._device_switch_failure(device)
             streamer = SyncedAVStreamer(
@@ -874,6 +888,11 @@ class PlaybackManager:
             return self.config.defaults.video_with_audio
         return normalized in {"1", "true", "yes", "on", "audio"}
 
+    def _prepare_device(self, item: MediaItem, start_s: float) -> DeviceResponse:
+        ids = self.index.db.ids_for_kind(item.kind)
+        position = ids.index(item.id) if item.id in ids else 0
+        return self.device.prepare_media(item, start_s, catalog_index=position, catalog_total=len(ids))
+
     @staticmethod
     def _make_state(
         mode: str,
@@ -890,6 +909,8 @@ class PlaybackManager:
             item_id=item.id,
             kind=item.kind,
             title=item.title,
+            artist=item.artist,
+            duration_s=item.duration_s,
             path=str(item.path),
             started_at=time.monotonic(),
             start_s=start_s,

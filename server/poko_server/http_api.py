@@ -680,13 +680,17 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                 if not item:
                     return
                 switch_device = str(_first(query, "switch", "true")).lower() not in {"0", "false", "no", "off"}
-                result = self.backend.playback.play_audio(
+                async_request = str(_first(query, "async", "false")).lower() in {"1", "true", "yes", "on"}
+                play = self.backend.playback.submit_audio if async_request else self.backend.playback.play_audio
+                options = {"request_id": _first(query, "request_id", None)} if async_request else {}
+                result = play(
                     item,
                     _float_query(query, "start", 0),
                     switch_device=switch_device,
                     target_host=None if switch_device or self.authentication.enabled else self.client_address[0],
+                    **options,
                 )
-                self._json(result, HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_GATEWAY)
+                self._json(result, (HTTPStatus.ACCEPTED if async_request else HTTPStatus.OK) if result.get("ok") else HTTPStatus.BAD_GATEWAY)
                 return
             if path.startswith("/api/video/") and path.endswith("/play"):
                 item = self._item_from_path(path, "video")
@@ -779,15 +783,13 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                 self._json(result, (HTTPStatus.ACCEPTED if async_request else HTTPStatus.OK)
                            if result.get("ok") else HTTPStatus.CONFLICT)
                 return
-            if path == "/api/playback/next":
+            if path in {"/api/playback/next", "/api/playback/previous"}:
                 switch_device = str(_first(query, "switch", "true")).lower() not in {"0", "false", "no", "off"}
-                result = self.backend.playback.skip("next", switch_device=switch_device)
-                self._json(result, HTTPStatus.OK if result.get("ok") else HTTPStatus.CONFLICT)
-                return
-            if path == "/api/playback/previous":
-                switch_device = str(_first(query, "switch", "true")).lower() not in {"0", "false", "no", "off"}
-                result = self.backend.playback.skip("previous", switch_device=switch_device)
-                self._json(result, HTTPStatus.OK if result.get("ok") else HTTPStatus.CONFLICT)
+                async_request = str(_first(query, "async", "false")).lower() in {"1", "true", "yes", "on"}
+                skip = self.backend.playback.submit_skip if async_request else self.backend.playback.skip
+                options = {"request_id": _first(query, "request_id", None)} if async_request else {}
+                result = skip(path.rsplit("/", 1)[1], switch_device=switch_device, **options)
+                self._json(result, (HTTPStatus.ACCEPTED if async_request else HTTPStatus.OK) if result.get("ok") else HTTPStatus.CONFLICT)
                 return
             if path == "/api/camera/list":
                 limit = max(1, min(50, int(_first(query, "limit", "20") or "20")))

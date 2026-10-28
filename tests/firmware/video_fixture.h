@@ -2,6 +2,9 @@
 #include <cstring>
 #include "Arduino.h"
 #include "TitleMarquee.h"
+#include "RemotePlayback.h"
+size_t testStrlcpy(char* dst, const char* src, size_t len) { if (len) snprintf(dst,len,"%s",src); return strlen(src); }
+#define strlcpy testStrlcpy
 struct String : std::string {
     using std::string::string;
     String(const std::string& s): std::string(s) {}
@@ -63,12 +66,16 @@ class VideoApp {
 public:
     enum VideoMode { MODE_BROWSE, MODE_PLAYING };
     VideoMode _mode = MODE_PLAYING;
-    struct Item { const char* id = "video"; unsigned duration_s = 10; } _videos[8];
+    struct Item { char id[36]="video",title[128]="Old video"; unsigned duration_s = 10; } _videos[8];
     using VideoItem = Item;
     int _videoCount = 2, _selectedIdx = 0, _pageStart = 0, _catalogIndex = 0, _catalogTotal = 2, thumbnails = 0;
     unsigned _lastScrollMs = 0, _playStartMs = 0;
     uint32_t _operationId = 0, _requestGeneration = 0, _lastOperationPollMs = 0;
     String _requestId;
+    bool _serverTransition=false, listenerReady=true;
+    size_t _thumbSize=100;
+    char _loadedId[36]="old";
+    bool prepareRemoteStream() { return listenerReady; }
     bool _serverError = false, _serverOffline = false, _contentMissing = false;
     bool _dirty = false, _streamStarted = false;
     TitleMarquee _marquee;
@@ -88,7 +95,7 @@ public:
         _videoCount = std::min(8, _catalogTotal - _pageStart);
         _catalogIndex = index;
         _selectedIdx = index - _pageStart;
-        _videos[_selectedIdx].id = "next";
+        strlcpy(_videos[_selectedIdx].id, "next", sizeof(_videos[_selectedIdx].id));
         return true;
     }
 

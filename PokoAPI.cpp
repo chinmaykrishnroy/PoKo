@@ -39,7 +39,7 @@ void PokoAPI::begin() {
             json += "\"psram_free\":" + String(ESP.getFreePsram()) + ",";
             json += "\"uptime_ms\":" + String(millis()) + ",";
             json += "\"cpu_mhz\":" + String(getCpuFrequencyMhz()) + ",";
-            json += "\"firmware_version\":\"v2.1.2\",";
+            json += "\"firmware_version\":\"v2.2.0\",";
             json += "\"app_state\":" + String((int)activeApp) + ",";
             json += "\"theme\":\"" + String(isDarkTheme() ? "dark" : "light") + "\",";
             json += "\"master_vol\":" + String(getMasterVolumeLimit()) + ",";
@@ -75,6 +75,11 @@ void PokoAPI::begin() {
             json += "\"freq_resp\":" + String((int)pixelEngine.getFreqResponse()) + ",";
             json += "\"battery_v\":" + String(batteryManager.getVoltage(), 2) + ",";
             json += "\"battery_pct\":" + String(batteryManager.getPercentage()) + ",";
+            json += "\"music_media_id\":\"" + escapeJson(musicAppInstance ? musicAppInstance->currentMediaId() : "") + "\",";
+            json += "\"music_artwork_id\":\"" + escapeJson(musicAppInstance ? musicAppInstance->currentArtworkId() : "") + "\",";
+            json += "\"music_playing\":" + String(musicAppInstance && musicAppInstance->isPlaying() ? "true" : "false") + ",";
+            json += "\"video_media_id\":\"" + escapeJson(videoAppInstance ? videoAppInstance->currentMediaId() : "") + "\",";
+            json += "\"video_playing\":" + String(videoAppInstance && videoAppInstance->isPlaying() ? "true" : "false") + ",";
             json += "\"charging\":" + String(batteryManager.isCharging() ? "true" : "false");
             json += "}";
             _server->send(200, "application/json", json);
@@ -569,6 +574,55 @@ void PokoAPI::begin() {
             _server->send(200, "application/json", "{\"ok\":true,\"addr\":\"" + scheme + escapeJson(h) + ":" + String(p) + "\",\"host\":\"" + escapeJson(h) + "\",\"port\":" + String(p) + ",\"token_configured\":" + String(_prefs->getString("server_token", "").length() ? "true" : "false") + "}");
         });
 
+        // Protected by the normal authentication middleware. This is not a
+        // pairing/login route; authenticated integration clients may only POST.
+        _server->on("/api/playback/prepare", HTTP_POST, [this]() {
+            String body = _server->arg("plain");
+            JsonDocument doc;
+            if (body.length() > 2048 || deserializeJson(doc, body)) {
+                _server->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid playback metadata\"}");
+                return;
+            }
+            const char* kind = doc["kind"] | "";
+            RemotePlayback media;
+            media.id = doc["id"] | "";
+            media.title = doc["title"] | "";
+            media.artist = doc["artist"] | "";
+            media.duration = doc["duration_s"].as<uint32_t>();
+            media.position = doc["position_s"].as<uint32_t>();
+            media.index = doc["catalog_index"] | 0;
+            media.total = doc["catalog_total"] | 0;
+            bool audio = strcmp(kind, "audio") == 0;
+            bool video = strcmp(kind, "video") == 0;
+            bool validId = strlen(media.id) > 0 && strlen(media.id) < 36;
+            for (const char* p = media.id; *p; ++p)
+                if (!isalnum((unsigned char)*p) && *p != '-' && *p != '_') validId = false;
+            if ((!audio && !video) || !validId || !strlen(media.title) ||
+                !doc["duration_s"].is<uint32_t>() || !doc["position_s"].is<uint32_t>() ||
+                media.index < 0 || media.index >= 999 || media.total < 0 || media.total > 999 ||
+                (media.total && media.index >= media.total) || !musicAppInstance || !videoAppInstance) {
+                _server->send(400, "application/json", "{\"ok\":false,\"error\":\"unsupported playback metadata\"}");
+                return;
+            }
+            struct Transition {
+                ~Transition() {
+                    musicAppInstance->setServerTransition(false);
+                    videoAppInstance->setServerTransition(false);
+                }
+            } transition;
+            musicAppInstance->setServerTransition(true);
+            videoAppInstance->setServerTransition(true);
+            AppState target = audio ? STATE_MUSIC_UI : STATE_VIDEO_UI;
+            onAppChange(target);
+            bool ready = activeApp == target && (audio ? musicAppInstance->prepareRemoteMedia(media)
+                                                       : videoAppInstance->prepareRemoteMedia(media));
+            if (!ready) {
+                _server->send(503, "application/json", "{\"ok\":false,\"error\":\"media listener unavailable\"}");
+                return;
+            }
+            _server->send(200, "application/json", "{\"ok\":true,\"media_id\":\"" + escapeJson(media.id) + "\"}");
+        });
+
         // App switch
         _server->on("/api/app", HTTP_GET, [this]() {
             if (_server->hasArg("set") || _server->hasArg("name")) {
@@ -636,7 +690,13 @@ void PokoAPI::begin() {
 
         // Playback stopped notification from streaming backend
         _server->on("/api/ui/playback_stopped", HTTP_GET, [this]() {
-            if (activeApp == STATE_VIDEO_UI && videoAppInstance) {
+            if (_server->arg("reason") == "stop") {
+                if (musicAppInstance) musicAppInstance->setServerTransition(true);
+                if (videoAppInstance) videoAppInstance->setServerTransition(true);
+                if (audioManager) audioManager->stopActiveSession();
+                if (musicAppInstance) musicAppInstance->setServerTransition(false);
+                if (videoAppInstance) videoAppInstance->setServerTransition(false);
+            } else if (activeApp == STATE_VIDEO_UI && videoAppInstance) {
                 videoAppInstance->onPlaybackEnded();
             } else if (activeApp == STATE_MUSIC_UI && musicAppInstance) {
                 musicAppInstance->onPlaybackEnded();

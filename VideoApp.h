@@ -1,4 +1,5 @@
 #pragma once
+#include "RemotePlayback.h"
 #include <Arduino.h>
 #include "PokoAppState.h"
 #include "TitleMarquee.h"
@@ -67,6 +68,7 @@ private:
     uint32_t  _lastDrawMs   = 0;
     uint32_t  _playStartMs  = 0;
     bool      _streamStarted = false;
+    bool      _serverTransition = false;
     uint32_t  _requestGeneration = 0;
     uint32_t  _operationId = 0;
     uint32_t  _lastOperationPollMs = 0;
@@ -93,6 +95,9 @@ private:
 
 public:
     VideoApp(Arduino_GFX* gfx, AppSwitchFn exitFn);
+    bool prepareRemoteMedia(const RemotePlayback& media);
+    void setServerTransition(bool active);
+    const char* currentMediaId() const;
 
     static bool playbackStoppedStatic();
     static void stopPlaybackStatic();

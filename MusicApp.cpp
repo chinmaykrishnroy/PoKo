@@ -319,13 +319,15 @@ void MusicApp::requestStop() {
             audioPlugin->stopStream();
         }
 
-        MediaServerRequest http;
-        String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false";
-        http.begin(url);
-        http.setConnectTimeout(1000);
-        http.setTimeout(4000);
-        http.GET();
-        http.end();
+        if (!_serverTransition) {
+            MediaServerRequest http;
+            String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false";
+            http.begin(url);
+            http.setConnectTimeout(1000);
+            http.setTimeout(4000);
+            http.GET();
+            http.end();
+        }
 
         pixelEngine.setSongProgress(0.0f);
         _dirty = true;
@@ -372,7 +374,7 @@ void MusicApp::renderToCanvas() {
         int16_t x1, y1; uint16_t w, h;
 
         if (_mode == MODE_PLAYING) {
-            const char* statusStr = _paused ? "PAUSED" : "PLAYING";
+            const char* statusStr = _paused ? "PAUSED" : (_streamStarted ? "PLAYING" : "STARTING");
             uint16_t statusClr = _paused ? pokoClrWarn() : pokoClrGreen();
             _canvas->setTextColor(statusClr, theme.headerBg);
             _canvas->getTextBounds(statusStr, 0, 0, &x1, &y1, &w, &h);
@@ -657,10 +659,50 @@ bool MusicApp::prepareRemoteStream() {
         return true;
     }
 
+void MusicApp::setServerTransition(bool active) { _serverTransition = active; }
+const char* MusicApp::currentMediaId() const { return _selectedIdx >= 0 && _selectedIdx < _songCount ? _songs[_selectedIdx].id : ""; }
+const char* MusicApp::currentArtworkId() const { return _artBitmapValid ? _loadedId : ""; }
+
+bool MusicApp::prepareRemoteMedia(const RemotePlayback& media) {
+        if (_cleanupPending) {
+            stopAndReleaseMusic();
+            if (_cleanupPending) return false;
+        }
+        if (!prepareRemoteStream()) return false;
+        _songs[0] = {};
+        strlcpy(_songs[0].id, media.id, sizeof(_songs[0].id));
+        strlcpy(_songs[0].title, media.title, sizeof(_songs[0].title));
+        strlcpy(_songs[0].artist, media.artist, sizeof(_songs[0].artist));
+        _songs[0].duration_s = media.duration;
+        _selectedIdx = 0;
+        _songCount = 1;
+        _pageStart = _catalogIndex = media.index;
+        _catalogTotal = media.total;
+        _artSize = 0;
+        _artBitmapValid = false;
+        _loadedId[0] = _artRequestedId[0] = 0;
+        _artFailures = 0;
+        _paused = _serverError = _serverOffline = _contentMissing = false;
+        _mode = MODE_PLAYING;
+        _trackPos = media.position;
+        _scrollOffset = 0;
+        fetchArtwork(0);
+        _playStartMs = millis() - media.position * 1000UL;
+        _streamRequestMs = _lastSecondMs = millis();
+        _streamStarted = false;
+        _dirty = true;
+        return true;
+    }
+
 void MusicApp::load() {
         _active = true;
         _dirty  = true;
         begin();
+        if (_serverTransition) {
+            _artSize = 0;
+            _artBitmapValid = false;
+            return;
+        }
 
         if (_mode == MODE_PLAYING) {
             // Already playing in background! Keep playing, just refresh UI!

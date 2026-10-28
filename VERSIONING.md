@@ -132,6 +132,7 @@ git push origin main --tags
 | v2.1.0 candidate | 2026-10-28 | Superseded before publication during CI validation |
 | v2.1.1 candidate | 2026-10-28 | Superseded before publication during Linux host validation |
 | v2.1.2 | 2026-10-28 | Browser sessions and manageable credentials with Linux/Windows regression validation |
+| v2.2.0 | 2026-10-28 | Synchronized remote playback UI and bounded/coalesced command handling |
 | v1.6.0 | 2026-10-06 | Media-safe staged power management, Wi-Fi hibernation, codec shutdown, battery smoothing, and wake hardening |
 | v1.5.0 | 2026-10-02 | Race-free inter-task state, safe worker shutdown, and graceful allocation failure handling |
 | v1.4.0 | 2026-10-01 | Declaration-only firmware modules, media-aware low-battery shutdown, and stronger CI regression checks |

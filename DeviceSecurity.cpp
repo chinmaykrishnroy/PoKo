@@ -38,7 +38,9 @@ bool deviceRequestAuthorized(WebServer& server, bool challenge) {
     }
     String password = prefs.getString("device_pass", "");
     bool authorized = password.length() >= 16 && server.authenticate("admin", password.c_str());
-    if (!authorized && deviceControlRoute(server.uri().c_str(), server.method() == HTTP_GET)) {
+    // Scope alone never authorizes: the integration password must authenticate.
+    // metadata-auth-required tests deny missing/wrong credentials on this route.
+    if (!authorized && deviceControlRoute(server.uri().c_str(), server.method() == HTTP_GET, server.method() == HTTP_POST)) {
         String control = prefs.getString("device_ctrl", "");
         authorized = control.length() >= 16 && server.authenticate("admin", control.c_str());
     }

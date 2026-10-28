@@ -10,6 +10,7 @@ import urllib.request
 from dataclasses import dataclass
 
 from .config import AppConfig
+from .models import MediaItem
 
 
 @dataclass
@@ -53,10 +54,31 @@ class DeviceClient:
         url = f"{self.config.poko.base_url}/api/app?{query}"
         return self._get(url, app)
 
+    def prepare_media(self, item: MediaItem, start_s: float = 0, *, catalog_index: int = 0, catalog_total: int = 0) -> DeviceResponse:
+        app = "audio" if item.kind == "audio" else "sync"
+        if not self.enabled:
+            return DeviceResponse(ok=True, app=app, body="dry-run")
+        payload = {"kind": item.kind, "id": item.id, "title": item.title[:128],
+                   "artist": (item.artist or "Unknown Artist")[:128],
+                   "duration_s": max(0, int(item.duration_s or 0)), "position_s": max(0, int(start_s)),
+                   "catalog_index": catalog_index, "catalog_total": catalog_total}
+        status, body, _ = self.request("/api/playback/prepare", method="POST",
+                                       data=json.dumps(payload, ensure_ascii=False).encode(), content_type="application/json", timeout=15)
+        if status == 404:
+            return DeviceResponse(ok=False, app=app, error="Update PoKo firmware to support synchronized remote playback")
+        try:
+            acknowledged = json.loads(body)
+            if status != 200 or acknowledged.get("ok") is not True or acknowledged.get("media_id") != item.id:
+                return DeviceResponse(ok=False, app=app, error="device did not acknowledge the selected media")
+        except (ValueError, AttributeError):
+            return DeviceResponse(ok=False, app=app, error="invalid device playback acknowledgement")
+        time.sleep(max(0, self.config.poko.switch_delay_ms) / 1000)
+        return DeviceResponse(ok=True, app=app, body="metadata synchronized")
+
     def notify_playback_stopped(self) -> DeviceResponse:
         if not self.enabled:
             return DeviceResponse(ok=True, app="playback_stopped", body="dry-run")
-        url = f"{self.config.poko.base_url}/api/ui/playback_stopped"
+        url = f"{self.config.poko.base_url}/api/ui/playback_stopped?reason=stop"
         return self._get(url, "playback_stopped")
 
     def request(

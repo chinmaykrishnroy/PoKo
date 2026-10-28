@@ -5,8 +5,8 @@ root = Path(__file__).resolve().parents[2]
 source = root / "VideoApp.cpp"
 text = source.read_text(encoding="utf-8")
 methods = []
-for name in ("failPlayback", "requestPlay", "reconcileOperation", "requestStopInternal", "requestStop", "selectVideo", "onLeft", "onRight"):
-    marker = f"{'bool' if name in {'selectVideo', 'reconcileOperation'} else 'void'} VideoApp::{name}("
+for name in ("failPlayback", "requestPlay", "reconcileOperation", "requestStopInternal", "requestStop", "prepareRemoteMedia", "selectVideo", "onLeft", "onRight"):
+    marker = f"{'bool' if name in {'selectVideo', 'reconcileOperation', 'prepareRemoteMedia'} else 'void'} VideoApp::{name}("
     if marker not in text:
         continue
     start = text.index(marker)
@@ -20,6 +20,7 @@ for name in ("failPlayback", "requestPlay", "reconcileOperation", "requestStopIn
 prefix = (root / "tests/firmware/video_fixture.h").read_text()
 suffix = (root / "tests/firmware/video_main.cpp").read_text()
 declarations = """
+    bool prepareRemoteMedia(const RemotePlayback& media);
     void failPlayback(int httpCode = 0);
     void requestPlay(int idx, bool retryMissing = true);
     bool reconcileOperation();

@@ -293,13 +293,15 @@ bool VideoApp::reconcileOperation() {
 
 void VideoApp::requestStopInternal() {
         _operationId = 0;
-        MediaServerRequest http;
-        String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false&async=true";
-        http.begin(url);
-        http.setConnectTimeout(1000);
-        http.setTimeout(1500);
-        http.GET();
-        http.end();
+        if (!_serverTransition) {
+            MediaServerRequest http;
+            String url = "http://" + getServerHost() + ":" + String(getServerPort()) + "/api/playback/stop?switch=false&notify=false&async=true";
+            http.begin(url);
+            http.setConnectTimeout(1000);
+            http.setTimeout(1500);
+            http.GET();
+            http.end();
+        }
 
         if (syncPlugin) {
             syncPlugin->unload();
@@ -318,7 +320,7 @@ void VideoApp::requestStop() {
         if (audioManager && (!syncPlugin || !syncPlugin->isLoaded())) {
             audioManager->release(AUDIO_VIDEO);
         }
-        if (_videoCount > 0) fetchThumbnail(_selectedIdx);
+        if (_videoCount > 0 && !_serverTransition) fetchThumbnail(_selectedIdx);
     }
 
 bool VideoApp::selectVideo(int index) {
@@ -493,6 +495,7 @@ void VideoApp::load() {
         _marquee.reset(millis());
         _titleWidth = 0;
         begin();
+        if (_serverTransition) { _thumbSize = 0; return; }
 
         _pageStart = -1;
         if (!fetchVideoList(_catalogIndex) && _catalogIndex > 0) fetchVideoList(0);
@@ -520,6 +523,28 @@ bool VideoApp::prepareRemoteStream() {
         _contentMissing = false;
         _dirty = true;
         if (powerManager) powerManager->acquireLock(POWER_LOCK_DISPLAY | POWER_LOCK_REALTIME_NET, LOCK_OWNER_VIDEO);
+        return true;
+    }
+
+void VideoApp::setServerTransition(bool active) { _serverTransition = active; }
+const char* VideoApp::currentMediaId() const { return _selectedIdx >= 0 && _selectedIdx < _videoCount ? _videos[_selectedIdx].id : ""; }
+
+bool VideoApp::prepareRemoteMedia(const RemotePlayback& media) {
+        if (!prepareRemoteStream()) return false;
+        _videos[0] = {};
+        strlcpy(_videos[0].id, media.id, sizeof(_videos[0].id));
+        strlcpy(_videos[0].title, media.title, sizeof(_videos[0].title));
+        _videos[0].duration_s = media.duration > media.position ? media.duration - media.position : 0;
+        _selectedIdx = 0;
+        _videoCount = 1;
+        _pageStart = _catalogIndex = media.index;
+        _catalogTotal = media.total;
+        _thumbSize = 0;
+        _loadedId[0] = 0;
+        _operationId = 0;
+        _requestId = "";
+        _marquee.reset(millis());
+        _titleWidth = 0;
         return true;
     }
 

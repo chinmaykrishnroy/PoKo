@@ -14,6 +14,7 @@
 #include "TCPAudio.h"
 #include "AudioManager.h"
 #include "CoreIApp.h"
+#include "RemotePlayback.h"
 
 // ─────────────────────────────────────────────────────────────
 //  MusicApp — Single-Song Audio Browser & MP3 TCP Stream Player
@@ -53,6 +54,7 @@ private:
     bool      _dirty        = true;
     bool      _paused       = false;
     bool      _cleanupPending = false;
+    bool      _serverTransition = false;
     MusicMode _mode         = MODE_BROWSE;
 
     SongItem  _songs[PAGE_SIZE];
@@ -112,6 +114,10 @@ private:
 
 public:
     MusicApp(Arduino_GFX* gfx, AppSwitchFn exitFn);
+    bool prepareRemoteMedia(const RemotePlayback& media);
+    void setServerTransition(bool active);
+    const char* currentMediaId() const;
+    const char* currentArtworkId() const;
 
     ~MusicApp();
 

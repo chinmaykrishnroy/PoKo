@@ -188,6 +188,21 @@ invalidates an old browser override, so CLI recovery always takes precedence.
 
 ## Private state and operation
 
+### Web playback flow and limits
+
+With matching v2.2+ firmware, Play submits an asynchronous command and returns
+an operation ID immediately. The server authenticates to the device and posts
+the chosen ID/title/artist/duration/catalog position. The device closes old local
+transports without echoing a Stop, adopts the new metadata and artwork, prepares
+its listener, and acknowledges the same ID. The server then starts FFmpeg.
+The dashboard follows the operation result before presenting Playing.
+
+There is one running playback operation and at most one pending replacement.
+New clicks supersede older pending clicks; 64 records are operation history,
+not queued tracks. Browser refreshes coalesce. The HTTP worker limit is eight;
+increasing a FIFO to 32/64 does not repair metadata or player-state mismatches.
+Explicit Stop ends playback without advancing to another item.
+
 Example paths can be changed together in the configuration and service unit:
 
 - `/var/lib/poko/config.yml`: editable server configuration.

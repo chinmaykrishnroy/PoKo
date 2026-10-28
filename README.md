@@ -169,6 +169,13 @@ your own targets and credential-file paths, and follow the
 [Pi reference architecture](server/deploy/README.md). Test scripts accept
 `--env /path/to/private.env`; your private deployment values stay outside Git.
 
+Server Web UI playback uses an authenticated metadata handshake with firmware
+v2.2 or later. It first synchronizes the selected item and prepares the device's
+listener, then starts the stream; the browser shows Starting until that operation
+succeeds. New selections replace pending commands. This is a playback controller,
+not a FIFO song queue. Generated firmware binaries live in CI/release assets;
+the local `build/` directory is ignored by Git.
+
 ### 2 — Build from source
 
 **Dependencies (Arduino CLI):**

@@ -21,15 +21,15 @@ def main() -> int:
     for script in ("prepare_audio_test.py", "prepare_video_test.py", "prepare_music_test.py"):
         subprocess.run([sys.executable, str(HERE / script)], cwd=ROOT, check=True)
     cases = {
-        "device-security": ["rotation-preserves-controls", "password-change-validation", "storage-failure-keeps-admin", "setup-cannot-rotate",
+        "device-security": ["rotation-preserves-controls", "password-change-validation", "storage-failure-keeps-admin", "setup-cannot-rotate", "metadata-auth-required",
                             "browser-no-native-prompt", "browser-session-tab-return", "browser-session-password-revocation", "browser-remember-cookie"],
         "buttons": ["deferred-init", "double-left", "double-right", "info-hold", "power-click",
                     "wake-left", "wake-right", "wake-power", "music-hold", "single-left", "single-right",
                     "busy-main-loop", "bounce", "overflow", "combo-click", "combo-double",
                     "combo-reboot", "combo-drivers", "combo-emergency"],
         "audio": ["suspend-transition", "suspend-timeout", "stop-all", "silent-video-is-not-audio"],
-        "music": ["terminal-release", "handoff-defers-release", "handoff-timeout-retries", "shutdown-timeout-retains-owner", "startup-timeout-releases", "blocked-loop-clock"],
-        "video": ["next", "next-page", "page-failure", "http-failure", "missing-refresh", "missing-empty", "load-failure", "stop-timeout", "next-stop-timeout", "fit-query", "async-rejected", "async-failed", "async-stale-result"],
+        "music": ["terminal-release", "handoff-defers-release", "handoff-timeout-retries", "shutdown-timeout-retains-owner", "startup-timeout-releases", "blocked-loop-clock", "remote-metadata", "remote-listener-failure", "server-handoff-no-stop"],
+        "video": ["next", "next-page", "page-failure", "http-failure", "missing-refresh", "missing-empty", "load-failure", "stop-timeout", "next-stop-timeout", "fit-query", "async-rejected", "async-failed", "async-stale-result", "remote-metadata", "remote-listener-failure", "server-handoff-no-stop"],
         "marquee": ["scroll-and-wrap"],
         "pixel-toggle": ["preserves-color", "forces-solid", "turns-off"],
         "power-policy": ["active-above-threshold-inhibits", "inactive-delay",

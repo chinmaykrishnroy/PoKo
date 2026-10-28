@@ -25,6 +25,11 @@ class FakeDevice(DeviceClient):
     def __init__(self, config):
         super().__init__(config, enabled=False)
         self.apps: list[str] = []
+        self.prepared = []
+
+    def prepare_media(self, item, start_s=0, *, catalog_index=0, catalog_total=0):
+        self.prepared.append((item.id, item.title, item.artist, item.duration_s, start_s, catalog_index, catalog_total))
+        return self.switch("audio" if item.kind == "audio" else "sync")
 
     def switch(self, app: str) -> DeviceResponse:
         self.apps.append(app)
@@ -38,6 +43,51 @@ class FailingDevice(FakeDevice):
 
 
 class PlaybackTests(unittest.TestCase):
+    def test_async_audio_tracks_the_actual_selected_media_result(self):
+        for manager, device in self._manager():
+            item = MediaItem(id="chosen", kind="audio", path=Path("chosen.mp3"), title="Chosen", extension=".mp3", size_bytes=1)
+            try:
+                accepted = manager.submit_audio(item, request_id="web-selected")
+                self.assertTrue(accepted["accepted"])
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline:
+                    operation = manager.operation_status(accepted["operation_id"])
+                    if operation["status"] not in {"running", "queued"}:
+                        break
+                    time.sleep(0.01)
+                self.assertEqual(operation["status"], "succeeded")
+                self.assertEqual(operation["result"]["playback"]["item_id"], "chosen")
+            finally:
+                manager.close()
+
+    def test_playback_burst_keeps_only_latest_pending_and_bounded_history(self):
+        for manager, _ in self._manager():
+            entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+            executed = []
+            def slow():
+                entered.set(); release.wait(2); return {"ok":True}
+            try:
+                manager._submit_operation("slow", slow)
+                self.assertTrue(entered.wait(1))
+                for value in range(100):
+                    def action(value=value):
+                        executed.append(value); finished.set(); return {"ok":True}
+                    manager._submit_operation("replace", action)
+                    self.assertLessEqual(len(manager._operations), 64)
+                    self.assertLessEqual(manager._operation_queue.qsize(), 1)
+                release.set()
+                self.assertTrue(finished.wait(2))
+                self.assertEqual(executed, [99])
+            finally:
+                release.set(); manager.close()
+
+    def test_remote_audio_synchronizes_selected_track_before_streaming(self):
+        for manager, device in self._manager():
+            item = MediaItem(id="chosen", kind="audio", path=Path("chosen.mp3"), title="Chosen song", artist="Chosen artist", duration_s=177, extension=".mp3", size_bytes=1)
+            result = manager.play_audio(item, 12)
+            self.assertTrue(result["ok"])
+            self.assertEqual(device.prepared[0][:5], ("chosen", "Chosen song", "Chosen artist", 177, 12))
+
     def test_embedded_silent_video_keeps_nav1_transport(self) -> None:
         for manager, device in self._manager():
             item = MediaItem(id="silent", kind="video", path=Path("silent.mp4"), title="Silent", extension=".mp4", size_bytes=1, has_audio=False)

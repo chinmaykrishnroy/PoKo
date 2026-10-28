@@ -58,6 +58,9 @@ jobs:
       - name: Run backend tests
         run: python server/run_tests.py
 
+      - name: Run dashboard playback regressions
+        run: node --test tests/server_ui.test.cjs
+
       - name: Run firmware host regressions
         run: python tests/firmware/run_tests.py --onebutton "$HOME/Arduino/libraries/OneButton/src"
 

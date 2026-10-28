@@ -3,8 +3,9 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[2]
 source = (root / "MusicApp.cpp").read_text()
 methods = []
-for name in ["stopAndReleaseMusic", "stopPlayback", "update"]:
-    start = source.index(f"void MusicApp::{name}(")
+for name in ["requestStop", "stopAndReleaseMusic", "stopPlayback", "prepareRemoteMedia", "update"]:
+    result = "bool" if name == "prepareRemoteMedia" else "void"
+    start = source.index(f"{result} MusicApp::{name}(")
     if name == "update":
         end = source.index("        if (!_active || !_canvas) return;", start)
         methods.append(source[start:end] + "}\n")

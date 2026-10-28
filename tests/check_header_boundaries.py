@@ -41,6 +41,7 @@ MIGRATED = (
 # Templates, core interfaces/data declarations, and third-party C interfaces
 # are valid header-only exceptions.
 HEADER_EXCEPTIONS = {
+    "RemotePlayback", # Data-only playback transfer object.
     "CoreIApp",
     "CoreInputEvent",
     "PixelToggle",

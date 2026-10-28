@@ -50,6 +50,16 @@ int main(int argc, char** argv) {
         server.supplied = oldPassword; server.arguments["password"] = newPassword;
         server.dispatch(); assert(server.status == 409);
         assert(prefs.getString("device_pass", "") == oldPassword);
+    } else if (test == "metadata-auth-required") {
+        assert(replaceDevicePassword(newPassword));
+        server.path = "/api/playback/prepare"; server.verb = HTTP_POST;
+        assert(!deviceRequestAuthorized(server)); assert(server.status == 401);
+        server.supplied = "incorrect-password";
+        assert(!deviceRequestAuthorized(server, false));
+        server.supplied = oldPassword;
+        assert(deviceRequestAuthorized(server, false));
+        server.path = "/api/security/password";
+        assert(!deviceRequestAuthorized(server, false));
     } else if (test == "browser-no-native-prompt") {
         server.headers["Sec-Fetch-Mode"] = "cors";
         server.path = "/api/health"; server.supplied = oldPassword;

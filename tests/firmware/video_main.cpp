@@ -4,7 +4,22 @@ int testPinSetups = 0;
 #define CHECK(c) do { if (!(c)) { puts("FAIL: " #c); return 1; } } while (0)
 int main(int argc, char** argv) {
     VideoApp app;
-    if (!strcmp(argv[1], "next")) {
+    if (!strcmp(argv[1], "remote-metadata")) {
+        RemotePlayback media{"chosen","Chosen video","",120,20,17,40};
+        CHECK(app.prepareRemoteMedia(media));
+        CHECK(!strcmp(app._videos[0].id,"chosen") && !strcmp(app._videos[0].title,"Chosen video"));
+        CHECK(app._videos[0].duration_s==100 && app._catalogIndex==17 && app._catalogTotal==40);
+        CHECK(app._selectedIdx==0 && app._videoCount==1 && app._thumbSize==0 && app._loadedId[0]==0);
+    } else if (!strcmp(argv[1], "remote-listener-failure")) {
+        app.listenerReady=false;
+        RemotePlayback media{"chosen","Chosen video"};
+        CHECK(!app.prepareRemoteMedia(media));
+        CHECK(!strcmp(app._videos[0].id,"video"));
+    } else if (!strcmp(argv[1], "server-handoff-no-stop")) {
+        app._serverTransition=true;
+        app.requestStop();
+        CHECK(requests==0 && player.unloads==1 && app.thumbnails==0);
+    } else if (!strcmp(argv[1], "next")) {
         app.onRight();
         CHECK(app._catalogIndex == 1 && app._selectedIdx == 1);
         CHECK(player.unloads == 1 && player.loads == 1);
