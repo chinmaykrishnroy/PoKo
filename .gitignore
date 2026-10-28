@@ -25,6 +25,12 @@ server-secrets/
 thumbnails/
 *.key
 credentials.env
+device-tokens.json
+admin-verifier.json
+setup-code
+admin-password
+device-token
+device-admin-password
 
 # ── IDE & OS ──────────────────────────────────────────────────────────────────
 .vscode/

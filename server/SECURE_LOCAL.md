@@ -38,6 +38,26 @@ the account that owns that secrets directory. Browser login uses HttpOnly Secure
 cookies over HTTPS, with optional **Remember me**; API clients can still use their
 separate credentials. Server restarts require one fresh browser login.
 
+The initial server login is `admin` / `00000000`. It only opens setup. Read
+`server-secrets/setup-code` on the server machine and choose a private 16–128
+character server passphrase. Then open **Settings → Device tokens**, create a
+named token, and copy it once into PoKo's **Media & Network → Device token**.
+The token store contains hashes only. Revocation takes effect on subsequent
+requests; it does not terminate an already established LAN media stream.
+`POKO_DEVICE_TOKENS_FILE` and `POKO_SETUP_CODE_FILE` are configured by the helper.
+Keep both paths outside media folders and Git.
+When upgrading an existing local credential file, add
+`POKO_DEVICE_TOKENS_FILE=/absolute/private/path/device-tokens.json` to its
+environment and restart the server; existing tokens remain valid. The token
+file's parent directory must be writable by the server account.
+
+If you forget the server password, run
+`python server/scripts/rotate_admin.py server-secrets --prompt` on that machine,
+reload its credentials environment and restart the server. `--bootstrap` instead
+restores `00000000` with a new private claim code. These operations preserve
+device tokens. Device password recovery is separate: physical **Settings →
+Security → Reset password** produces a random eight-character device password.
+
 For a small private installation, generate a local certificate with OpenSSL:
 
 ```sh

@@ -701,7 +701,7 @@ async function renderControls(){
             <label style="font-size:12px;color:var(--muted)">Media Server Address</label>
             <input type="text" id="server_addr" placeholder="hostname:port or 192.168.0.15:8765" style="margin-top:4px;width:100%;height:33px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px;padding:0 8px" required>
             <label>Device token (leave blank to keep saved token)</label>
-            <input type="password" id="server_token" autocomplete="new-password" placeholder="Separate device credential">
+            <input type="password" id="server_token" autocomplete="new-password" placeholder="Create in server Settings → Device tokens">
             <label>Local server CA certificate (optional; public HTTPS uses built-in CAs)</label>
             <textarea id="server_ca" placeholder="PEM CA certificate"></textarea>
             <label><input type="checkbox" id="server_clear_ca"> Use built-in public CAs (clear saved private CA)</label>
@@ -930,8 +930,8 @@ function renderSettings(){
       <form id="devicePasswordForm" class="form-grid">
         <input type="text" name="username" value="admin" autocomplete="username" readonly hidden>
         <div class="field"><label for="current_password">Current password</label><input id="current_password" name="current_password" type="password" autocomplete="current-password" required maxlength="128"></div>
-        <div class="field"><label for="new_device_password">New password</label><input id="new_device_password" name="password" type="password" autocomplete="new-password" required minlength="16" maxlength="128"></div>
-        <div class="field"><label for="confirm_device_password">Confirm password</label><input id="confirm_device_password" name="confirmation" type="password" autocomplete="new-password" required minlength="16" maxlength="128"></div>
+        <div class="field"><label for="new_device_password">New password (8 characters)</label><input id="new_device_password" name="password" type="password" autocomplete="new-password" required minlength="8" maxlength="8"></div>
+        <div class="field"><label for="confirm_device_password">Confirm password</label><input id="confirm_device_password" name="confirmation" type="password" autocomplete="new-password" required minlength="8" maxlength="8"></div>
         <p>Existing server media controls retain a separate, restricted integration credential. The previous password will no longer open this dashboard or authorize OTA. Forgot your password? Use Settings → Security on the physical device.</p>
         <p>The device dashboard uses local HTTP: change passwords only on a trusted LAN. Reboot after changing the password to update ArduinoOTA authentication.</p>
         <div class="form-foot"><button class="btn blue" type="submit">Change password</button></div>

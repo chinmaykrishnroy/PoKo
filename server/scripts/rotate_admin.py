@@ -14,10 +14,13 @@ parser.add_argument("directory", nargs="?", type=Path, default=Path("/etc/poko")
 choices = parser.add_mutually_exclusive_group()
 choices.add_argument("--prompt", action="store_true", help="Enter your own passphrase privately")
 choices.add_argument("--word-list", type=Path, help="Generate six random words from a 4096+ word list")
+choices.add_argument("--bootstrap", action="store_true", help="Reset to initial 00000000 with a new private setup code; normal access remains locked")
 args = parser.parse_args()
 root = args.directory
 env = root / "credentials.env"
-if args.prompt:
+if args.bootstrap:
+    password = "00000000"
+elif args.prompt:
     password = getpass.getpass("New browser passphrase (16-128 characters): ")
     if password != getpass.getpass("Confirm passphrase: ") or not 16 <= len(password) <= 128:
         parser.error("Use matching passphrases of 16-128 characters")
@@ -31,6 +34,17 @@ else:
     password = secrets.token_urlsafe(24)
 lines = [line for line in env.read_text().splitlines() if not line.startswith("POKO_ADMIN_PASSWORD_HASH=")]
 lines.append("POKO_ADMIN_PASSWORD_HASH='" + password_hash(password) + "'")
+if args.bootstrap:
+    setting = next((line.split("=", 1)[1].strip().strip("\"'") for line in lines
+                    if line.startswith("POKO_SETUP_CODE_FILE=")), str((root / "setup-code").resolve()))
+    if not any(line.startswith("POKO_SETUP_CODE_FILE=") for line in lines):
+        lines.append("POKO_SETUP_CODE_FILE='" + setting + "'")
+    code_path = Path(setting)
+    code_path.write_text(secrets.token_urlsafe(24) + "\n")
+    os.chmod(code_path, 0o600)
+    if os.name != "nt" and os.geteuid() == 0:
+        owner = code_path.parent.stat()
+        os.chown(code_path, owner.st_uid, owner.st_gid)
 temporary = env.with_suffix(".tmp")
 temporary.write_text("\n".join(lines) + "\n")
 os.chmod(temporary, 0o600)

@@ -9,7 +9,7 @@ Preferences prefs;
 int main(int argc, char** argv) {
     assert(argc == 2);
     std::string test = argv[1];
-    String oldPassword = "old-secret-password-000", newPassword = "new-secret-password-111";
+    String oldPassword = "old-secret-password-000", newPassword = "NewPass1";
     prefs.putString("device_pass", oldPassword);
     WebServer server;
     installDeviceAuthentication(server);
@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
         assert(!deviceRequestAuthorized(server, false));
         server.supplied = newPassword; server.path = "/ota/upload";
         assert(deviceRequestAuthorized(server, false));
-        assert(replaceDevicePassword("third-secret-password-222"));
+        assert(replaceDevicePassword("ThirdPwd"));
         assert(prefs.getString("device_ctrl", "") == oldPassword);
     } else if (test == "password-change-validation") {
         server.path = "/api/security/password"; server.verb = HTTP_POST;
@@ -36,11 +36,25 @@ int main(int argc, char** argv) {
         server.arguments["current_password"] = oldPassword;
         server.arguments["confirmation"] = "mismatch";
         server.dispatch(); assert(server.status == 400);
+        for(const char* invalid: {"short", "ninechars", "bad pass", "bad\npass"}) {
+            assert(!replaceDevicePassword(invalid));
+        }
         server.arguments["confirmation"] = newPassword;
         server.dispatch(); assert(server.status == 200);
         assert(prefs.getString("device_pass", "") == newPassword);
         server.supplied = oldPassword;
         server.dispatch(); assert(server.status == 401);
+    } else if (test == "default-password") {
+        prefs.putString("device_pass", "");
+        WebServer fresh;
+        installDeviceAuthentication(fresh);
+        assert(prefs.getString("device_pass", "") == "00000000");
+        fresh.supplied="00000000";fresh.path="/ota/upload";
+        assert(deviceRequestAuthorized(fresh,false));
+        assert(replaceDevicePassword("NewPass1"));
+        assert(prefs.getString("device_ctrl", "").length()==0);
+        fresh.supplied="00000000";fresh.path="/api/health";
+        assert(!deviceRequestAuthorized(fresh,false));
     } else if (test == "storage-failure-keeps-admin") {
         prefs.failWrite = true;
         assert(!replaceDevicePassword(newPassword));

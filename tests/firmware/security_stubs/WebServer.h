@@ -10,6 +10,7 @@ public:
     String(std::string text) : value(std::move(text)) {}
     size_t length() const { return value.size(); }
     const char* c_str() const { return value.c_str(); }
+    char operator[](size_t i) const { return value[i]; }
     bool operator==(const String& other) const { return value == other.value; }
     bool operator!=(const String& other) const { return !(*this == other); }
     bool equalsConstantTime(const String& other) const { return *this == other; }

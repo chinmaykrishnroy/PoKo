@@ -1,4 +1,4 @@
-"""Run on the Pi as root after first flashing, within five minutes of boot.
+"""Run on the server machine after flashing a new/unprovisioned device.
 
 Sends separate admin and media credentials over the user's trusted local LAN.
 No credential is printed or included in a URL. Future device requests use
@@ -26,15 +26,23 @@ if any(c in host for c in "/:@ "):
 base = "http://" + host
 password = Path("/etc/poko/device-admin-password").read_text().strip()
 token = Path("/etc/poko/device-token").read_text().strip()
-try:
-    request = urllib.request.Request(base + "/api/security/setup", data=urllib.parse.urlencode({"password": password}).encode(), method="POST")
-    urllib.request.urlopen(request, timeout=10).close()
-except urllib.error.HTTPError as exc:
-    if exc.code != 401:
-        raise
 manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
 manager.add_password(None, base, "admin", password)
 opener = urllib.request.build_opener(urllib.request.HTTPDigestAuthHandler(manager))
+try:
+    opener.open(base + "/api/health", timeout=10).close()
+except urllib.error.HTTPError as exc:
+    if exc.code != 401:
+        raise
+    if len(password) != 8:
+        raise SystemExit("This helper needs a new eight-character pairing password. Existing device credentials were preserved; pair through its Web UI instead.")
+    bootstrap = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+    bootstrap.add_password(None, base, "admin", "00000000")
+    initial = urllib.request.build_opener(urllib.request.HTTPDigestAuthHandler(bootstrap))
+    request = urllib.request.Request(base + "/api/security/password", data=urllib.parse.urlencode({
+        "current_password": "00000000", "password": password, "confirmation": password,
+    }).encode(), method="POST")
+    initial.open(request, timeout=10).close()
 request = urllib.request.Request(base + "/api/server", data=urllib.parse.urlencode({
     "addr": args.server_url.rstrip("/"), "token": token, "ca": "",
 }).encode(), method="POST")

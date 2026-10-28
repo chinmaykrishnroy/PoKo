@@ -19,6 +19,7 @@ from pathlib import Path
 import tempfile
 from http.cookies import SimpleCookie, CookieError
 from urllib.parse import urlsplit
+from .device_tokens import DeviceTokens
 
 
 def password_hash(password: str, salt: bytes | None = None) -> str:
@@ -36,6 +37,9 @@ class Authentication:
         self._base_encoded = self.encoded
         self.password_file = os.environ.get("POKO_ADMIN_PASSWORD_HASH_FILE", "")
         self.device_digest = os.environ.get("POKO_DEVICE_TOKEN_SHA256", "")
+        self.tokens = DeviceTokens(os.environ.get("POKO_DEVICE_TOKENS_FILE", ""), self.device_digest)
+        self.setup_code_file = os.environ.get("POKO_SETUP_CODE_FILE", "")
+        self.requires_password_change = False
         self._sessions = {}
         self._session_lock = threading.Lock()
         self._failed_logins = []
@@ -55,16 +59,23 @@ class Authentication:
                     raise ValueError()
             except ValueError:
                 raise ValueError("Set a valid POKO_ADMIN_PASSWORD_HASH before enabling security") from None
+            self.requires_password_change = hmac.compare_digest(
+                hashlib.scrypt(b"00000000", salt=self.salt, n=16384, r=8, p=1), self.digest)
 
-    def change_password(self, current: str, password: str, confirmation: str) -> None:
+    def change_password(self, current: str, password: str, confirmation: str, setup_code: str = "") -> None:
         if not self.password_file:
             raise ValueError("Configure POKO_ADMIN_PASSWORD_HASH_FILE for browser password changes")
         if not 16 <= len(password) <= 128 or password != confirmation or password == current:
             raise ValueError("Use a different 16-128 character passphrase with matching confirmation")
         with self._session_lock:
             header = "Basic " + base64.b64encode((self.username + ":" + current).encode()).decode()
-            if self.role(header) != "admin":
+            if self.role(header) not in {"admin", "setup"}:
                 raise ValueError("Current password is incorrect")
+            if self.requires_password_change:
+                path = Path(self.setup_code_file) if self.setup_code_file else None
+                expected = path.read_text().strip() if path and path.exists() else ""
+                if not expected or not hmac.compare_digest(expected, setup_code):
+                    raise ValueError("Enter the one-time setup code from the server machine")
             encoded = password_hash(password)
             path = Path(self.password_file)
             descriptor, temporary = tempfile.mkstemp(prefix=".poko-password-", dir=path.parent)
@@ -80,6 +91,7 @@ class Authentication:
             self.encoded = encoded
             _, salt, digest = encoded.split("$")
             self.salt, self.digest = bytes.fromhex(salt), bytes.fromhex(digest)
+            self.requires_password_change = False
             self._sessions.clear()
 
     def authorized(self, header: str) -> bool:
@@ -93,7 +105,7 @@ class Authentication:
                 return None, True
         generation = self.encoded
         header = "Basic " + base64.b64encode((username + ":" + password).encode()).decode()
-        if self.role(header) != "admin":
+        if self.role(header) not in {"admin", "setup"}:
             with self._session_lock:
                 self._failed_logins.append(now)
             return None, False
@@ -124,7 +136,7 @@ class Authentication:
             return None
         key = hashlib.sha256(token.encode()).digest()
         with self._session_lock:
-            return "admin" if self._sessions.get(key, 0) > time.time() else None
+            return ("setup" if self.requires_password_change else "admin") if self._sessions.get(key, 0) > time.time() else None
 
     def logout(self, header: str) -> None:
         token = self._cookie_token(header)
@@ -137,15 +149,12 @@ class Authentication:
         try:
             scheme, encoded = header.split(" ", 1)
             if scheme.lower() == "bearer":
-                if not self.device_digest or len(encoded) > 256:
-                    return None
-                digest = hashlib.sha256(encoded.encode()).hexdigest()
-                return "device" if hmac.compare_digest(digest, self.device_digest) else None
+                return "device" if self.tokens.matches(encoded) else None
             if scheme.lower() != "basic" or len(encoded) > 2048:
                 return None
             username, password = base64.b64decode(encoded, validate=True).decode().split(":", 1)
             digest = hashlib.scrypt(password.encode(), salt=self.salt, n=16384, r=8, p=1)
-            return "admin" if hmac.compare_digest(username.encode(), self.username.encode()) & hmac.compare_digest(digest, self.digest) else None
+            return ("setup" if self.requires_password_change else "admin") if hmac.compare_digest(username.encode(), self.username.encode()) & hmac.compare_digest(digest, self.digest) else None
         except (ValueError, UnicodeError, binascii.Error):
             return None
 

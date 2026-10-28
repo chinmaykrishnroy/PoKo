@@ -32,7 +32,7 @@ secrets_dir = Path("/etc/poko")
 secrets_dir.mkdir(mode=0o700, exist_ok=True)
 env = secrets_dir / "credentials.env"
 if not env.exists():
-    password = secrets.token_urlsafe(24)
+    password = "00000000"
     with env.open("x") as stream:
         stream.write("POKO_ADMIN_USER=admin\nPOKO_ADMIN_PASSWORD_HASH='" + password_hash(password) + "'\n")
     os.chmod(env, 0o600)
@@ -40,13 +40,18 @@ if not env.exists():
     with password_file.open("x") as stream:
         stream.write(password + "\n")
     os.chmod(password_file, 0o600)
+    setup_file = Path("/var/lib/poko/setup-code")
+    setup_file.write_text(secrets.token_urlsafe(24) + "\n")
+    os.chmod(setup_file, 0o600)
+    owner = setup_file.parent.stat()
+    os.chown(setup_file, owner.st_uid, owner.st_gid)
 
 for variable, filename, hashed in [
     ("POKO_DEVICE_TOKEN_SHA256", "device-token", True),
     ("POKO_DEVICE_PASSWORD", "device-admin-password", False),
 ]:
     if variable + "=" not in env.read_text():
-        credential = secrets.token_urlsafe(32)
+        credential = secrets.token_urlsafe(32) if hashed else "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789") for _ in range(8))
         value = hashlib.sha256(credential.encode()).hexdigest() if hashed else credential
         with env.open("a") as stream:
             stream.write(f"{variable}='{value}'\n")
@@ -57,6 +62,11 @@ for variable, filename, hashed in [
 if "POKO_ADMIN_PASSWORD_HASH_FILE=" not in env.read_text():
     with env.open("a") as stream:
         stream.write("POKO_ADMIN_PASSWORD_HASH_FILE='/var/lib/poko/admin-verifier.json'\n")
+for variable, filename in [("POKO_DEVICE_TOKENS_FILE", "device-tokens.json"),
+                           ("POKO_SETUP_CODE_FILE", "setup-code")]:
+    if variable + "=" not in env.read_text():
+        with env.open("a") as stream:
+            stream.write(f"{variable}='/var/lib/poko/{filename}'\n")
 
 if not config_path.exists():
     config = load_config("/opt/poko/server/config.example.yml")

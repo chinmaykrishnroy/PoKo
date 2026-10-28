@@ -573,8 +573,10 @@ void SettingsApp::onEnter() {
                 return;
             }
             if (!_resetConfirm) { _resetConfirm = true; _dirty = true; return; }
-            char password[17];
-            snprintf(password, sizeof(password), "%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());
+            char password[9];
+            const char alphabet[] = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+            for (unsigned i = 0; i < 8; ++i) password[i] = alphabet[esp_random() % (sizeof(alphabet) - 1)];
+            password[8] = 0;
             if (replaceDevicePassword(String(password))) _recoveryPassword = password;
             _dirty = true;
             return;

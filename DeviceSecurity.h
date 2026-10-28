@@ -2,5 +2,6 @@
 #include <WebServer.h>
 bool deviceRequestAuthorized(WebServer& server, bool challenge = true);
 void installDeviceAuthentication(WebServer& server);
-// Physical Settings recovery only. Caller displays the generated password.
+// New passwords are exactly eight printable non-space ASCII characters.
+// Existing longer passwords remain valid until explicitly replaced.
 bool replaceDevicePassword(const String& password);

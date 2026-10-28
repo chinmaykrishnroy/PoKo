@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v2.3.0] — 2026-10-28
+
+- Create named media-only device tokens in server Settings, copy each token once,
+  and revoke individual tokens. Persist hashes only; retain existing tokens.
+- New server installations start with `admin` / `00000000` in setup-only mode.
+  A private server-machine claim code and a new passphrase are required before
+  media or administration unlock. CLI recovery preserves device credentials.
+- New devices start with `admin` / `00000000`. Web password changes require
+  exactly eight printable non-space ASCII characters; physical recovery creates
+  a random eight-character password. Preserve existing passwords on upgrade.
+- Includes the v2.2.2 remote playback, dashboard layout and empty-catalog fixes.
+
 ## [v2.2.2] — 2026-10-28
 
 - Respect invalidated Music/Video catalog pages when reopening an app, so a

@@ -9,6 +9,26 @@ from helpers import workspace_tempdir
 
 
 class AdminRotationTests(unittest.TestCase):
+    def test_initial_setup_and_operator_bootstrap_recovery(self):
+        from unittest.mock import patch
+        from server.poko_server.security import Authentication
+        with workspace_tempdir() as root:
+            directory = root / "private"
+            scripts = Path(__file__).parents[1] / "scripts"
+            result = subprocess.run([sys.executable, str(scripts / "create_credentials.py"), str(directory)], capture_output=True, text=True, check=True)
+            code = (directory / "setup-code").read_text().strip()
+            self.assertNotIn(code, result.stdout + result.stderr)
+            values = dict(line.split("=", 1) for line in (directory / "credentials.env").read_text().splitlines())
+            values = {key: value.strip("'") for key, value in values.items()}
+            with patch.dict(os.environ, values):
+                self.assertTrue(Authentication(True, "https://poko.example.com").requires_password_change)
+            integration = values["POKO_DEVICE_TOKEN_SHA256"]
+            result = subprocess.run([sys.executable, str(scripts / "rotate_admin.py"), str(directory), "--bootstrap"], capture_output=True, text=True, check=True)
+            self.assertEqual((directory / "admin-password").read_text().strip(), "00000000")
+            self.assertNotEqual((directory / "setup-code").read_text().strip(), code)
+            self.assertIn(integration, (directory / "credentials.env").read_text())
+            self.assertNotIn(code, result.stdout + result.stderr)
+
     def test_memorable_rotation_preserves_integration_and_does_not_print_secret(self):
         with workspace_tempdir() as root:
             directory = root / "private"

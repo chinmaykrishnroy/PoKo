@@ -136,7 +136,7 @@ void installDeviceBrowserSessions(WebServer& server) {
         if (now - failureWindow > 60000) { failures = 0; failureWindow = now; }
         if (failures >= 10) { server.send(429, "text/plain", "Too many attempts. Wait one minute."); return; }
         String password = prefs.getString("device_pass", "");
-        if (password.length() < 16 || server.arg("username") != "admin" ||
+        if (password.length() < 8 || server.arg("username") != "admin" ||
             !password.equalsConstantTime(server.arg("password"))) {
             ++failures;
             server.send(401, "text/html", "<p>Username or password is incorrect. <a href=/login>Try again</a></p>");

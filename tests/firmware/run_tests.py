@@ -22,7 +22,7 @@ def main() -> int:
         subprocess.run([sys.executable, str(HERE / script)], cwd=ROOT, check=True)
     cases = {
         "library-status": ["empty", "offline", "error", "missing", "loading", "populated", "invalidated-cache"],
-        "device-security": ["rotation-preserves-controls", "password-change-validation", "storage-failure-keeps-admin", "setup-cannot-rotate", "metadata-auth-required",
+        "device-security": ["rotation-preserves-controls", "password-change-validation", "default-password", "storage-failure-keeps-admin", "setup-cannot-rotate", "metadata-auth-required",
                             "browser-no-native-prompt", "browser-session-tab-return", "browser-session-password-revocation", "browser-remember-cookie"],
         "buttons": ["deferred-init", "double-left", "double-right", "info-hold", "power-click",
                     "wake-left", "wake-right", "wake-power", "music-hold", "single-left", "single-right",

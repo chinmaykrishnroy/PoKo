@@ -135,6 +135,7 @@ git push origin main --tags
 | v2.2.0 | 2026-10-28 | Synchronized remote playback UI and bounded/coalesced command handling |
 | v2.2.1 | 2026-10-28 | Empty media libraries show 0/0 and clear stale artwork; includes v2.2.0 playback fixes |
 | v2.2.2 | 2026-10-28 | Revalidate invalidated catalogs; published release includes v2.2.0/v2.2.1 candidate fixes |
+| v2.3.0 | 2026-10-28 | Server token management, protected initial setup and eight-character device passwords |
 | v1.6.0 | 2026-10-06 | Media-safe staged power management, Wi-Fi hibernation, codec shutdown, battery smoothing, and wake hardening |
 | v1.5.0 | 2026-10-02 | Race-free inter-task state, safe worker shutdown, and graceful allocation failure handling |
 | v1.4.0 | 2026-10-01 | Declaration-only firmware modules, media-aware low-battery shutdown, and stronger CI regression checks |

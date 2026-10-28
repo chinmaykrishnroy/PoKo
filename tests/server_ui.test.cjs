@@ -30,6 +30,18 @@ test('Play shows selected Starting state, then matching Playing title and artwor
   assert.match(d.html(),/audio\/chosen\/thumbnail.jpg/);
 });
 
+test('token settings show paste instructions and escape device names without exposing credentials',async()=>{
+  const d=dashboard();
+  const html=await d.run('tokenSettings({items:[{id:"abc123",name:"<script>bad</script>",token:"must-not-render",hash:"must-not-render"}]})');
+  assert.match(html,/Device token/);
+  assert.match(html,/will not be shown again/);
+  assert.match(html,/&lt;script&gt;/);
+  assert.doesNotMatch(html,/<script>bad/);
+  assert.doesNotMatch(html,/must-not-render/);
+  assert.match(html,/id="newDeviceToken" type="password" readonly/);
+  assert.match(html,/data-token-revoke="abc123"/);
+});
+
 test('failed and mismatched operations never present Playing',async()=>{
   for(const operation of [{status:'failed',result:{error:'Device unavailable'}},{status:'succeeded',result:{playback:{item_id:'different'}}}]){
     const d=dashboard();d.state.operation=operation;

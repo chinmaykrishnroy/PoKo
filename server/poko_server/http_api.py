@@ -25,6 +25,7 @@ from .playback import PlaybackManager
 from .ui import ADMIN_HTML, FAVICON_SVG
 from .security import Authentication
 from .login_page import LOGIN_HTML
+from .setup_page import SETUP_HTML
 
 
 class PokoHTTPServer(ThreadingHTTPServer):
@@ -413,7 +414,7 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
             browser = bool(self.headers.get("Sec-Fetch-Mode")) or "text/html" in self.headers.get("Accept", "")
             if self.authentication.enabled and path == "/login" and self.command == "GET":
                 if self.authentication.cookie_role(self.headers.get("Cookie", "")):
-                    self._auth_redirect("/")
+                    self._auth_redirect("/setup" if self.authentication.requires_password_change else "/")
                     return
                 self._html(LOGIN_HTML.replace("__MESSAGE__", "Remembered sessions last up to 30 days, or until the server restarts."))
                 return
@@ -434,7 +435,7 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                     cookie = "poko_session=" + token + "; Path=/; HttpOnly; Secure; SameSite=Strict"
                     if remember:
                         cookie += "; Max-Age=2592000"
-                    self._auth_redirect("/", cookie)
+                    self._auth_redirect("/setup" if self.authentication.requires_password_change else "/", cookie)
                 else:
                     self._html(LOGIN_HTML.replace("__MESSAGE__", "Too many attempts. Wait a minute." if limited else "Username or password is incorrect."),
                                HTTPStatus.TOO_MANY_REQUESTS if limited else HTTPStatus.UNAUTHORIZED)
@@ -463,6 +464,14 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
             if not self.authentication.same_origin(self.headers):
                 self._json({"ok": False, "error": "cross-origin request refused"}, HTTPStatus.FORBIDDEN)
                 return
+            if self.authentication.requires_password_change:
+                if role == "setup" and path in {"/", "/setup"} and self.command == "GET":
+                    self._html(SETUP_HTML)
+                    return
+                if role != "setup" or (path, self.command) not in {
+                        ("/api/security/password", "POST"), ("/api/security/logout", "POST")}:
+                    self._json({"ok": False, "error": "Complete server password setup first", "password_change_required": True}, HTTPStatus.FORBIDDEN)
+                    return
             if path == "/api/security/logout" and self.command == "POST":
                 self.authentication.logout(self.headers.get("Cookie", ""))
                 self._auth_redirect("/login" if self.authentication.enabled else "/", "poko_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0")
@@ -472,8 +481,25 @@ class PokoRequestHandler(BaseHTTPRequestHandler):
                 current, password, confirmation = (data.get(key, "") for key in ("current_password", "password", "confirmation"))
                 if not all(isinstance(value, str) for value in (current, password, confirmation)):
                     raise ValueError("invalid password form")
-                self.authentication.change_password(current, password, confirmation)
+                setup_code = data.get("setup_code", "")
+                if not isinstance(setup_code, str):
+                    raise ValueError("invalid setup code")
+                self.authentication.change_password(current, password, confirmation, setup_code)
                 self._json({"ok": True, "sign_in_again": True})
+                return
+            if path == "/api/security/device-tokens" and self.command == "GET":
+                self._json({"items": self.authentication.tokens.list()})
+                return
+            if path == "/api/security/device-tokens" and self.command == "POST":
+                data = self._read_json_body()
+                action = data.get("action", "create")
+                if action == "create":
+                    self._json({"ok": True, **self.authentication.tokens.create(data.get("name", ""))}, HTTPStatus.CREATED)
+                elif action == "revoke":
+                    self.authentication.tokens.revoke(data.get("id", ""))
+                    self._json({"ok": True})
+                else:
+                    raise ValueError("Unsupported token action")
                 return
             self._handle()
         except (ValueError, TypeError, json.JSONDecodeError) as exc:

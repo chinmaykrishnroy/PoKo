@@ -69,8 +69,12 @@ is installed. If using a virtual environment, adapt `ExecStart` in the unit.
    connector is containerized, its loopback is a different network namespace:
    use host networking or a private network shared with the origin. Keep the
    origin inaccessible from public interfaces.
-5. Provision the device on your trusted LAN within its initial five-minute
-   pairing window:
+5. Complete server setup, then provision a new device on your trusted LAN:
+
+   Sign in to the server UI as `admin` / `00000000`. This login only opens setup.
+   Read `sudo cat /var/lib/poko/setup-code` on the server machine and choose your
+   private server passphrase. Public visitors cannot claim setup with the
+   documented password alone. Existing installations retain their passwords.
 
    ```sh
    sudo python3 /opt/poko/server/deploy/pair_device.py 192.168.1.50 \
@@ -80,6 +84,9 @@ is installed. If using a virtual environment, adapt `ExecStart` in the unit.
    The helper sends an independent device-admin password and media token. It
    does not print either secret. For a private-CA local server, provision its CA
    in the device dashboard using the [local hosting guide](../SECURE_LOCAL.md).
+   Alternatively, create a token in **Server Settings → Device tokens**, copy it
+   once, and paste it into **Device Media & Network → Device token**. A new device
+   initially uses `admin` / `00000000`; change its password under Security.
 6. Copy the repository's `.env.example` to a private `.env` file and fill in your
    own device/server/origin URLs, credential-file directory, and expected firmware
    version. No passwords need to be copied into it: verification reads the private
@@ -128,6 +135,14 @@ Root-only `/etc/poko/credentials.env` provides the server's scrypt password
 verifier, token hash, and device-control credential. Secrets must not be stored
 in Git, editable YAML, screenshots, or public configuration responses.
 
+The server UI creates named, individually revocable tokens. Their hashes are
+persisted in `POKO_DEVICE_TOKENS_FILE` (Pi example:
+`/var/lib/poko/device-tokens.json`); plaintext is shown only when created.
+The original `/etc/poko/device-token` remains valid until explicitly revoked as
+Original device token. Revocation blocks new API requests but does not interrupt
+an already established LAN stream. Stop playback separately if required.
+Never put a Web UI password in the device-token field.
+
 Retrieve the server browser password locally as the operator:
 
 ```sh
@@ -163,6 +178,12 @@ On the first device password change, the existing Pi credential becomes a
 separate, restricted integration credential for media controls. It cannot open
 the dashboard, change security/server settings, reset drivers, or upload OTA.
 Further human password changes preserve it, so the Pi remains paired. This does
+not retain the public initial password `00000000` as an integration credential.
+For a new installation, the pairing helper first replaces that password with a
+private eight-character credential and configures server access. Simply copying
+a media token configures device-to-server access; remote Web UI Play also needs
+the server's `POKO_DEVICE_PASSWORD` to match a device admin/integration credential.
+This does
 not revoke a compromised integration credential; replace/re-provision that
 credential separately if needed. Device HTTP control remains LAN-only: Digest
 authenticates requests but does not encrypt the connection.
@@ -174,6 +195,14 @@ password**, or choose one privately with:
 sudo python3 /opt/poko/server/scripts/rotate_admin.py --prompt
 sudo systemctl restart poko
 ```
+
+To restore initial setup instead, run `rotate_admin.py --bootstrap`, restart the
+service, then read `sudo cat /var/lib/poko/setup-code`. The initial password is
+`00000000`; controls and media remain locked until a private passphrase is set.
+This operator recovery works even when the browser password is forgotten and
+preserves media tokens. Device passwords are exactly eight printable non-space
+ASCII characters when changed; physical reset generates a random eight-character
+password. Existing longer device passwords continue to work until changed.
 
 The tool also supports `--word-list /path/to/words.txt` to generate six random
 words from a list of at least 4096 distinct words. It never prints the password.

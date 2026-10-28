@@ -141,15 +141,33 @@ The application-only `.ino.bin` is for OTA; do not flash it at offset `0x0`.
 
 On first boot the device creates a Wi-Fi AP named **PoKo-Setup** — connect to it and visit `http://192.168.4.1/` to set your Wi-Fi credentials.
 
-Firmware v2 first asks you to set a **device-admin password** during a five-minute
-pairing window. Sign in as `admin` to configure Wi-Fi, server settings, or OTA.
+New devices use **`admin` / `00000000`** for their initial Web UI login.
+Sign in to configure Wi-Fi, server settings, or OTA, and change that initial password.
 The media server uses a separate device token over HTTPS. See
 [secure local-server setup](server/SECURE_LOCAL.md) and
 [persistent Pi/cloud deployment](server/deploy/README.md). The browser's server
 login password, device token, and device-admin password serve different roles.
 
 Use **Web UI → Settings → Security** to change the device-admin password.
-Enter the current password and confirm a new password of 16–128 characters.
+Enter the current password and confirm a new password of **exactly 8 printable,
+non-space ASCII characters**. Physical **Settings → Security → Reset password**
+generates a random eight-character password; Show password displays the saved one.
+Existing longer passwords remain valid until changed; upgrading never resets them.
+
+New secure servers also start with **`admin` / `00000000`**, but this login only
+opens setup. Read the private `setup-code` on the server machine and choose a
+16–128 character server passphrase before media, settings or controls unlock.
+On the Pi example deployment: `sudo cat /var/lib/poko/setup-code`.
+
+To connect PoKo, open **Server Web UI → Settings → Device tokens → Create device
+token**, copy the token shown once, and paste it into **Device Web UI → Media &
+Network → Device token**, then click **Update Server**. Each device can have its
+own token. Revoke lost tokens from server Settings; passwords and other devices
+are unaffected. A token authorizes media requests, not server administration.
+Server-machine password recovery is always available through
+`python server/scripts/rotate_admin.py /path/to/private-credentials --prompt`;
+restart the server afterward. Use `--bootstrap` instead to restore initial setup
+with `00000000` and a new private claim code.
 Both dashboards use a normal login form with **Remember me** and **Sign out**.
 Sessions use HttpOnly cookies, never localStorage. A tab switch does not end a
 session. Remembered sessions last up to 30 days; server restarts require a fresh

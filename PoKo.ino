@@ -918,7 +918,7 @@ void loop() {
                     p.end();
                 });
                 String otaPassword = prefs.getString("device_pass", "");
-                if (otaPassword.length() >= 16) {
+                if (otaPassword.length() >= 8) {
                     ArduinoOTA.setPassword(otaPassword.c_str());
                     ArduinoOTA.begin();
                 }
