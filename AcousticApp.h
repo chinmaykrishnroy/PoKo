@@ -13,6 +13,7 @@ public:
         bool capturing, hasResult, automaticGain;
         uint8_t mode;
         uint32_t frames, lastDataAgeMs;
+        uint32_t capturedAtMs, analysisUs;
         const char* error;
         AcousticDSP::Result signal, displayed;
     };
@@ -51,6 +52,7 @@ private:
     uint32_t _lastData = 0, _lastAnalysis = 0, _lastDraw = 0, _lastEdit = 0;
     bool _hasResult = false;
     uint32_t _frames = 0;
+    uint32_t _rxOverruns = 0, _analysisUs = 0;
     float _range = 0.1f, _meter = -120, _periodMs = 0;
     void adjustParameter(int direction);
     void adjustGain(int direction);

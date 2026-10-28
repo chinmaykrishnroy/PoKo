@@ -9,11 +9,12 @@ float db(float amplitude) { return amplitude > 0.000001f ? 20.0f * log10f(amplit
 float magnitude(float re, float im) { return sqrtf(re * re + im * im); }
 }
 
-AcousticDSP::AcousticDSP() : _write(0), _count(0), _window(0), _bassWrite(0), _bassCount(0),
-    _decimationPhase(0), _rawClipAge(MAX_SAMPLES*4), _bass(false), _sampleRate(RATE), _frequencyMax(20000),
+AcousticDSP::AcousticDSP(bool collectBass) : _write(0), _count(0), _window(0), _bassWrite(0), _bassCount(0),
+    _decimationPhase(0), _rawClipAge(MAX_SAMPLES*4), _bass(false), _collectBass(collectBass), _sampleRate(RATE), _frequencyMax(20000),
     _tonalMaximum(0), _tonalNoise(0), _windowEnergy(1), _spectralMaximum(0) {
     _result={};_result.rmsDb=_result.peakDb=-120;_result.midi=_result.root=-1;_result.chord=NONE;
     for (float& v : _spectrum) v = -120;
+    if(!_collectBass) return;
     // 63-tap Hamming low-pass before 4:1 decimation. Bass mode observes 683 ms
     // at 12 kHz with 8192 points (1.465 Hz bins), rather than zero padding.
     float sum=0;
@@ -23,12 +24,15 @@ AcousticDSP::AcousticDSP() : _write(0), _count(0), _window(0), _bassWrite(0), _b
     }
     for(float& coefficient:_decimator) coefficient/=sum;
 }
+void AcousticDSP::resetInputHistory() {
+    _write=_count=_bassWrite=_bassCount=0;_decimationPhase=0;_rawClipAge=MAX_SAMPLES*4;
+}
 void AcousticDSP::push(const int16_t* data, size_t count) {
     for (size_t i=0;i<count;++i) {
         if(_rawClipAge<MAX_SAMPLES*4) ++_rawClipAge;
         if(data[i]>=32760 || data[i]<=-32760) _rawClipAge=0;
         _samples[_write]=data[i];_write=(_write+1)%MAX_SAMPLES;_count=std::min(MAX_SAMPLES,_count+1);
-        if(++_decimationPhase==4) {
+        if(_collectBass && ++_decimationPhase==4) {
             _decimationPhase=0;
             if(_count>=63) {
                 float value=0;

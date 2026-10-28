@@ -16,11 +16,14 @@ struct MicrophoneInput {
     float frequency=440;
     float amplitude=.5f;
     int gainDb=18;
+    uint32_t overflowCount=0;
+    int overflowOnRead=-1;
+    uint32_t overruns() const { return overflowCount; }
     int reads=0,sample=0;
     bool running() const { return active; }
     bool setGain(int value) { if(failGain) return false;gainDb=value;return true; }
     size_t read(int16_t* out,size_t n) {
-        ++reads;if(noData) return 0;
+        ++reads;if(reads==overflowOnRead) ++overflowCount;if(noData) return 0;
         for(size_t i=0;i<n;++i) {
             double phase=6.28318530718*(sample++)/48000;
             double value=chord?(sin(261.625565*phase)+sin(329.627557*phase)+sin(391.995436*phase))/3:sin(frequency*phase);

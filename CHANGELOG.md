@@ -7,6 +7,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v2.4.3] — 2026-10-28
+
+- Skip Analyzer-only bass filtering in Tuner and double microphone DMA/drain
+  headroom to cover DSP plus short HTTP/Wi-Fi stalls.
+- Count RX overflows in the driver ISR with an atomic counter. Clear analysis
+  history at an input discontinuity instead of estimating pitch across a gap.
+- Expose overflow, capture timestamp and DSP-duration telemetry for real-device
+  validation of continuous capture, alongside the v2.4.2 UI/DSP fixes.
+
 ## [v2.4.2] — 2026-10-28
 
 - Keep Tuner's empty layout stable with `--`; right-align the colored Mode hint

@@ -6,7 +6,15 @@ void exitApp(AppState state) { exited=state; }
 int main(int argc,char** argv) {
     assert(argc==2);Arduino_GFX gfx;
     AcousticApp analyzer(&gfx,exitApp,false),tuner(&gfx,exitApp,true);
-    if(!strcmp(argv[1],"auto-gain-persistence")) {
+    if(!strcmp(argv[1],"overrun-clears-reading")) {
+        tuner.load();for(int i=0;i<3;++i){testMillis+=100;tuner.update();}
+        assert(tuner.status().displayed.frequency>0);
+        microphoneInput.noData=true;++microphoneInput.overflowCount;testMillis+=100;tuner.update();
+        assert(!tuner.status().hasResult && tuner.status().displayed.frequency==0);
+        microphoneInput.noData=false;testMillis+=100;tuner.update();assert(tuner.status().hasResult);
+        microphoneInput.overflowOnRead=microphoneInput.reads+3;testMillis+=100;tuner.update();
+        assert(!tuner.status().hasResult && tuner.status().displayed.frequency==0);
+    } else if(!strcmp(argv[1],"auto-gain-persistence")) {
         microphoneInput.amplitude=.0012f;tuner.begin();tuner.load();
         for(int i=0;i<22;++i) {testMillis+=100;tuner.update();}
         assert(microphoneInput.gainDb>18 && tuner.status().automaticGain);
@@ -45,7 +53,7 @@ int main(int argc,char** argv) {
         analyzer.begin();analyzer.load();assert(analyzer.isCapturing() && gfx.begins==0);
         assert(gfx.text.find("Listening")!=std::string::npos);
         for(int i=0;i<4;++i) { testMillis+=100;analyzer.update(); }
-        assert(analyzer.status().frames==16384 && analyzer.status().capturing && analyzer.status().hasResult);
+        assert(analyzer.status().frames==32768 && analyzer.status().capturing && analyzer.status().hasResult);
         assert(gfx.text.find("Oscilloscope")!=std::string::npos);
         assert(gfx.text.find("Avg T 2.27ms")!=std::string::npos);
         testMillis+=400;analyzer.onHoldingRight();analyzer.renderToCanvas();

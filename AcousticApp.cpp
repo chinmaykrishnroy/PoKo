@@ -37,10 +37,11 @@ void AcousticApp::load() {
     _range=0.1f;_meter=-120;_periodMs=0;_lastData=_lastAnalysis=_lastDraw=millis();
     _canvas=new(std::nothrow) Arduino_Canvas(128,128,_gfx);
     if (_canvas && !_canvas->begin(GFX_SKIP_OUTPUT_BEGIN)) { delete _canvas;_canvas=nullptr; }
-    _dsp=new(std::nothrow) AcousticDSP();
+    _dsp=new(std::nothrow) AcousticDSP(!_tuner);
     if (!_canvas || !_dsp) _error="Not enough memory";
     else if (!audioManager || !audioManager->request(AUDIO_MIC)) _error="Microphone unavailable";
     else if (!microphoneInput.setGain(_gain)) _error="Microphone gain error";
+    _rxOverruns=microphoneInput.overruns();_analysisUs=0;
     if (_error) {
         if(audioManager) audioManager->release(AUDIO_MIC);
         delete _dsp;_dsp=nullptr;
@@ -66,6 +67,7 @@ AcousticApp::Status AcousticApp::status() const {
     state.capturing=isCapturing();state.mode=_mode;state.frames=_frames;
     state.automaticGain=_tuner && _autoGain.automatic(millis());
     state.lastDataAgeMs=millis()-_lastData;state.error=_error;
+    state.capturedAtMs=_lastData;state.analysisUs=_analysisUs;
     state.hasResult=state.capturing && _hasResult && state.lastDataAgeMs<500;
     if(state.hasResult && _dsp) state.signal=_dsp->result();
     else { state.signal.rmsDb=state.signal.peakDb=-120;state.signal.chord=AcousticDSP::NONE;state.signal.midi=-1; }
@@ -76,17 +78,28 @@ void AcousticApp::update() {
     if (!_loaded) return;
     uint32_t now=millis();
     if (isCapturing() && _dsp) {
+        uint32_t overruns=microphoneInput.overruns();
+        if(overruns!=_rxOverruns) {
+            // Never estimate pitch across a discontinuity in captured samples.
+            _rxOverruns=overruns;_dsp->resetInputHistory();_reading.reset();_hasResult=false;
+        }
         int16_t samples[512];
         // Drain bounded DMA backlog before analysis; leave the service loop free.
-        for (int i=0;i<8;++i) {
+        for (int i=0;i<16;++i) {
             size_t n=microphoneInput.read(samples,512);if(!n) break;
             _dsp->push(samples,n);_frames+=n;_lastData=now;
+        }
+        overruns=microphoneInput.overruns();
+        if(overruns!=_rxOverruns) {
+            _rxOverruns=overruns;_dsp->resetInputHistory();_reading.reset();_hasResult=false;
         }
         if (now-_lastAnalysis>=100) {
             uint32_t elapsed=now-_lastAnalysis;_lastAnalysis=now;
             if (now-_lastData<500) {
                 unsigned window=(_tuner||_mode==0)?8192:WINDOWS[std::min<unsigned>(3,_fft)];
+                uint32_t started=micros();
                 _hasResult=_dsp->analyze(window,_tuner&&_mode==0,_tuner&&_mode==1,!_tuner&&_mode==1&&_fft==4);
+                _analysisUs=micros()-started;
                 if (_hasResult) {
                     const auto& r=_dsp->result();
                     if(_tuner) {

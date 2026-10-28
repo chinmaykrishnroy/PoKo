@@ -19,7 +19,14 @@ void tone(AcousticDSP& dsp,const double* frequencies,int count,float amplitude=0
 int main(int argc,char** argv) {
     assert(argc==2);
     auto dsp=std::make_unique<AcousticDSP>();
-    if(!strcmp(argv[1],"scope-trace-math")) {
+    if(!strcmp(argv[1],"tuner-history-without-bass")) {
+        auto tuner=std::make_unique<AcousticDSP>(false);double f=440;
+        for(int i=0;i<5;++i) tone(*tuner,&f,1);
+        assert(!tuner->analyze(8192,false,false,true));
+        assert(tuner->analyze(8192,true,false));assert(fabs(tuner->result().frequency-440)<1);
+        tuner->resetInputHistory();int16_t fragment[512]={};tuner->push(fragment,512);
+        assert(!tuner->analyze(8192,true,false));
+    } else if(!strcmp(argv[1],"scope-trace-math")) {
         std::vector<int16_t> data(16384);
         for(size_t i=0;i<data.size();++i) data[i]=(int16_t)(32767*(.2+.5*sin(2*PI*440*i/48000)));
         dsp->push(data.data(),data.size());float trace[118];dsp->waveformTrace(240,trace,118);

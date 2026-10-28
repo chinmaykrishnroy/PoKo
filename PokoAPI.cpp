@@ -48,7 +48,7 @@ void PokoAPI::begin() {
             json += "\"last_wake_cause\":" + String((int)esp_sleep_get_wakeup_cause()) + ",";
             json += "\"last_ext1_wake_mask\":" + String((unsigned long)esp_sleep_get_ext1_wakeup_status()) + ",";
             json += "\"cpu_mhz\":" + String(getCpuFrequencyMhz()) + ",";
-            json += "\"firmware_version\":\"v2.4.2\",";
+            json += "\"firmware_version\":\"v2.4.3\",";
             json += "\"app_state\":" + String((int)activeApp) + ",";
             json += "\"theme\":\"" + String(isDarkTheme() ? "dark" : "light") + "\",";
             json += "\"master_vol\":" + String(getMasterVolumeLimit()) + ",";
@@ -695,6 +695,9 @@ void PokoAPI::begin() {
             json += ",\"gain_db\":" + String(microphoneInput.gain());
             json += ",\"auto_gain\":" + String(state.automaticGain ? "true" : "false");
             json += ",\"frames\":" + String(state.frames);
+            json += ",\"captured_at_ms\":" + String(state.capturedAtMs);
+            json += ",\"analysis_ms\":" + String(state.analysisUs/1000.0f, 2);
+            json += ",\"rx_overruns\":" + String(microphoneInput.overruns());
             json += ",\"last_data_age_ms\":" + String(state.lastDataAgeMs);
             json += ",\"rms_dbfs\":" + String(state.signal.rmsDb, 2);
             json += ",\"peak_hz\":" + String(state.signal.spectralPeakHz, 2);

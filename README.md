@@ -126,6 +126,10 @@ after reboot.
 Authenticated `GET /api/acoustic` reports capture state, frame count, input age,
 level, peak frequency, period, FFT bin/range, raw versus displayed tuner readings,
 automatic-gain status and speaker-PA state for on-device verification.
+It also reports RX overruns, capture timestamps and DSP duration. Capture gaps
+invalidate the analysis history; pitch is never estimated across known lost
+samples. Tuner skips the Analyzer-only bass decimator, and RX buffers cover about
+171 ms of short service-loop stalls.
 It exposes no raw microphone recording and requires the device admin login.
 
 Hardware references: [Waveshare board documentation](https://docs.waveshare.com/ESP32-S3-LCD-0.85),

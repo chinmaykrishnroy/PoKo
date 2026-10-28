@@ -4,13 +4,16 @@ int main(int argc,char** argv) {
         poko_tx_handle=(void*)2;assert(!microphoneInput.start());
         assert(!allocations && !hardwareStops);
     } else if(!strcmp(argv[1],"failure-cleanup")) {
-        for(failAt=1;failAt<=4;++failAt) {
+        for(failAt=1;failAt<=5;++failAt) {
             Wire.fail=failAt==4;assert(!microphoneInput.start());
             assert(!microphoneInput.running() && !enabled);
             assert(allocations==deletions);
         }
     } else if(!strcmp(argv[1],"capture-and-stop")) {
         assert(microphoneInput.start() && !amp);
+        assert(rxCallbacks.on_recv_q_ovf);
+        assert(!rxCallbacks.on_recv_q_ovf(nullptr,nullptr,rxContext));
+        assert(microphoneInput.overruns()==1);
         assert(capturedConfig.clk_cfg.sample_rate_hz==48000);
         assert(capturedConfig.clk_cfg.mclk_multiple==256);
         assert(capturedConfig.slot_cfg.bits==16 && capturedConfig.slot_cfg.mode==2);
@@ -22,6 +25,8 @@ int main(int argc,char** argv) {
         microphoneInput.stop();microphoneInput.stop();
         assert(allocations==deletions && !enabled && !amp);
         assert(Wire.registers[0x4b]==0xff && Wire.registers[0x06]==0x07);
+        assert(microphoneInput.start() && microphoneInput.overruns()==0);
+        microphoneInput.stop();assert(allocations==deletions);
     } else if(!strcmp(argv[1],"gain")) {
         assert(microphoneInput.setGain(100) && microphoneInput.gain()==30);
         assert(microphoneInput.start());

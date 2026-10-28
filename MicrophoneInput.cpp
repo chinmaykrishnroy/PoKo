@@ -5,9 +5,14 @@
 #include <algorithm>
 
 MicrophoneInput microphoneInput;
-MicrophoneInput::MicrophoneInput() : _rx(nullptr),_gain(18) {}
+MicrophoneInput::MicrophoneInput() : _rx(nullptr),_gain(18),_overruns(0) {}
 bool MicrophoneInput::running() const { return _rx!=nullptr; }
 int MicrophoneInput::gain() const { return _gain; }
+uint32_t MicrophoneInput::overruns() const { return _overruns.load(std::memory_order_relaxed); }
+bool IRAM_ATTR MicrophoneInput::onOverflow(i2s_chan_handle_t, i2s_event_data_t*, void* context) {
+    static_cast<MicrophoneInput*>(context)->_overruns.fetch_add(1,std::memory_order_relaxed);
+    return false;
+}
 bool MicrophoneInput::writeReg(uint8_t reg,uint8_t value) {
     Wire.beginTransmission(0x40);Wire.write(reg);Wire.write(value);
     return Wire.endTransmission()==0;
@@ -42,7 +47,8 @@ bool MicrophoneInput::start() {
     Wire.begin(POKO_PIN_I2C_SDA,POKO_PIN_I2C_SCL);
     Wire.setTimeOut(50);
     i2s_chan_config_t channel=I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0,I2S_ROLE_MASTER);
-    channel.dma_desc_num=8;channel.dma_frame_num=512;
+    // 171 ms of RX headroom covers a DSP pass plus a short HTTP/Wi-Fi stall.
+    channel.dma_desc_num=16;channel.dma_frame_num=512;
     if(i2s_new_channel(&channel,nullptr,&_rx)!=ESP_OK) { _rx=nullptr;return false; }
     i2s_std_config_t config={};
     config.clk_cfg=I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE);
@@ -53,7 +59,10 @@ bool MicrophoneInput::start() {
     config.gpio_cfg.ws=(gpio_num_t)POKO_PIN_I2S_LRC;
     config.gpio_cfg.dout=(gpio_num_t)I2S_GPIO_UNUSED;
     config.gpio_cfg.din=(gpio_num_t)POKO_PIN_I2S_DIN;
+    _overruns.store(0,std::memory_order_relaxed);
+    i2s_event_callbacks_t callbacks={};callbacks.on_recv_q_ovf=onOverflow;
     if(i2s_channel_init_std_mode(_rx,&config)!=ESP_OK ||
+       i2s_channel_register_event_callback(_rx,&callbacks,this)!=ESP_OK ||
        i2s_channel_enable(_rx)!=ESP_OK || !configure()) {
         stop();Serial.println("[mic] ES7210/I2S initialization failed");return false;
     }

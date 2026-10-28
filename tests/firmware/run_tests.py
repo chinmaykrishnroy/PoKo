@@ -23,10 +23,10 @@ def main() -> int:
         subprocess.run([sys.executable, str(HERE / script)], cwd=ROOT, check=True)
     cases = {
         "capture-power": ["capture-pa-off-and-lock", "capture-stop-and-playback"],
-        "acoustic-app": ["auto-gain-persistence", "render-preview", "right-footer-and-fft-headroom", "quiet-placeholder", "scope-connected-trace", "modes-and-holds", "tuner-and-stale-input", "failure-and-retry", "external-stop-and-reload"],
+        "acoustic-app": ["overrun-clears-reading", "auto-gain-persistence", "render-preview", "right-footer-and-fft-headroom", "quiet-placeholder", "scope-connected-trace", "modes-and-holds", "tuner-and-stale-input", "failure-and-retry", "external-stop-and-reload"],
         "microphone": ["no-clock-steal", "failure-cleanup", "capture-and-stop", "gain"],
         "launcher-window": ["scroll-and-wrap"],
-        "acoustic-dsp": ["scope-trace-math", "fft-headroom", "reading-hysteresis", "auto-gain", "semantic-colors", "bass-resolution", "harmonic-note-rejection", "pitch", "spectrum-levels", "chords", "silence-noise", "scope-period", "adaptive-scale", "weak-chord", "uneven-chord", "pitch-with-transient", "scale-headroom"],
+        "acoustic-dsp": ["tuner-history-without-bass", "scope-trace-math", "fft-headroom", "reading-hysteresis", "auto-gain", "semantic-colors", "bass-resolution", "harmonic-note-rejection", "pitch", "spectrum-levels", "chords", "silence-noise", "scope-period", "adaptive-scale", "weak-chord", "uneven-chord", "pitch-with-transient", "scale-headroom"],
         "power-wake": ["held-power", "held-combo", "released", "rtc-restore-before-boot"],
         "boot-splash": ["white-first", "fusion-randomized", "allocation-fallback", "nonblocking-finish", "visible-duration", "slow-startup", "clock-wrap"],
         "library-status": ["empty", "offline", "error", "missing", "loading", "populated", "invalidated-cache"],
