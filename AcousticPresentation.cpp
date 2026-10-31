@@ -7,11 +7,12 @@ void AcousticTunerReading::reset() {
     _display={};_display.midi=_display.root=-1;_display.chord=AcousticDSP::NONE;
     _historyCount=_historyWrite=_candidateCount=0;_candidateRoot=-1;_candidateChord=AcousticDSP::NONE;
     _lastNote=_lastChord=_lastCandidate=0;_candidateConfidence=0;
+    _candidateOnset=false;
 }
 const AcousticDSP::Result& AcousticTunerReading::result() const { return _display; }
 void AcousticTunerReading::update(const AcousticDSP::Result& signal,uint32_t now,bool fresh) {
     if(!fresh) { reset();return; }
-    _display.rmsDb=signal.rmsDb;_display.clipped=signal.clipped;
+    _display.rmsDb=signal.rmsDb;_display.atFullScale=signal.atFullScale;_display.referenceHz=signal.referenceHz;
     if(signal.frequency>0 && signal.confidence>=0.85f) {
         if(_display.frequency<=0 || fabsf(1200*log2f(signal.frequency/_display.frequency))>60) _historyCount=_historyWrite=0;
         _history[_historyWrite]=signal.frequency;_historyWrite=(_historyWrite+1)%3;
@@ -19,28 +20,34 @@ void AcousticTunerReading::update(const AcousticDSP::Result& signal,uint32_t now
         float sorted[3];for(unsigned i=0;i<_historyCount;++i) sorted[i]=_history[i];
         std::sort(sorted,sorted+_historyCount);float value=sorted[_historyCount/2];
         _display.frequency=_historyCount==1?value:_display.frequency+0.35f*(value-_display.frequency);
-        float note=69+12*log2f(_display.frequency/440);
+        float note=69+12*log2f(_display.frequency/signal.referenceHz);
         _display.midi=(int)lroundf(note);_display.cents=100*(note-_display.midi);
         _display.confidence=signal.confidence;_lastNote=now;
     } else if(now-_lastNote>=250) { _display.frequency=_display.cents=_display.confidence=0;_display.midi=-1;_historyCount=0; }
     if(signal.chord!=AcousticDSP::NONE && signal.root>=0 && signal.chordConfidence>=0.45f) {
         if(signal.root==_display.root && signal.chord==_display.chord) {
             _lastChord=now;_display.chordConfidence+=0.35f*(signal.chordConfidence-_display.chordConfidence);
+            _display.bassMidi=signal.bassMidi;
         }
         if(_candidateRoot!=signal.root || _candidateChord!=signal.chord || now-_lastCandidate>350) {
             _candidateRoot=signal.root;_candidateChord=signal.chord;_candidateCount=0;_candidateConfidence=0;
+            _candidateOnset=false;
         }
-        _lastCandidate=now;_candidateCount=std::min(3u,_candidateCount+1);
+        if(signal.onset || signal.onsetAgeMs<250) _candidateOnset=true;
+        _lastCandidate=now;_candidateCount=std::min(4u,_candidateCount+1);
         // Changing quality on the same root needs one extra confirmation:
         // decaying guitar partials must not briefly invent/remove a seventh.
         unsigned required=_display.chord!=AcousticDSP::NONE && signal.root==_display.root && signal.chord!=_display.chord?3:2;
+        if(_display.chord!=AcousticDSP::NONE && signal.root!=_display.root && !_candidateOnset) required=4;
         _candidateConfidence=std::min(3.0f,_candidateConfidence+signal.chordConfidence);
-        if(_candidateCount>=required && _candidateConfidence>=(required==3?2.0f:1.2f)) {
+        float evidence=required==4?2.6f:required==3?2.0f:1.2f;
+        if(_candidateCount>=required && _candidateConfidence>=evidence) {
             _display.root=signal.root;_display.chord=signal.chord;
+            _display.bassMidi=signal.bassMidi;
             _display.chordConfidence=signal.chordConfidence;_lastChord=now;
         }
     }
-    if(now-_lastChord>=450) { _display.chord=AcousticDSP::NONE;_display.root=-1;_display.chordConfidence=0; }
+    if(now-_lastChord>=450) { _display.chord=AcousticDSP::NONE;_display.root=-1;_display.bassMidi=-1;_display.chordConfidence=0; }
 }
 AcousticSpectrumRange::AcousticSpectrumRange():_top(0),_quietSince(0),_initialized(false),_quiet(false) {}
 float AcousticSpectrumRange::update(float peakDb,uint32_t now) {
@@ -63,7 +70,7 @@ int AcousticAutoGain::update(const AcousticDSP::Result& signal,int gain,uint32_t
         (signal.chord!=AcousticDSP::NONE && signal.chordConfidence>=0.45f);
     if(!recognized) _noiseDb+=0.05f*(signal.rmsDb-_noiseDb);
     if(!automatic(now)) return gain;
-    if((signal.clipped || signal.peakDb>-2) && now-_lastChange>=250 && gain>0) {
+    if((signal.atFullScale || signal.peakDb>-2) && now-_lastChange>=250 && gain>0) {
         _lastChange=now;_noiseDb-=3;return std::max(0,gain-3);
     }
     if(signal.rmsDb>-15 && now-_lastChange>=500 && gain>0) {

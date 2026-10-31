@@ -2,6 +2,7 @@
 #include "DeviceSecurity.h"
 #include "SyncedAVPlayer.h"
 #include "AcousticApp.h"
+#include <stdlib.h>
 #include "MicrophoneInput.h"
 #include <esp_sleep.h>
 #include <esp_system.h>
@@ -48,7 +49,7 @@ void PokoAPI::begin() {
             json += "\"last_wake_cause\":" + String((int)esp_sleep_get_wakeup_cause()) + ",";
             json += "\"last_ext1_wake_mask\":" + String((unsigned long)esp_sleep_get_ext1_wakeup_status()) + ",";
             json += "\"cpu_mhz\":" + String(getCpuFrequencyMhz()) + ",";
-            json += "\"firmware_version\":\"v2.5.0\",";
+            json += "\"firmware_version\":\"v2.6.0\",";
             json += "\"app_state\":" + String((int)activeApp) + ",";
             json += "\"theme\":\"" + String(isDarkTheme() ? "dark" : "light") + "\",";
             json += "\"master_vol\":" + String(getMasterVolumeLimit()) + ",";
@@ -682,12 +683,41 @@ void PokoAPI::begin() {
             _server->send(200, "application/json", "{\"ok\":true,\"app\":" + String((int)activeApp) + "}");
         });
 
+        _server->on("/api/acoustic/settings", HTTP_ANY, [this]() {
+            if(!tunerAppInstance) { _server->send(503,"application/json","{\"error\":\"Tuner unavailable\"}");return; }
+            if(_server->method()==HTTP_POST) {
+                float reference=tunerAppInstance->referenceHz();auto profile=tunerAppInstance->profile();bool valid=true;
+                if(_server->hasArg("reference_hz")) {
+                    String value=_server->arg("reference_hz");
+                    if(!value.length()) valid=false;
+                    else {
+                        char* end=nullptr;const char* text=value.c_str();reference=strtof(text,&end);
+                        if(end==text || !end || *end) valid=false;
+                    }
+                }
+                if(_server->hasArg("profile")) {
+                    String value=_server->arg("profile");
+                    if(value=="guitar") profile=NoteEstimator::GUITAR;
+                    else if(value=="keyboard") profile=NoteEstimator::KEYBOARD;
+                    else valid=false;
+                }
+                if(!valid || !tunerAppInstance->setTuning(reference,profile)) {
+                    _server->send(400,"application/json","{\"error\":\"Use A4 400–480 Hz and guitar or keyboard profile\"}");return;
+                }
+            } else if(_server->method()!=HTTP_GET) {
+                _server->send(405,"application/json","{\"error\":\"Use GET or POST\"}");return;
+            }
+            String json="{\"ok\":true,\"reference_hz\":"+String(tunerAppInstance->referenceHz(),1);
+            json+=",\"profile\":\""+String(tunerAppInstance->profile()==NoteEstimator::KEYBOARD?"keyboard":"guitar")+"\"}";
+            _server->send(200,"application/json",json);
+        });
+
         // Admin-only live diagnostics. No raw microphone audio is exposed.
         _server->on("/api/acoustic", HTTP_GET, [this]() {
             AcousticApp* app = activeApp == STATE_ANALYZER ? analyzerAppInstance :
                                (activeApp == STATE_TUNER ? tunerAppInstance : nullptr);
             AcousticApp::Status state = {};
-            state.signal.rmsDb = -120;
+            state.signal.rmsDb = state.signal.peakDb = -120;
             if (app) state = app->status();
             String json = "{\"app_state\":" + String((int)activeApp);
             json += ",\"capturing\":" + String(app && state.capturing ? "true" : "false");
@@ -701,9 +731,13 @@ void PokoAPI::begin() {
             json += ",\"frames\":" + String(state.frames);
             json += ",\"captured_at_ms\":" + String(state.capturedAtMs);
             json += ",\"analysis_ms\":" + String(state.analysisUs/1000.0f, 2);
+            json += ",\"analysis_max_ms\":" + String(state.analysisMaxUs/1000.0f, 2);
             json += ",\"rx_overruns\":" + String(microphoneInput.overruns());
             json += ",\"last_data_age_ms\":" + String(state.lastDataAgeMs);
             json += ",\"rms_dbfs\":" + String(state.signal.rmsDb, 2);
+            json += ",\"peak_dbfs\":" + String(state.signal.peakDb, 2);
+            json += ",\"sample_at_full_scale\":" + String(state.signal.atFullScale ? "true" : "false");
+            json += ",\"near_full_scale\":" + String(state.signal.atFullScale ? "true" : "false");
             json += ",\"peak_hz\":" + String(state.signal.spectralPeakHz, 2);
             json += ",\"frequency_hz\":" + String(state.signal.frequency, 2);
             json += ",\"period_ms\":" + String(state.signal.periodMs, 3);
@@ -712,9 +746,38 @@ void PokoAPI::begin() {
             json += ",\"tonality\":" + String(state.signal.tonality, 2);
             json += ",\"display_frequency_hz\":" + String(state.displayed.frequency, 2);
             json += ",\"display_cents\":" + String(state.displayed.cents, 2);
-            String displayedChord = app && state.hasResult && state.displayed.chord != AcousticDSP::NONE ?
-                String(AcousticDSP::noteName(state.displayed.root)) + AcousticDSP::chordSuffix(state.displayed.chord) : "";
+            char chordLabel[40]={};
+            if(app && state.hasResult) AcousticDSP::formatChord(chordLabel,sizeof(chordLabel),state.displayed.root,state.displayed.chord,state.displayed.bassMidi);
+            String displayedChord=chordLabel;
             json += ",\"display_chord\":\"" + displayedChord + "\"";
+            json += ",\"chord_tuning_cents\":" + String(state.signal.chordTuningCents, 2);
+            json += ",\"chord_match_score\":" + String(state.signal.chordConfidence, 3);
+            json += ",\"chord_decision\":\"" + String(AcousticDSP::chordDecisionName(state.signal.chordDecision)) + "\"";
+            auto candidateName=[](const AcousticDSP::ChordCandidate& candidate) {
+                return candidate.root>=0 && candidate.chord!=AcousticDSP::NONE ?
+                    String(AcousticDSP::noteName(candidate.root))+AcousticDSP::chordSuffix(candidate.chord) : String("");
+            };
+            json += ",\"chord_best\":\"" + candidateName(state.signal.bestChord) + "\"";
+            json += ",\"chord_best_score\":" + String(state.signal.bestChord.score, 3);
+            json += ",\"chord_runner_up\":\"" + candidateName(state.signal.runnerUpChord) + "\"";
+            json += ",\"chord_runner_up_score\":" + String(state.signal.runnerUpChord.score, 3);
+            json += ",\"chord_margin\":" + String(state.signal.chordMargin, 3);
+            json += ",\"reference_hz\":" + String(tunerAppInstance?tunerAppInstance->referenceHz():440,1);
+            json += ",\"profile\":\"" + String(tunerAppInstance && tunerAppInstance->profile()==NoteEstimator::KEYBOARD?"keyboard":"guitar") + "\"";
+            json += ",\"bass_midi\":" + String(state.signal.bassMidi);
+            json += ",\"bass_ready\":" + String(state.signal.bassReady?"true":"false");
+            json += ",\"bass_bin_hz\":" + String(state.signal.bassBinHz,3);
+            json += ",\"bass_window_ms\":" + String(state.signal.bassWindowMs,1);
+            json += ",\"onset\":" + String(state.signal.onset?"true":"false");
+            json += ",\"notes\":[";
+            for(unsigned i=0;i<state.signal.noteCount;++i) {
+                const auto& note=state.signal.notes[i];if(i) json+=",";
+                json+="{\"midi\":"+String(note.midi)+",\"frequency_hz\":"+String(note.frequency,2);
+                json+=",\"strength\":"+String(note.strength,3)+",\"observed\":"+String(note.observed?"true":"false");
+                json+=",\"evidence_score\":"+String(note.confidence,2);
+                json+=",\"current\":"+String(note.current?"true":"false")+"}";
+            }
+            json += "]";
             json += ",\"chord\":\"" + String(app && state.hasResult ? AcousticDSP::chordSuffix(state.signal.chord) : "") + "\"";
             json += ",\"speaker_amp\":" + String(isSpeakerAmpEnabled() ? "true" : "false");
             json += ",\"error\":\"" + escapeJson(state.error ? state.error : "") + "\"}";

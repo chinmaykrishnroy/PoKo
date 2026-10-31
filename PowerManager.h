@@ -35,7 +35,8 @@ enum PowerLock : uint32_t {
     POWER_LOCK_PREVENT_LIGHT_SLEEP  = 1 << 3, // Prevent automatic light sleep
     POWER_LOCK_PREVENT_DEEP_SLEEP   = 1 << 4, // Prevent auto power-off or deep sleep
     POWER_LOCK_LEDS                 = 1 << 5, // Keep LEDs enabled during display sleep
-    POWER_LOCK_OTA                  = 1 << 6  // OTA flashing in progress
+    POWER_LOCK_OTA                  = 1 << 6, // OTA flashing in progress
+    POWER_LOCK_DSP                  = 1 << 7  // CPU performance for active signal analysis; no Wi-Fi requirement
 };
 
 enum PowerLockOwner : uint8_t {
@@ -44,7 +45,8 @@ enum PowerLockOwner : uint8_t {
     LOCK_OWNER_VIDEO   = 2,
     LOCK_OWNER_GALLERY = 3,
     LOCK_OWNER_OTA     = 4,
-    LOCK_OWNER_COUNT   = 5
+    LOCK_OWNER_ANALYSIS= 5,
+    LOCK_OWNER_COUNT   = 6
 };
 
 enum DisplayPowerState : uint8_t {

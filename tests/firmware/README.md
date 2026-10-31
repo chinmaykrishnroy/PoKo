@@ -60,8 +60,8 @@ appearance, I2S timing, or hardware wake. Those require the device checks above.
 ## Microphone apps
 
 The host suite additionally exercises production DSP with A440/tuning offsets,
-notes from 41–1760 Hz, spectrum/octave/RMS calibration, all 12 roots for eight
-chord templates, silence/noise rejection and auto-range hysteresis. App tests use
+notes from 41–1760 Hz, spectrum/octave/RMS calibration, all 12 roots for 16
+chord templates under both instrument profiles, silence/noise rejection and auto-range hysteresis. App tests use
 the production screens and DSP with bus/display doubles, covering mode/hold
 controls, stale-input clearing, failure/retry and buffer cleanup. Driver tests
 replace only I²C/I²S/GPIO, checking clock ownership, 48 kHz stereo configuration,
@@ -76,8 +76,13 @@ After the user compiles and installs firmware, verify on the physical board:
 - Play an external A440 reference: Tuner should show A4 near 440 Hz and 0 cents.
   Check a quiet room, several lower/upper notes and clean major/minor/suspended/
   seventh/augmented chords. Stop the reference: readings must clear.
-- Open each tool during SSync: playback suspends, PA stays off; `2L` resumes SSync.
-  Repeat after Music/Video playback and after Wi-Fi reconnect/driver reset.
+- Open each tool during active SSync or Music: it must observe internal PCM
+  without interrupting playback or changing volume. Idle input uses the microphone
+  with PA off. Repeat after pause/resume and Wi-Fi reconnect/driver reset.
+- Change saved A4/profile in Settings and Web UI; verify note calibration, chord
+  notes/slash labels, and persistence after playback stops and the board reboots.
+- In chord mode, monitor `analysis_ms`, `analysis_max_ms` and RX/observer overruns.
+  Check the DSP CPU lease releases on silence, stale input, mode change and exit.
 - Leave capture running beyond power deadlines; it must keep capturing while the
   display may sleep. Low-battery policy must still override as configured.
 - Close/reopen repeatedly and inspect heap, audio handoff and absence of I²S errors.
@@ -87,7 +92,22 @@ Synthetic chord matches do not certify instrument/microphone recognition quality
 The acoustic groups reproduce the reported 435 Hz drift with a 440 Hz tone plus
 interference/transient while the FFT stays near 440 Hz. They also cover weak and
 uneven chords, rich-single-note rejection, silence/noise, auto gain with manual
-override and clipping recovery, bounded display holds, right-aligned Mode,
+override and full-scale headroom recovery, bounded display holds, right-aligned Mode,
 connected scope rendering, 80% spectrum headroom and genuine decimated bass
 resolution/anti-alias rejection. `render-preview` writes production draw commands
 under `build/host-tests/` for inspection without resetting or flashing hardware.
+
+The [notes-first analysis document](../../docs/tuner-analysis.md) describes the
+multi-resolution fundamental estimator, independent bass, tuning, ambiguity,
+profiles and validation limits. The host suite also checks raw sample peaks with
+large DC offsets: 0 dBFS means full scale, not proof of clipping. Both inputs show
+`FULL`, and the logarithmic view is titled `FFT Spectrum`.
+
+For an existing, known single-chord capture (no new recording is opened):
+
+```powershell
+python tests/firmware/replay_chords.py sample.pcm --sample-rate 48000 --expected Cmaj
+```
+
+The input must be 16-bit LE mono PCM with its actual sample rate. Abstentions and
+wrong labels are counted separately. Private captures are not committed.

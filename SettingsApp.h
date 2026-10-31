@@ -37,13 +37,14 @@ private:
     uint32_t _lastHoldMs = 0;
     int8_t   _holdDirection = 0;
     int8_t   _pendingItem = -1;
+    float _pendingTunerReference=440;
     bool _securityPage = false;
     bool _resetConfirm = false;
     bool _securityReset = false;
     uint8_t _passwordPage = 0;
     String _recoveryPassword;
 
-    static constexpr uint8_t ITEM_COUNT   = 24;
+    static constexpr uint8_t ITEM_COUNT   = 26;
     static constexpr uint8_t ROW_H        = 16;
     static constexpr uint8_t TOP_Y        = 14;
     static constexpr uint8_t ROWS_VISIBLE = 6;
@@ -73,7 +74,9 @@ private:
         "Reset Drivers",
         "Power Off",
         "Reboot",
-        "Security"
+        "Security",
+        "Tuner A4",
+        "Tuner Type"
     };
 
     void adjustScroll();

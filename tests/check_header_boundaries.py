@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATED = (
     "AcousticApp",
     "AcousticDSP",
+    "NoteEstimator",
     "AcousticPresentation",
     "MicrophoneInput",
     "PlaybackAudioTap",

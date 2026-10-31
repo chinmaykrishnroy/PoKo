@@ -3,6 +3,8 @@
 #include <WiFi.h>
 #include "DeviceSecurity.h"
 #include <esp_system.h>
+#include "AcousticApp.h"
+extern AcousticApp* tunerAppInstance;
 
 void SettingsApp::adjustScroll() {
         if (_selected < _scroll) {
@@ -23,11 +25,17 @@ void SettingsApp::flushHeldValue() {
             case 10: if (powerManager) prefs.putUInt("wifi_hib", powerManager->getWifiHibernateTimeout()); break;
             case 11: if (powerManager) prefs.putUInt("light_sleep", powerManager->getLightSleepTimeout()); break;
             case 12: if (powerManager) prefs.putUInt("deep_sleep", powerManager->getDeepSleepTimeout()); break;
+            case 24: if(tunerAppInstance) tunerAppInstance->setTuning(_pendingTunerReference,tunerAppInstance->profile()); break;
         }
         _pendingItem = -1;
     }
 
 void SettingsApp::adjustHeldValue(int direction) {
+        if(_selected==24 && tunerAppInstance) {
+            if(_pendingItem!=24) _pendingTunerReference=tunerAppInstance->referenceHz();
+            _pendingTunerReference=constrain(_pendingTunerReference+direction*.1f,400.0f,480.0f);
+            _pendingItem=24;_lastHoldMs=millis();_dirty=true;return;
+        }
         if (!powerManager || (_selected != 1 && _selected != 2 && _selected != 4 &&
                               _selected != 5 && _selected != 6 && _selected != 7 &&
                               _selected != 10 && _selected != 11 && _selected != 12)) return;
@@ -240,6 +248,8 @@ void SettingsApp::renderToCanvas() {
                 case 21: snprintf(valBuf, sizeof(valBuf), "Shut"); valCol = POKO_CLR_ERR; break;
                 case 22: snprintf(valBuf, sizeof(valBuf), "Restart"); valCol = POKO_CLR_ERR; break;
                 case 23: snprintf(valBuf, sizeof(valBuf), "Open"); break;
+                case 24: snprintf(valBuf, sizeof(valBuf), "%.1f",_pendingItem==24?_pendingTunerReference:(tunerAppInstance?tunerAppInstance->referenceHz():440)); break;
+                case 25: snprintf(valBuf, sizeof(valBuf), "%s",tunerAppInstance && tunerAppInstance->profile()==NoteEstimator::KEYBOARD?"Keyboard":"Guitar"); break;
             }
 
             _canvas->setTextColor(valCol, isSel ? theme.surface : theme.bg);
@@ -263,7 +273,7 @@ void SettingsApp::renderToCanvas() {
         _canvas->setTextColor(theme.footerText, theme.headerBg);
         const char* hint = (_selected == 1 || _selected == 2 || _selected == 4 ||
                             _selected == 5 || _selected == 6 || _selected == 7 ||
-                            _selected == 10 || _selected == 11 || _selected == 12)
+                            _selected == 10 || _selected == 11 || _selected == 12 || _selected == 24)
                                ? "Hold L:- R:+  2R:Set" : "L:Prv  R:Nxt  2R:Set";
         _canvas->getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
         _canvas->setCursor(64 - w / 2, 124);
@@ -274,6 +284,8 @@ void SettingsApp::renderToCanvas() {
 
 void SettingsApp::applyAction() {
         switch (_selected) {
+            case 24: if(tunerAppInstance) tunerAppInstance->setTuning(tunerAppInstance->referenceHz()>=480?400:min(480.0f,tunerAppInstance->referenceHz()+1.0f),tunerAppInstance->profile()); break;
+            case 25: if(tunerAppInstance) tunerAppInstance->setTuning(tunerAppInstance->referenceHz(),tunerAppInstance->profile()==NoteEstimator::GUITAR?NoteEstimator::KEYBOARD:NoteEstimator::GUITAR); break;
             case 23: _securityPage = true; _resetConfirm = false; _securityReset = false; _passwordPage = 0; _recoveryPassword = ""; break;
             case 0: { // Toggle Theme (Dark <-> Light)
                 bool nextDark = !isDarkTheme();

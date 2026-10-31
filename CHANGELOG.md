@@ -7,6 +7,34 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v2.6.0] — 2026-11-01
+
+- Replace greedy peak grouping with an allocation-free notes-first estimator:
+  compare fundamental hypotheses, iteratively explain shared spectral evidence,
+  recover supported missing fundamentals and reject uncorroborated harmonics.
+- Combine the fast FFT with a genuinely longer, decimated bass FFT in chord mode;
+  keep the faster note mode free of bass filtering. Use actual input sample clocks.
+- Accumulate independent-note evidence with onset-sensitive smoothing and clear
+  stale evidence on silence, source/rate changes and known capture gaps.
+- Add independent bass and slash labels, and expand from eight to 16 chord
+  qualities with dim, dim7, m7b5, 6, m6, add9, madd9 and power chords.
+- Add Guitar/Keyboard profiles and saved 400–480 Hz A4 calibration in Settings,
+  the device Web UI and authenticated `/api/acoustic/settings`. Chord-only common
+  detuning compensation preserves the calibrated note meter.
+- Rank required notes and unexplained energy, retain best/runner-up candidates
+  and ambiguity margins, and show uncertain holds in amber. Expose estimated
+  notes, bass, tuning and worst analysis duration for on-device verification.
+- Request 240 MHz only while active chord analysis needs it, using a CPU-only
+  lease that is released on quiet/mode change/exit without forcing Wi-Fi awake.
+- Rename the logarithmic view to **FFT Spectrum**. Show amber **FULL** for an
+  integer rail on both inputs: 0 dBFS alone does not prove clipping. Measure sample
+  peak before DC removal so an asymmetric waveform cannot manufacture >0 dBFS.
+  Keep playback gain, volume and ownership unchanged.
+- Add deterministic note, bass, vocabulary, profile, calibration, transition,
+  silence, memory-budget, playback-preservation and browser-setting regressions,
+  plus opt-in local recorded PCM replay. Firmware/hardware verification remains
+  separate from host regression results.
+
 ## [v2.5.0] — 2026-10-31
 
 - Let Analyzer and Tuner observe Music and active SSync PCM without stopping,

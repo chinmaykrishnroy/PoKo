@@ -15,6 +15,7 @@ private:
     float _candidateConfidence;
     int _candidateRoot;
     AcousticDSP::Chord _candidateChord;
+    bool _candidateOnset;
     uint32_t _lastNote,_lastChord,_lastCandidate;
 };
 

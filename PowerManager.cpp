@@ -451,14 +451,14 @@ void PowerManager::update() {
         // 1b. CPU Frequency Scaling — 240 MHz for explicit performance,
         // 160 MHz while interactive, configurable 80/160 MHz while screen-off idle.
         {
-            bool wantMax = isMaxPerfActive() || hasLock(POWER_LOCK_OTA) || hasLock(POWER_LOCK_REALTIME_NET);
+            bool wantMax = isMaxPerfActive() || hasLock(POWER_LOCK_OTA | POWER_LOCK_REALTIME_NET | POWER_LOCK_DSP);
             bool interactive = _displayState != DISPLAY_POWER_OFF || protectedMedia ||
                                hasLock(POWER_LOCK_DISPLAY | POWER_LOCK_AUDIO);
             uint32_t targetMhz = wantMax ? 240 : (interactive ? 160 : _idleCpuMhz);
             if (getCpuFrequencyMhz() != targetMhz) {
                 setCpuFrequencyMhz(targetMhz);
                 Serial.printf("[power] CPU -> %u MHz (%s)\n", targetMhz,
-                              wantMax ? "MaxPerf/Realtime" : (interactive ? "Interactive" : "Idle"));
+                              wantMax ? "MaxPerf/Realtime/DSP" : (interactive ? "Interactive" : "Idle"));
             }
         }
 

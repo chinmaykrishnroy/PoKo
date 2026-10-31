@@ -3,11 +3,14 @@
 #include "MicrophoneInput.h"
 #include "PlaybackAudioTap.h"
 #include "PokoTheme.h"
+#include "PowerManager.h"
+extern PowerManager* powerManager;
 #include <U8g2lib.h>
 #include <Preferences.h>
 #include <algorithm>
 #include <math.h>
 #include <new>
+#include <string.h>
 
 namespace {
 const unsigned WINDOWS[] = {1024,2048,4096,8192};
@@ -29,6 +32,9 @@ void AcousticApp::begin() {
     int32_t savedGain=p.getInt("gain",18);
     _gain=(int)std::max<int32_t>(0,std::min<int32_t>(30,savedGain))/3*3;
     _preferredGain=_gain;
+    long savedReference=p.getInt("a4x10",4400);
+    _referenceHz=savedReference>=4000 && savedReference<=4800?savedReference/10.0f:440;
+    _profile=p.getUChar("profile",0)==1?NoteEstimator::KEYBOARD:NoteEstimator::GUITAR;
     p.end();
 }
 void AcousticApp::load() {
@@ -40,25 +46,43 @@ void AcousticApp::load() {
     if (_canvas && !_canvas->begin(GFX_SKIP_OUTPUT_BEGIN)) { delete _canvas;_canvas=nullptr; }
     _dsp=new(std::nothrow) AcousticDSP(!_tuner);
     if (!_canvas || !_dsp) _error="Not enough memory";
-    else selectInput();
-    _rxOverruns=microphoneInput.overruns();_analysisUs=0;
+    else {
+        _dsp->configureTuning(_referenceHz,_profile);
+        _dsp->enableChordAnalysis(_tuner && _mode==1);
+        selectInput();
+    }
+    _rxOverruns=microphoneInput.overruns();_analysisUs=_analysisMaxUs=0;
     if (_error) {
         if(audioManager && !_playback) audioManager->release(AUDIO_MIC);
         playbackAudioTap.enable(false);
         delete _dsp;_dsp=nullptr;
     }
+    updatePerformanceLock();
     renderToCanvas();
 }
 void AcousticApp::flushPreferences() {
     if(_loaded || !_prefsDirty || (audioManager && audioManager->isSoundPlaying())) return;
     Preferences p;p.begin(_tuner ? "tuner" : "analyzer",false);
     p.putUChar("mode",_mode);p.putUChar("time",_time);p.putUChar("fft",_fft);
-    p.putUChar("octave",_octave);p.putUChar("response",_response);p.putInt("gain",_preferredGain);p.end();
+    p.putUChar("octave",_octave);p.putUChar("response",_response);p.putInt("gain",_preferredGain);
+    p.putInt("a4x10",(int)lroundf(_referenceHz*10));p.putUChar("profile",(uint8_t)_profile);p.end();
     _prefsDirty=false;
+}
+float AcousticApp::referenceHz() const { return _referenceHz; }
+NoteEstimator::Profile AcousticApp::profile() const { return _profile; }
+bool AcousticApp::setTuning(float referenceHz,NoteEstimator::Profile profile) {
+    if(!_tuner || !isfinite(referenceHz) || referenceHz<400 || referenceHz>480 ||
+       (profile!=NoteEstimator::GUITAR && profile!=NoteEstimator::KEYBOARD)) return false;
+    referenceHz=roundf(referenceHz*10)/10;
+    if(referenceHz==_referenceHz && profile==_profile) return true;
+    _referenceHz=referenceHz;_profile=profile;_prefsDirty=true;
+    if(_dsp) { _dsp->configureTuning(_referenceHz,_profile);clearReading(); }
+    _dirty=true;flushPreferences();return true;
 }
 void AcousticApp::unload() {
     if (!_loaded) return;
     _loaded=false;playbackAudioTap.enable(false);
+    updatePerformanceLock();
     // Save while RX still owns the clocks, before resuming suspended SSync.
     // PCM observers defer flash writes until playback is idle or shut down.
     flushPreferences();
@@ -78,7 +102,7 @@ AcousticApp::Status AcousticApp::status() const {
     state.sampleRate=_inputRate;state.inputSource=inputName();
     state.inputOverruns=_playback?playbackAudioTap.overruns():microphoneInput.overruns();
     state.lastDataAgeMs=millis()-_lastData;state.error=_error;
-    state.capturedAtMs=_lastData;state.analysisUs=_analysisUs;
+    state.capturedAtMs=_lastData;state.analysisUs=_analysisUs;state.analysisMaxUs=_analysisMaxUs;
     state.hasResult=state.capturing && _hasResult && state.lastDataAgeMs<500;
     if(state.hasResult && _dsp) state.signal=_dsp->result();
     else { state.signal.rmsDb=state.signal.peakDb=-120;state.signal.chord=AcousticDSP::NONE;state.signal.midi=-1; }
@@ -90,6 +114,14 @@ void AcousticApp::clearReading() {
     if(_dsp) _dsp->resetInputHistory();
     _reading.reset();_hasResult=false;_periodMs=0;_meter=-120;
     _scale=AcousticScale();_spectrumRange=AcousticSpectrumRange();_dirty=true;
+}
+void AcousticApp::updatePerformanceLock() {
+    if(!_tuner || !powerManager) return;
+    bool recentInput=millis()-_lastData<500;
+    bool needsDsp=_loaded && !_error && _mode==1 && recentInput &&
+        (!_hasResult || (_dsp && _dsp->result().rmsDb>-90));
+    if(needsDsp) powerManager->acquireLock(POWER_LOCK_DSP,LOCK_OWNER_ANALYSIS);
+    else powerManager->releaseLock(POWER_LOCK_DSP,LOCK_OWNER_ANALYSIS);
 }
 const char* AcousticApp::inputName() const {
     if(!_loaded || _error) return "NONE";
@@ -170,6 +202,7 @@ void AcousticApp::update() {
                 uint32_t started=micros();
                 _hasResult=_dsp->analyze(window,_tuner&&_mode==0,_tuner&&_mode==1,!_tuner&&_mode==1&&_fft==4);
                 _analysisUs=micros()-started;
+                _analysisMaxUs=std::max(_analysisMaxUs,_analysisUs);
                 if (_hasResult) {
                     const auto& r=_dsp->result();
                     if(_tuner) {
@@ -193,6 +226,7 @@ void AcousticApp::update() {
             _dirty=true;
         }
     } else if (!_error) { _error="Microphone stopped";_hasResult=false;_dirty=true; }
+    updatePerformanceLock();
     if (_dirty && now-_lastDraw>=50) renderToCanvas();
 }
 void AcousticApp::text(int x,int y,const char* value,uint16_t color) {
@@ -212,9 +246,13 @@ void AcousticApp::renderToCanvas() {
     if(_playback) snprintf(b,sizeof(b),"%s PCM",inputName());
     else snprintf(b,sizeof(b),_tuner?(_autoGain.automatic(millis())?"AUTO %ddB":"MAN %ddB"):"MIC %ddB",_gain);
     int16_t gx,gy;uint16_t gw,gh;_canvas->getTextBounds(b,0,0,&gx,&gy,&gw,&gh);text(125-gw-gx,10,b,t.muted);
-    if(_hasResult && _dsp->result().clipped) text(54,10,"CLIP",pokoClrErr());
-    const char* modes[]={"Oscilloscope","Log FFT dBFS","Octave","Level meter"};
-    text(4,25,_tuner?(_mode?"Chord  A4=440Hz":"Note   A4=440Hz"):modes[_mode],t.text);
+    const char* modes[]={"Oscilloscope","FFT Spectrum","Octave","Level meter"};
+    if(_tuner) { snprintf(b,sizeof(b),"%s A4=%.1f",_mode?"Chord":"Note",_referenceHz);text(4,25,b,t.text); }
+    else text(4,25,modes[_mode],t.text);
+    // PCM near the integer rails can be a normal mastered peak. The observer
+    // cannot establish whether upstream audio was actually clipped. Keep the
+    // warning below the header, clear of the source/clock label.
+    if(_hasResult && _dsp->result().atFullScale) text(101,34,"FULL",isDarkTheme()?0xFD20:0xB360);
     if (_error) { text(3,59,_error,t.accent);text(3,77,"2R: retry",t.muted); }
     else if (_tuner) drawTuner();
     else if (!_hasResult) text(5,64,millis()-_lastData>=500?(_playback?"Waiting for audio":"No microphone data"):"Listening...",t.muted);
@@ -237,7 +275,7 @@ void AcousticApp::drawScope() {
     _canvas->drawRect(4,36,120,67,t.line);
     for(int y=52;y<=86;y+=17) _canvas->drawFastHLine(5,y,118,t.line);
     for(int x=34;x<123;x+=30) _canvas->drawFastVLine(x,37,65,t.line);
-    uint16_t color=_dsp->result().clipped?pokoClrErr():pokoClrCyan();
+    uint16_t color=_dsp->result().atFullScale?(isDarkTheme()?0xFD20:0xB360):pokoClrCyan();
     for(int x=1;x<118;++x) {
         _canvas->drawLine(x+4,plotY(69-trace[x-1]/_range*31),x+5,plotY(69-trace[x]/_range*31),color);
     }
@@ -307,27 +345,41 @@ void AcousticApp::drawMeter() {
     for(int x=0;x<width;++x) _canvas->drawFastVLine(7+x,71,11,acousticLevelColor(-60+60.0f*x/114,isDarkTheme()));
     int peak=std::max(7,std::min(120,7+(int)((r.peakDb+60)/60*114)));
     _canvas->drawFastVLine(peak,70,13,t.text);
-    snprintf(b,sizeof(b),"Peak %.1f %s",r.peakDb,r.clipped?"CLIP":"");text(5,97,b,r.clipped?pokoClrErr():t.text);
+    snprintf(b,sizeof(b),"Peak %.1f %s",fabsf(r.peakDb)<.05f?0.0f:r.peakDb,r.atFullScale?"FULL":"");
+    text(5,97,b,r.atFullScale?(isDarkTheme()?0xFD20:0xB360):t.text);
     text(5,111,_response?"Hold: Slow / Fast":"Hold: Fast / Slow",t.muted);
 }
 void AcousticApp::drawTuner() {
     const auto& t=currentTheme();const auto& r=_reading.result();char b[40];
     bool valid=_mode?r.chord!=AcousticDSP::NONE:r.frequency>0;
+    bool held=_mode && valid && (!_hasResult || _dsp->result().chordDecision!=AcousticDSP::MATCH ||
+        _dsp->result().root!=r.root || _dsp->result().chord!=r.chord);
     uint16_t color=t.muted;
     if(valid) color=_mode?acousticBlend(isDarkTheme()?0xFD20:0xB360,pokoClrGreen(),std::max(0.0f,(r.chordConfidence-0.5f)*2)):
                          acousticTuningColor(r.cents,isDarkTheme());
+    if(held) color=isDarkTheme()?0xFD20:0xB360;
     _canvas->setFont(u8g2_font_helvB18_tf);
     if(!valid) snprintf(b,sizeof(b),"--");
-    else if(_mode) snprintf(b,sizeof(b),"%s%s",AcousticDSP::noteName(r.root),AcousticDSP::chordSuffix(r.chord));
+    else if(_mode) AcousticDSP::formatChord(b,sizeof(b),r.root,r.chord,r.bassMidi);
     else snprintf(b,sizeof(b),"%s%d",AcousticDSP::noteName(r.midi),r.midi/12-1);
     int16_t x1,y1;uint16_t w,h;_canvas->getTextBounds(b,0,0,&x1,&y1,&w,&h);
+    if(w>120) { _canvas->setFont(u8g2_font_helvB08_tf);_canvas->getTextBounds(b,0,0,&x1,&y1,&w,&h); }
     text(64-w/2-x1,57,b,color);_canvas->setFont(u8g2_font_5x7_tf);
     if(_mode) {
-        if(valid) snprintf(b,sizeof(b),"Match %d%%",(int)(r.chordConfidence*100));
+        if(held) snprintf(b,sizeof(b),"Hold - uncertain");
+        else if(valid) snprintf(b,sizeof(b),"Match %d%%",(int)(r.chordConfidence*100));
+        else if(_hasResult && _dsp->result().chordDecision==AcousticDSP::AMBIGUOUS) snprintf(b,sizeof(b),"Ambiguous");
         else snprintf(b,sizeof(b),"Match --");
         text(7,78,b,color);_canvas->drawRect(6,86,116,7,t.line);
-        if(valid) _canvas->fillRect(8,88,(int)(112*r.chordConfidence),3,color);
-        snprintf(b,sizeof(b),"Input %.0fdBFS",_hasResult?_dsp->result().rmsDb:-120.0f);text(7,109,b,t.muted);
+        if(valid && !held) _canvas->fillRect(8,88,(int)(112*r.chordConfidence),3,color);
+        b[0]=0;unsigned length=0;
+        if(_hasResult) for(unsigned i=0;i<_dsp->result().noteCount;++i) {
+            char note[8];int midi=_dsp->result().notes[i].midi;
+            snprintf(note,sizeof(note),"%s%d",AcousticDSP::noteName(midi),midi/12-1);
+            unsigned n=strlen(note);if(length+n+1>18) { strcat(b,"+");break; }
+            if(length) b[length++]=' ';strcpy(b+length,note);length+=n;
+        }
+        text(7,109,b[0]?b:"Notes --",t.muted);
     } else {
         if(valid) snprintf(b,sizeof(b),r.frequency<100?"%.2f Hz  %+.1fc":"%.1f Hz  %+.1fc",r.frequency,r.cents);
         else snprintf(b,sizeof(b),"-- Hz  --c");
@@ -367,6 +419,8 @@ void AcousticApp::onHoldingRight() { adjustParameter(1); }
 void AcousticApp::onEnter() {
     if(_error) { unload();load();return; }
     _mode=(_mode+1)%(_tuner?2:4);_prefsDirty=true;_dirty=true;_hasResult=false;
+    if(_dsp && _tuner) _dsp->enableChordAnalysis(_mode==1);
+    updatePerformanceLock();
     _reading.reset();_spectrumRange=AcousticSpectrumRange();
 }
 void AcousticApp::handleInput(InputEvent event) {

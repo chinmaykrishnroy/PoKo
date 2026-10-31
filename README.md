@@ -59,7 +59,7 @@ PoKo is a **full-featured pocket media device** running on an ESP32-S3 microcont
 | **Pixels** | NeoPixel ring studio and audio-reactive effects |
 | ⚙️ **Settings** | Brightness, volume, theme, Wi-Fi, button controls, and more |
 | **Analyzer** | Microphone oscilloscope, logarithmic FFT, octave/third-octave bands, dBFS level meter |
-| **Tuner** | A440 note/cents tuner and major, minor, sus2, sus4, 7, maj7, m7, augmented chord estimates |
+| **Tuner** | Calibratable note/cents tuner, independent-note estimates, 16 chord qualities and slash chords |
 
 The launcher keeps **eight visible navigation dots** for ten apps. The represented
 window scrolls at its edges: the selected dot stays last when advancing past the
@@ -77,19 +77,19 @@ the tool back to PCM. Microphone gain controls apply only to microphone input. S
 an updated server while a tool is open keeps the tool visible and switches its
 input to PCM.
 
-`2R` cycles Analyzer's Scope → Log FFT → Octave
+`2R` cycles Analyzer's Scope → FFT Spectrum → Octave
 → Level modes, or Tuner's Note → Chord modes; `2L` returns home. Single `L`/`R`
 adjusts microphone gain in 3 dB steps (0–30 dB; default 18 dB). Tuner also uses
 automatic gain: it raises a quiet recognized note/chord above the learned ambient
 floor gradually; tonal interference alone is insufficient, and it does not raise gain on
-silence/broadband noise, and reduces gain quickly on clipping. `AUTO` shows the current gain;
+silence/broadband noise, and reduces gain quickly near full scale. `AUTO` shows the current gain;
 manual changes override it for five seconds (`MAN`). Automatic gain changes are
 not saved to preferences; your explicit manual gain is saved.
 
 | Analyzer mode | Hold L / R |
 |---|---|
 | Oscilloscope | Shorter / longer window: 2, 5, 10, 20, 50, 100, 160 ms (new default 5 ms) |
-| Log FFT | 1024 → 2048 → 4096 → 8192 → Bass 8192 |
+| FFT Spectrum | 1024 → 2048 → 4096 → 8192 → Bass 8192 |
 | Octave | Full octave / third octave |
 | Level | Fast / slow RMS display response |
 
@@ -110,23 +110,63 @@ from about **0.68 seconds** of history. At 44.1 kHz playback the bins are **1.35
 from about **0.74 seconds**; labels follow the actual clock.
 Decimal peaks are sub-bin estimates, not a promise of 0.01 Hz resolution.
 Octave centers span 31.25 Hz–16 kHz. The level meter shows RMS and peak **dBFS** plus
-clipping, not calibrated acoustic dB SPL. Hold L/R in Tuner adjusts gain.
+a full-scale indicator, not calibrated acoustic dB SPL. Hold L/R in Tuner adjusts gain.
 
-Tuner uses A4=440 Hz and displays note, octave, frequency and cents (approximately
-40–2000 Hz). Chord mode is an estimate for a clearly played chord, not polyphonic
-transcription of a full song. Noise, weak/missing notes, distortion and ambiguous
-voicings can prevent or change a match; symmetric augmented chords are named
-using the detected bass. Two agreeing detections confirm a chord; a change of quality on the same root
-requires at least three confirmations and additional confidence for weak matches
-to reject transient upper partials. A brief hold
-bridges missed frames, then clears to `--`. A rich single note is rejected as a
-chord. Silence or unavailable input shows `--` in the same fixed layout.
+Tuner defaults to **A4=440 Hz**. Set **Tuner A4** (400–480 Hz in 0.1 Hz
+steps) and **Tuner Type** (Guitar/Keyboard) in Settings or the device Web UI.
+Hold L/R on Tuner A4 for fine adjustment; Enter advances 1 Hz. These preferences
+apply to microphone and internal PCM analysis and persist without writing flash
+during playback. Note mode displays note, octave, frequency and cents over
+approximately 40–2000 Hz.
+
+Chord mode now estimates **independent notes first**, then ranks chord templates.
+It combines a fast 8192-point FFT with a filtered, 4:1-decimated 4096-point bass
+FFT: at 48 kHz input these observe about 171/341 ms with 5.86/2.93 Hz bins.
+The long band supplies evidence below 500 Hz; the fast band can identify an onset
+before the bass window is ready. A bounded iterative harmonic fit compares
+competing fundamentals, including missing-fundamental hypotheses, rather than
+assigning every peak permanently to one parent. The bottom line shows estimated
+notes; it is not a full-song transcription system.
+
+Supported qualities are **major, minor, sus2, sus4, 7, maj7, m7, augmented,
+diminished, dim7, half-diminished (m7b5), 6, m6, add9, madd9 and power (5)**.
+A separately supported bass enables labels such as **C/E**, **C/G**, **Am/C**.
+A power chord establishes no major/minor third. Identical pitch sets can have
+several valid names (C6/Am7, Csus2/Gsus4); detected bass breaks these ties without
+claiming a uniquely knowable musical intention.
+
+Chord mode compensates a coherent common tuning offset when at least three
+independent pitch classes agree. The note meter stays referenced to your saved
+A4. Guitar and Keyboard profiles use different harmonic priors, note limits and
+release smoothing. Onsets refresh accumulated note evidence promptly; sustained
+notes decay more slowly in Guitar mode. Stale held notes cannot create a new
+chord. Two agreeing detections confirm a chord; quality changes need additional
+confirmation, and root changes during a decay require more evidence than a fresh
+attack. Silence or unavailable input clears to `--` in a fixed layout.
+
+Ranking considers required independent tones, unexplained note energy, and the
+best-versus-runner-up margin. Close alternatives show an ambiguous result. A brief
+retained label is amber with `Hold - uncertain`, then clears. Match scores are
+heuristics, not calibrated probabilities. Noise, distortion, missing notes and
+ambiguous voicings can still prevent a reliable match. See
+[the analysis architecture and validation limits](docs/tuner-analysis.md).
 Pitch uses [YIN](https://www.ee.columbia.edu/~dpwe/papers/deChevK02-yin.pdf) with
 spectral refinement; refinement uses spectral strength rather than an unrelated
-time-domain transient. Note readings are smoothed without snapping them to A440.
+time-domain transient. Note readings are smoothed without snapping them to the reference pitch.
 Tuning color blends from green (within 2 cents) through amber toward red as error
 grows. Spectrum colors run from bass cyan through blue to treble violet; level
-meter warning colors follow actual dBFS/clipping, independently of autoscaling.
+meter warning colors follow sample headroom, independently of autoscaling.
+For **both microphone and internal PCM**, amber **FULL** means an original
+16-bit sample reached an integer rail. **0 dBFS is full scale, not proof of
+clipping.** Integer samples cannot preserve an excursion above that ceiling;
+PoKo cannot infer the original analog/upstream overload or intersample true peak
+from this flag. The peak meter measures original samples, so removing DC for
+analysis cannot create a false reading above 0 dBFS. FFT bars measure spectral
+components; their scale/headroom is separate from the sample-peak meter.
+Microphone auto gain may back off near full scale, while playback observation
+never adjusts microphone gain or playback volume. Existing distortion can still
+create misleading harmonics; attenuation cannot restore a previously lost waveform.
+
 
 Microphone input is captured at 48 kHz/16-bit stereo; analysis uses MIC1 rather than averaging
 the two microphones and introducing phase cancellation. The microphone takes
@@ -141,6 +181,15 @@ after reboot.
 Authenticated `GET /api/acoustic` reports capture state, frame count, input age,
 level, peak frequency, period, FFT bin/range, raw versus displayed tuner readings,
 automatic-gain status and speaker-PA state for on-device verification.
+`peak_dbfs` reports sample headroom; `sample_at_full_scale` marks an integer rail
+(`near_full_scale` remains as a compatibility alias). `chord_tuning_cents` reports
+the common chord-only offset; `chord_match_score` is a heuristic match score,
+not a calibrated probability.
+`chord_decision` distinguishes `match`, `ambiguous`, `insufficient_evidence`, and
+`no_chord`. `chord_best`, `chord_runner_up`, their ranking scores and `chord_margin`
+make competing interpretations inspectable. Ranking scores include a bass tie-break
+and are not probabilities. These fields describe the current analysis; a displayed
+label may be a short uncertain hold from an earlier frame.
 `input_source`, the actual `sample_rate`, and `input_overruns` distinguish
 microphone RX from the passive playback observer. Playback is analyzed at its
 actual clock (including 44.1 and 48 kHz), not relabeled as 48 kHz; a stable
@@ -148,8 +197,15 @@ channel is selected to avoid cancellation of anti-phase stereo. Overflow of the
 observer only discards analysis copies, never playback. It also reports RX
 overruns, capture timestamps and DSP duration. Capture gaps
 invalidate the analysis history; pitch is never estimated across known lost
-samples. Tuner skips the Analyzer-only bass decimator, and RX buffers cover about
-171 ms of short service-loop stalls.
+samples. Note mode skips bass decimation; chord mode enables the longer bass band.
+`notes` reports MIDI, frequency, salience, heuristic evidence score, observed-fundamental and current-evidence
+flags; `bass_midi`, `bass_ready`, `bass_bin_hz`, `bass_window_ms`, `onset`,
+`reference_hz` and `profile` make the new pipeline inspectable. `analysis_max_ms`
+records the longest analysis since opening the app. Active chord analysis requests
+240 MHz using a CPU-only lease, released on digital silence, mode change or exit;
+it does not require low-latency Wi-Fi. RX buffers cover about 171 ms of short
+service-loop stalls. Board timing and RX continuity must still be checked after
+compilation.
 It exposes no raw microphone recording and requires the device admin login.
 
 For opt-in hardware checks, configure the private `.env` from `.env.example`.
@@ -163,6 +219,14 @@ ambiguous guitar decay may deliberately show `--`.
 The [v2.5.0 hardware validation](docs/acoustic-validation-v2.5.0.md) records
 passed playback checks and a remaining microphone chord-identification failure;
 chord accuracy is not yet verified for general instrument use.
+
+To compare a known single-chord recording locally, first run
+`python tests/firmware/run_tests.py --only acoustic-dsp`. Then run
+`python tests/firmware/replay_chords.py sample.pcm --sample-rate 48000 --expected Cmaj`.
+Supply signed 16-bit little-endian mono PCM and its actual clock. The replay uses
+the production chord mode and display stabilizer, opens no microphone, and sends
+no audio over the network. It reports correct, uncertain, and wrong readings
+separately; its acceptance threshold is configurable, not an accuracy guarantee.
 
 
 Hardware references: [Waveshare board documentation](https://docs.waveshare.com/ESP32-S3-LCD-0.85),
@@ -403,8 +467,9 @@ Poko/
 ├── ClockApp.h             # NTP clock
 ├── InfoApp.h              # System info
 ├── SettingsApp.h          # On-device settings
-├── AcousticApp.*          # Microphone Analyzer and A440 Tuner screens
-├── AcousticDSP.*          # FFT, YIN pitch, chroma/chord estimates, auto range
+├── AcousticApp.*          # Microphone/PCM Analyzer and calibrated Tuner screens
+├── AcousticDSP.*          # Multi-resolution FFT, YIN, note-driven chord ranking
+├── NoteEstimator.*        # Competing fundamentals, temporal notes and bass
 ├── AcousticPresentation.* # Reading stability, auto gain, scale and color policy
 ├── MicrophoneInput.*      # Exclusive ES7210 ADC / I²S RX driver
 ├── SnapPlayer.h           # Snapcast protocol client

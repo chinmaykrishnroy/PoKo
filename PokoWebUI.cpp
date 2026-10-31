@@ -309,7 +309,7 @@ const APP_DESC={
   7:'WS2812 8-LED light studio',
   8:'Device settings & power profiles',
   9:'Microphone scope, FFT, octave & level meter',
-  10:'A440 microphone note & chord tuner'
+  10:'Note and chord tuning with A4 calibration'
 };
 
 // ── Applications ──────────────────────────────────────────────────────────────
@@ -929,6 +929,15 @@ function renderSettings(){
       </div>
     </div>
     <div class="form-section">
+      <div class="form-title"><h3>Tuner</h3><p>Reference pitch and instrument response for microphone and playback analysis.</p></div>
+      <form id="tunerSettingsForm" class="form-grid">
+        <div class="field"><label for="tunerReference">A4 reference (Hz)</label><input id="tunerReference" name="reference_hz" type="number" min="400" max="480" step="0.1" value="440" required disabled></div>
+        <div class="field"><label for="tunerProfile">Instrument</label><select id="tunerProfile" name="profile" disabled><option value="guitar">Guitar</option><option value="keyboard">Keyboard</option></select></div>
+        <div class="form-foot"><button id="tunerSave" class="btn blue" type="submit" disabled>Update tuner</button></div>
+        <p id="tunerResult" role="status" aria-live="polite">Loading tuner settings…</p>
+      </form>
+    </div>
+    <div class="form-section">
       <div class="form-title"><h3>Security</h3><p>Device login: admin. Use Remember me on the login page and your browser's password manager. PoKo keeps browser sessions in HttpOnly cookies, never localStorage. The saved password is viewable only on the physical device.</p></div>
       <form id="devicePasswordForm" class="form-grid">
         <input type="text" name="username" value="admin" autocomplete="username" readonly hidden>
@@ -950,6 +959,30 @@ function renderSettings(){
       </div>
     </div>`;
   $('devicePasswordForm').onsubmit=changeDevicePassword;
+  $('tunerSettingsForm').onsubmit=saveTunerSettings;loadTunerSettings();
+}
+
+async function loadTunerSettings(){
+  const form=$('tunerSettingsForm');if(!form)return;
+  try{
+    const data=await api('/api/acoustic/settings');
+    if(!form.isConnected)return;
+    form.elements.reference_hz.value=Number(data.reference_hz).toFixed(1);form.elements.profile.value=data.profile;
+    for(const field of form.elements)field.disabled=false;
+    $('tunerResult').textContent='Changes apply to both microphone and internal audio.';
+  }catch(error){if(form.isConnected)$('tunerResult').textContent=error.message;}
+}
+async function saveTunerSettings(event){
+  event.preventDefault();const form=event.currentTarget,values=new URLSearchParams(new FormData(form));
+  for(const field of form.elements)field.disabled=true;
+  try{
+    const data=await api('/api/acoustic/settings',{method:'POST',body:values});
+    if(form.isConnected){
+      form.elements.reference_hz.value=Number(data.reference_hz).toFixed(1);form.elements.profile.value=data.profile;
+      $('tunerResult').textContent='Tuner settings updated.';
+    }
+  }catch(error){if(form.isConnected)$('tunerResult').textContent=error.message;}
+  finally{if(form.isConnected)for(const field of form.elements)field.disabled=false;}
 }
 
 let healthPollTimer=null;

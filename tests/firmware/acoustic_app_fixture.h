@@ -45,3 +45,10 @@ struct AudioManager {
     bool resumeIncomingPlayback(uint32_t) { if(!incoming || source!=AUDIO_MIC) return false;incoming=false;source=AUDIO_SSYNC;microphoneInput.active=false;return true; }
 } manager;
 inline AudioManager* audioManager=&manager;
+enum { POWER_LOCK_DSP=1<<7,LOCK_OWNER_ANALYSIS=5 };
+struct PowerManager {
+    unsigned locks=0;
+    void acquireLock(unsigned mask,int) { locks|=mask; }
+    void releaseLock(unsigned mask,int) { locks&=~mask; }
+} analysisPower;
+inline PowerManager* powerManager=&analysisPower;

@@ -6,7 +6,51 @@ void exitApp(AppState state) { exited=state; }
 int main(int argc,char** argv) {
     assert(argc==2);Arduino_GFX gfx;
     AcousticApp analyzer(&gfx,exitApp,false),tuner(&gfx,exitApp,true);
-    if(!strcmp(argv[1],"playback-preserved")) {
+    if(!strcmp(argv[1],"tuner-calibration-persistence")) {
+        tuner.begin();assert(tuner.referenceHz()==440 && tuner.profile()==NoteEstimator::GUITAR);
+        assert(!tuner.setTuning(399,NoteEstimator::KEYBOARD));
+        assert(!tuner.setTuning(NAN,NoteEstimator::GUITAR) && !tuner.setTuning(INFINITY,NoteEstimator::GUITAR));
+        assert(!tuner.setTuning(442,(NoteEstimator::Profile)2));
+        assert(tuner.setTuning(442.2f,NoteEstimator::KEYBOARD));
+        assert(storedPrefs["tunera4x10"]==4422 && storedPrefs["tunerprofile"]==1);
+        tuner.load();assert(tuner.isCapturing());
+        microphoneInput.frequency=442.2f;
+        for(int tick=0;tick<5;++tick){testMillis+=100;tuner.update();}
+        assert(fabs(tuner.status().displayed.cents)<1);
+        tuner.onEnter();assert(analysisPower.locks&POWER_LOCK_DSP);
+        tuner.onEnter();assert(!(analysisPower.locks&POWER_LOCK_DSP));
+        tuner.onEnter();tuner.unload();assert(!(analysisPower.locks&POWER_LOCK_DSP));
+        tuner.begin();assert(fabs(tuner.referenceHz()-442.2f)<.01f && tuner.profile()==NoteEstimator::KEYBOARD);
+    } else if(!strcmp(argv[1],"chord-performance-lease")) {
+        tuner.load();assert(!analysisPower.locks);tuner.onEnter();
+        assert(analysisPower.locks==POWER_LOCK_DSP);
+        microphoneInput.chord=true;
+        for(int tick=0;tick<5;++tick) { testMillis+=100;tuner.update(); }
+        assert(analysisPower.locks==POWER_LOCK_DSP);
+        microphoneInput.quiet=true;testMillis+=100;tuner.update();assert(!analysisPower.locks);
+        microphoneInput.quiet=false;testMillis+=100;tuner.update();assert(analysisPower.locks==POWER_LOCK_DSP);
+        microphoneInput.noData=true;testMillis+=1000;tuner.update();assert(!analysisPower.locks);
+        microphoneInput.noData=false;testMillis+=100;tuner.update();assert(analysisPower.locks==POWER_LOCK_DSP);
+        microphoneInput.failGain=true;tuner.onRight();tuner.update();assert(!analysisPower.locks);
+        tuner.unload();assert(!analysisPower.locks);
+    } else if(!strcmp(argv[1],"full-scale-ui-labels")) {
+        microphoneInput.frequency=1000;microphoneInput.amplitude=32767.0f/32768;
+        analyzer.load();for(int tick=0;tick<3;++tick) { testMillis+=100;analyzer.update(); }
+        assert(analyzer.status().signal.atFullScale && analyzer.status().signal.peakDb<=0);
+        assert(gfx.text.find("FULL")!=std::string::npos && gfx.text.find("CLIP")==std::string::npos);
+        analyzer.onEnter();testMillis+=100;analyzer.update();
+        assert(gfx.text.find("FFT Spectrum")!=std::string::npos && gfx.text.find("Log FFT")==std::string::npos);
+        bool located=false;for(const auto& label:gfx.labels) if(label.value=="FULL") { assert(label.y==34);located=true; }
+        assert(located);analyzer.onEnter();analyzer.onEnter();testMillis+=100;analyzer.update();
+        assert(gfx.text.find("Peak 0.0 FULL")!=std::string::npos);
+        analyzer.unload();
+    } else if(!strcmp(argv[1],"calibration-preserves-playback")) {
+        manager.source=AUDIO_MUSIC;manager.playing=true;speakerAmp=true;tuner.load();
+        int writes=preferenceWrites;assert(tuner.setTuning(432,NoteEstimator::KEYBOARD));
+        assert(manager.source==AUDIO_MUSIC && manager.playing && !microphoneInput.running());
+        assert(preferenceWrites==writes);tuner.unload();assert(preferenceWrites==writes);
+        manager.playing=false;tuner.flushPreferences();assert(storedPrefs["tunera4x10"]==4320);
+    } else if(!strcmp(argv[1],"playback-preserved")) {
         manager.source=AUDIO_MUSIC;manager.playing=true;speakerAmp=true;
         analyzer.load();
         assert(manager.requests==0 && manager.source==AUDIO_MUSIC);
@@ -34,6 +78,22 @@ int main(int argc,char** argv) {
         assert(manager.source==AUDIO_SSYNC && !microphoneInput.running());
         assert(!strcmp(tuner.status().inputSource,"SSYNC")); // Allow time for output to prime.
         tuner.unload();assert(manager.source==AUDIO_SSYNC);
+    } else if(!strcmp(argv[1],"playback-full-scale-no-auto-gain")) {
+        for(AudioSource source:{AUDIO_MUSIC,AUDIO_SSYNC}) {
+            manager.source=source;manager.playing=true;speakerAmp=true;
+            microphoneInput.failGain=true;tuner.load();
+            int16_t stereo[4800*2];
+            for(int i=0;i<4800;++i) stereo[2*i]=stereo[2*i+1]=(i%480<240)?32767:-32768;
+            for(int tick=0;tick<8;++tick) {
+                playbackAudioTap.writeStereo(stereo,4800,48000);testMillis+=100;tuner.update();
+            }
+            assert(tuner.status().signal.atFullScale && !tuner.status().automaticGain);
+            assert(gfx.text.find("FULL")!=std::string::npos && gfx.text.find("CLIP")==std::string::npos);
+            tuner.onRight();tuner.onHoldingLeft();
+            assert(microphoneInput.gainDb==18 && !microphoneInput.running());
+            assert(manager.source==source && manager.requests==0 && !tuner.status().error);
+            tuner.unload();assert(manager.source==source && manager.releases==0);
+        }
     } else if(!strcmp(argv[1],"music-starts-during-microphone")) {
         analyzer.load();assert(microphoneInput.running() && manager.requests==1);
         manager.source=AUDIO_MUSIC;manager.playing=true;microphoneInput.active=false;speakerAmp=true;
@@ -93,7 +153,7 @@ int main(int argc,char** argv) {
         assert(gfx.text.find("Avg T 2.27ms")!=std::string::npos);
         testMillis+=400;analyzer.onHoldingRight();analyzer.renderToCanvas();
         assert(gfx.text.find("10ms")!=std::string::npos);
-        analyzer.onEnter();testMillis+=100;analyzer.update();assert(gfx.text.find("Log FFT")!=std::string::npos);
+        analyzer.onEnter();testMillis+=100;analyzer.update();assert(gfx.text.find("FFT Spectrum")!=std::string::npos);
         assert(gfx.text.find("Pk 440.")!=std::string::npos);
         testMillis+=400;analyzer.onHoldingLeft();testMillis+=100;analyzer.update();
         assert(gfx.text.find("4096")!=std::string::npos);
