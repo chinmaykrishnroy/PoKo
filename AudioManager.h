@@ -88,6 +88,9 @@ public:
 
     bool request(AudioSource requested);
 
+    // Resume SSync only for new audible input arriving after microphone capture.
+    bool resumeIncomingPlayback(uint32_t sinceMs);
+
     void release(AudioSource source);
 
     void releaseOutput(AudioSource src);

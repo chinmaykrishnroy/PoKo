@@ -7,6 +7,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v2.5.0] — 2026-10-31
+
+- Let Analyzer and Tuner observe Music and active SSync PCM without stopping,
+  suspending or changing playback. Microphone capture remains available when
+  idle; fresh audible SSync ingress can reclaim output from the microphone.
+- Analyze PCM at its actual sample clock, update FFT/Bass labels accordingly,
+  and preserve stereo material that would cancel in a mono average. The bounded
+  observer discards only analysis copies on overflow or discontinuity.
+- Group corroborated guitar harmonics instead of treating bright overtones as
+  extra notes. Improve weak-fundamental/open voicings and quieter seventh voices;
+  reject ambiguous room noise and confirm same-root quality changes more slowly.
+- Require a recognized signal before increasing microphone gain; tonal
+  interference alone is insufficient.
+- Defer acoustic preference writes during playback and flush safely after audio
+  stops, including orderly power-off and deep idle.
+- Add source/clock/observer telemetry, stronger live microphone continuity checks,
+  an opt-in passive-playback check, and regressions for the real handoff paths.
+
 ## [v2.4.3] — 2026-10-28
 
 - Skip Analyzer-only bass filtering in Tuner and double microphone DMA/drain

@@ -9,6 +9,7 @@ MIGRATED = (
     "AcousticDSP",
     "AcousticPresentation",
     "MicrophoneInput",
+    "PlaybackAudioTap",
     "LauncherWindow",
     "AudioActivity",
     "AudioManager",

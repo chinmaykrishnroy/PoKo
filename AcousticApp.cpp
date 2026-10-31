@@ -1,6 +1,7 @@
 #include "AcousticApp.h"
 #include "AudioManager.h"
 #include "MicrophoneInput.h"
+#include "PlaybackAudioTap.h"
 #include "PokoTheme.h"
 #include <U8g2lib.h>
 #include <Preferences.h>
@@ -34,63 +35,132 @@ void AcousticApp::load() {
     if (_loaded) { renderToCanvas();return; }
     _loaded=true;_error=nullptr;_hasResult=false;_frames=0;_scale=AcousticScale();
     _spectrumRange=AcousticSpectrumRange();_reading.reset();_autoGain.reset(millis());_gain=_preferredGain;
-    _range=0.1f;_meter=-120;_periodMs=0;_lastData=_lastAnalysis=_lastDraw=millis();
+    _resumedAt=0;_range=0.1f;_meter=-120;_periodMs=0;_lastData=_lastAnalysis=_lastDraw=millis();
     _canvas=new(std::nothrow) Arduino_Canvas(128,128,_gfx);
     if (_canvas && !_canvas->begin(GFX_SKIP_OUTPUT_BEGIN)) { delete _canvas;_canvas=nullptr; }
     _dsp=new(std::nothrow) AcousticDSP(!_tuner);
     if (!_canvas || !_dsp) _error="Not enough memory";
-    else if (!audioManager || !audioManager->request(AUDIO_MIC)) _error="Microphone unavailable";
-    else if (!microphoneInput.setGain(_gain)) _error="Microphone gain error";
+    else selectInput();
     _rxOverruns=microphoneInput.overruns();_analysisUs=0;
     if (_error) {
-        if(audioManager) audioManager->release(AUDIO_MIC);
+        if(audioManager && !_playback) audioManager->release(AUDIO_MIC);
+        playbackAudioTap.enable(false);
         delete _dsp;_dsp=nullptr;
     }
     renderToCanvas();
 }
+void AcousticApp::flushPreferences() {
+    if(_loaded || !_prefsDirty || (audioManager && audioManager->isSoundPlaying())) return;
+    Preferences p;p.begin(_tuner ? "tuner" : "analyzer",false);
+    p.putUChar("mode",_mode);p.putUChar("time",_time);p.putUChar("fft",_fft);
+    p.putUChar("octave",_octave);p.putUChar("response",_response);p.putInt("gain",_preferredGain);p.end();
+    _prefsDirty=false;
+}
 void AcousticApp::unload() {
     if (!_loaded) return;
-    if (audioManager) audioManager->release(AUDIO_MIC);
-    if (_prefsDirty) {
-        Preferences p;p.begin(_tuner ? "tuner" : "analyzer",false);
-        p.putUChar("mode",_mode);p.putUChar("time",_time);p.putUChar("fft",_fft);
-        p.putUChar("octave",_octave);p.putUChar("response",_response);p.putInt("gain",_preferredGain);p.end();
-        _prefsDirty=false;
-    }
-    delete _canvas;_canvas=nullptr;delete _dsp;_dsp=nullptr;_loaded=false;_reading.reset();_hasResult=false;
+    _loaded=false;playbackAudioTap.enable(false);
+    // Save while RX still owns the clocks, before resuming suspended SSync.
+    // PCM observers defer flash writes until playback is idle or shut down.
+    flushPreferences();
+    if (audioManager && !_playback) audioManager->release(AUDIO_MIC);
+    _playback=false;_playbackSource=AUDIO_NONE;
+    delete _canvas;_canvas=nullptr;delete _dsp;_dsp=nullptr;_reading.reset();_hasResult=false;
 }
 bool AcousticApp::isCapturing() const {
-    return _loaded && !_error && microphoneInput.running() && audioManager && audioManager->activeSource()==AUDIO_MIC;
+    return _loaded && !_error && audioManager &&
+        (_playback ? playbackAudioTap.enabled() :
+         microphoneInput.running() && audioManager->activeSource()==AUDIO_MIC);
 }
 AcousticApp::Status AcousticApp::status() const {
     Status state={};
     state.capturing=isCapturing();state.mode=_mode;state.frames=_frames;
-    state.automaticGain=_tuner && _autoGain.automatic(millis());
+    state.automaticGain=_tuner && !_playback && _autoGain.automatic(millis());
+    state.sampleRate=_inputRate;state.inputSource=inputName();
+    state.inputOverruns=_playback?playbackAudioTap.overruns():microphoneInput.overruns();
     state.lastDataAgeMs=millis()-_lastData;state.error=_error;
     state.capturedAtMs=_lastData;state.analysisUs=_analysisUs;
     state.hasResult=state.capturing && _hasResult && state.lastDataAgeMs<500;
     if(state.hasResult && _dsp) state.signal=_dsp->result();
     else { state.signal.rmsDb=state.signal.peakDb=-120;state.signal.chord=AcousticDSP::NONE;state.signal.midi=-1; }
-    state.displayed=_reading.result();
+    if(state.hasResult) state.displayed=_reading.result();
+    else { state.displayed.midi=state.displayed.root=-1;state.displayed.chord=AcousticDSP::NONE;state.displayed.rmsDb=-120; }
     return state;
+}
+void AcousticApp::clearReading() {
+    if(_dsp) _dsp->resetInputHistory();
+    _reading.reset();_hasResult=false;_periodMs=0;_meter=-120;
+    _scale=AcousticScale();_spectrumRange=AcousticSpectrumRange();_dirty=true;
+}
+const char* AcousticApp::inputName() const {
+    if(!_loaded || _error) return "NONE";
+    if(!_playback) return "MIC";
+    switch(_playbackSource) {
+        case AUDIO_MUSIC:return "MUSIC";
+        case AUDIO_SSYNC:return "SSYNC";
+        case AUDIO_VIDEO:return "VIDEO";
+        default:return "NONE";
+    }
+}
+bool AcousticApp::selectInput() {
+    if(!audioManager) { _error="Microphone unavailable";return false; }
+    AudioSource source=audioManager->activeSource();
+    // Preserve Music/Video sessions through pauses. A silent SSync session can
+    // yield to the mic; newly received audible PCM resumes it automatically.
+    bool observe=source==AUDIO_MUSIC || source==AUDIO_VIDEO ||
+        (source==AUDIO_SSYNC && (audioManager->isSoundPlaying() || isSpeakerAmpEnabled() ||
+         (_resumedAt && millis()-_resumedAt<2000)));
+    if(observe) {
+        if(!_playback || _playbackSource!=source) {
+            playbackAudioTap.enable(true);_playback=true;_playbackSource=source;
+            _inputRate=0;_inputGeneration=0;_frames=0;_lastData=millis();clearReading();
+        }
+        return true;
+    }
+    if(source==AUDIO_BLUETOOTH) { _error="Input unavailable";return false; }
+    if(_playback) { playbackAudioTap.enable(false);_playback=false;clearReading(); }
+    if(source==AUDIO_MIC && microphoneInput.running()) return true;
+    _micSince=millis();
+    if(!audioManager->request(AUDIO_MIC)) { _error="Microphone unavailable";return false; }
+    if(!microphoneInput.setGain(_gain)) {
+        _error="Microphone gain error";audioManager->release(AUDIO_MIC);return false;
+    }
+    _inputRate=48000;_dsp->setSampleRate(_inputRate);_rxOverruns=microphoneInput.overruns();
+    _frames=0;_lastData=millis();clearReading();return true;
 }
 void AcousticApp::update() {
     if (!_loaded) return;
     uint32_t now=millis();
+    if(!_error && audioManager && _dsp) {
+        bool resumed=!_playback && audioManager->resumeIncomingPlayback(_micSince);
+        if(resumed) _resumedAt=millis()?millis():1;
+        AudioSource source=audioManager->activeSource();
+        if(_playback || resumed || source==AUDIO_MUSIC || source==AUDIO_VIDEO || source==AUDIO_SSYNC)
+            selectInput();
+    }
     if (isCapturing() && _dsp) {
-        uint32_t overruns=microphoneInput.overruns();
-        if(overruns!=_rxOverruns) {
+        uint32_t overruns=_playback?playbackAudioTap.overruns():microphoneInput.overruns();
+        if(!_playback && overruns!=_rxOverruns) {
             // Never estimate pitch across a discontinuity in captured samples.
             _rxOverruns=overruns;_dsp->resetInputHistory();_reading.reset();_hasResult=false;
         }
         int16_t samples[512];
         // Drain bounded DMA backlog before analysis; leave the service loop free.
         for (int i=0;i<16;++i) {
-            size_t n=microphoneInput.read(samples,512);if(!n) break;
+            size_t n=0;
+            if(_playback) {
+                uint32_t rate,generation;n=playbackAudioTap.read(samples,512,rate,generation);
+                if(rate && (rate!=_inputRate || generation!=_inputGeneration)) {
+                    _inputRate=rate;_inputGeneration=generation;_dsp->setSampleRate(rate);clearReading();
+                }
+            } else n=microphoneInput.read(samples,512);
+            if(!n) break;
             _dsp->push(samples,n);_frames+=n;_lastData=now;
         }
-        overruns=microphoneInput.overruns();
-        if(overruns!=_rxOverruns) {
+        overruns=_playback?playbackAudioTap.overruns():microphoneInput.overruns();
+        if(_playback) {
+            uint32_t rate,generation;playbackAudioTap.read(samples,0,rate,generation);
+            if(generation!=_inputGeneration) { _inputGeneration=generation;clearReading(); }
+        } else if(overruns!=_rxOverruns) {
             _rxOverruns=overruns;_dsp->resetInputHistory();_reading.reset();_hasResult=false;
         }
         if (now-_lastAnalysis>=100) {
@@ -104,7 +174,7 @@ void AcousticApp::update() {
                     const auto& r=_dsp->result();
                     if(_tuner) {
                         _reading.update(r,now,true);
-                        int target=_autoGain.update(r,_gain,now);
+                        int target=_playback?_gain:_autoGain.update(r,_gain,now);
                         if(target!=_gain) {
                             if(microphoneInput.setGain(target)) _gain=target;
                             else { _error="Microphone gain error";_reading.reset();if(audioManager) audioManager->release(AUDIO_MIC); }
@@ -138,14 +208,16 @@ void AcousticApp::renderToCanvas() {
     _canvas->fillScreen(t.bg);_canvas->setTextWrap(false);
     _canvas->fillRect(0,0,128,14,t.headerBg);_canvas->setFont(u8g2_font_helvB08_tf);
     text(3,11,appName(),t.accent);_canvas->setFont(u8g2_font_5x7_tf);
-    char b[40];snprintf(b,sizeof(b),_tuner?(_autoGain.automatic(millis())?"AUTO %ddB":"MAN %ddB"):"MIC %ddB",_gain);
+    char b[40];
+    if(_playback) snprintf(b,sizeof(b),"%s PCM",inputName());
+    else snprintf(b,sizeof(b),_tuner?(_autoGain.automatic(millis())?"AUTO %ddB":"MAN %ddB"):"MIC %ddB",_gain);
     int16_t gx,gy;uint16_t gw,gh;_canvas->getTextBounds(b,0,0,&gx,&gy,&gw,&gh);text(125-gw-gx,10,b,t.muted);
     if(_hasResult && _dsp->result().clipped) text(54,10,"CLIP",pokoClrErr());
     const char* modes[]={"Oscilloscope","Log FFT dBFS","Octave","Level meter"};
     text(4,25,_tuner?(_mode?"Chord  A4=440Hz":"Note   A4=440Hz"):modes[_mode],t.text);
     if (_error) { text(3,59,_error,t.accent);text(3,77,"2R: retry",t.muted); }
     else if (_tuner) drawTuner();
-    else if (!_hasResult) text(5,64,millis()-_lastData>=500?"No microphone data":"Listening...",t.muted);
+    else if (!_hasResult) text(5,64,millis()-_lastData>=500?(_playback?"Waiting for audio":"No microphone data"):"Listening...",t.muted);
     else if (_mode==0) drawScope();
     else if (_mode==1 || _mode==2) drawSpectrum(_mode==2);
     else drawMeter();
@@ -158,7 +230,8 @@ void AcousticApp::renderToCanvas() {
 }
 void AcousticApp::drawScope() {
     const auto& t=currentTheme();float trace[118],peak=0;
-    _dsp->waveformTrace(TIME_MS[_time]*48,trace,118);
+    size_t span=std::min<size_t>(AcousticDSP::MAX_SAMPLES,(size_t)TIME_MS[_time]*_inputRate/1000);
+    _dsp->waveformTrace(span,trace,118);
     for(float value:trace) peak=std::max(peak,fabsf(value));
     _range=_scale.update(peak,millis());
     _canvas->drawRect(4,36,120,67,t.line);
@@ -169,8 +242,11 @@ void AcousticApp::drawScope() {
         _canvas->drawLine(x+4,plotY(69-trace[x-1]/_range*31),x+5,plotY(69-trace[x]/_range*31),color);
     }
     char b[40];_canvas->setFont(u8g2_font_5x7_tf);
-    if(_range<0.01f) snprintf(b,sizeof(b),"%ums +/-%.1fmFS",TIME_MS[_time],_range*1000);
-    else snprintf(b,sizeof(b),"%ums +/-%.3f FS",TIME_MS[_time],_range);
+    char window[16];float visibleMs=1000.0f*span/_inputRate;
+    if(fabsf(visibleMs-TIME_MS[_time])<0.1f) snprintf(window,sizeof(window),"%ums",TIME_MS[_time]);
+    else snprintf(window,sizeof(window),"%.1fms",visibleMs);
+    if(_range<0.01f) snprintf(b,sizeof(b),"%s +/-%.1fmFS",window,_range*1000);
+    else snprintf(b,sizeof(b),"%s +/-%.3f FS",window,_range);
     text(4,34,b,t.muted);
     if(_periodMs>0) snprintf(b,sizeof(b),"Avg T %.2fms",_periodMs);
     else snprintf(b,sizeof(b),"Avg T -- (no period)");
@@ -200,13 +276,24 @@ void AcousticApp::drawSpectrum(bool octave) {
         snprintf(b,sizeof(b),"%.0f/%.0f",top,bottom);
         int16_t x1,y1;uint16_t w,h;_canvas->getTextBounds(b,0,0,&x1,&y1,&w,&h);text(125-w-x1,34,b,t.muted);
     }
-    // Frequency labels follow the logarithmic x axis.
-    text(4,111,octave?"31":"20",t.muted);
-    text(37,111,octave?"250":(_fft==4?"100":"200"),t.muted);
-    text(76,111,octave||_fft!=4?"2k":"500",t.muted);text(106,111,octave?"16k":(_fft==4?"2k":"20k"),t.muted);
+    // Label the actual FFT range, including non-48-kHz playback clocks.
+    if(octave) {
+        text(4,111,"31",t.muted);text(37,111,"250",t.muted);
+        text(76,111,"2k",t.muted);text(106,111,"16k",t.muted);
+    } else {
+        float maximumHz=_dsp->result().maxHz;
+        const float ticks[]={20,maximumHz>=15000?200.0f:100.0f,maximumHz>=15000?2000.0f:(maximumHz>=5000?1000.0f:500.0f),maximumHz};
+        for(unsigned i=0;i<4;++i) {
+            if(ticks[i]>=1000) snprintf(b,sizeof(b),"%.0fk",ticks[i]/1000);
+            else snprintf(b,sizeof(b),"%.0f",ticks[i]);
+            int16_t x1,y1;uint16_t w,h;_canvas->getTextBounds(b,0,0,&x1,&y1,&w,&h);
+            int x=(int)lroundf(5+118*logf(ticks[i]/20)/logf(maximumHz/20))-w/2-x1;
+            x=std::max(4,std::min(125-(int)w-x1,x));text(x,111,b,t.muted);
+        }
+    }
     if(octave) text(84,25,_octave?"1/3 oct":"1 oct",t.muted);
     else {
-        if(_fft==4) snprintf(b,sizeof(b),"Bass 1.46Hz");
+        if(_fft==4) snprintf(b,sizeof(b),"Bass %.2fHz",_dsp->result().binHz);
         else snprintf(b,sizeof(b),"%u",WINDOWS[_fft]);
         text(_fft==4?70:98,25,b,t.muted);
     }
@@ -252,6 +339,7 @@ void AcousticApp::drawTuner() {
 }
 void AcousticApp::refreshTheme() { _dirty=true;renderToCanvas(); }
 void AcousticApp::adjustGain(int direction) {
+    if(_playback) return; // Never change playback volume from an analysis tool.
     int gain=std::max(0,std::min(30,_gain+direction*3));
     if(microphoneInput.setGain(gain)) {
         _gain=_preferredGain=gain;_autoGain.manualOverride(millis());_prefsDirty=true;_dirty=true;

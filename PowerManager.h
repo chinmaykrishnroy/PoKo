@@ -78,6 +78,7 @@ private:
     std::function<void()> _wakeCb = nullptr;
     std::function<void()> _wifiHibernateCb = nullptr;
     std::function<void()> _networkWakeCb = nullptr;
+    std::function<void()> _powerDownCb = nullptr;
 
     std::atomic<uint32_t> _locks{POWER_LOCK_NONE};
     uint32_t              _ownerLocks[LOCK_OWNER_COUNT] = {0};
@@ -190,6 +191,7 @@ public:
 
     // ── Graceful Shutdown Sequence ───────────────────────────────
     void powerOff(bool restart = false);
+    void setPowerDownCallback(std::function<void()> cb);
 
     // ── Main Update Loop ─────────────────────────────────────────
     void update();

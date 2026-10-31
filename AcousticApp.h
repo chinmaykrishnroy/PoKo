@@ -5,8 +5,8 @@
 #include "AcousticDSP.h"
 #include "AcousticPresentation.h"
 
-// Two foreground tools sharing one microphone owner. DSP/canvas memory exists
-// only while a tool is open; no capture task or blocking read in the UI loop.
+// Foreground tools observe playback PCM without owning the output, or acquire
+// the microphone when idle. DSP/canvas memory is released when the tool closes.
 class AcousticApp : public IApp {
 public:
     struct Status {
@@ -14,6 +14,8 @@ public:
         uint8_t mode;
         uint32_t frames, lastDataAgeMs;
         uint32_t capturedAtMs, analysisUs;
+        uint32_t sampleRate, inputOverruns;
+        const char* inputSource;
         const char* error;
         AcousticDSP::Result signal, displayed;
     };
@@ -22,6 +24,7 @@ public:
     void begin() override;
     void load() override;
     void unload() override;
+    void flushPreferences();
     void update() override;
     void refreshTheme() override;
     void renderToCanvas() override;
@@ -50,10 +53,15 @@ private:
     int _gain = 18, _preferredGain = 18;
     const char* _error = nullptr;
     uint32_t _lastData = 0, _lastAnalysis = 0, _lastDraw = 0, _lastEdit = 0;
-    bool _hasResult = false;
+    bool _hasResult = false, _playback = false;
+    int _playbackSource = 0;
+    uint32_t _inputRate = 48000, _inputGeneration = 0, _micSince = 0, _resumedAt = 0;
     uint32_t _frames = 0;
     uint32_t _rxOverruns = 0, _analysisUs = 0;
     float _range = 0.1f, _meter = -120, _periodMs = 0;
+    bool selectInput();
+    const char* inputName() const;
+    void clearReading();
     void adjustParameter(int direction);
     void adjustGain(int direction);
     void text(int x, int y, const char* value, uint16_t color);

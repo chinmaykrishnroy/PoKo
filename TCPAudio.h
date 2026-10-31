@@ -65,6 +65,7 @@ private:
     private:
         std::atomic<float>* _vol;
         uint32_t        _sampleCount = 0;
+        uint32_t        _tapRate = 44100;
         int16_t         _buffer[512];
         int             _bufIndex = 0;
     public:

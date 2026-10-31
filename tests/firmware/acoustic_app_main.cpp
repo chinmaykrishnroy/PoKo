@@ -6,7 +6,42 @@ void exitApp(AppState state) { exited=state; }
 int main(int argc,char** argv) {
     assert(argc==2);Arduino_GFX gfx;
     AcousticApp analyzer(&gfx,exitApp,false),tuner(&gfx,exitApp,true);
-    if(!strcmp(argv[1],"overrun-clears-reading")) {
+    if(!strcmp(argv[1],"playback-preserved")) {
+        manager.source=AUDIO_MUSIC;manager.playing=true;speakerAmp=true;
+        analyzer.load();
+        assert(manager.requests==0 && manager.source==AUDIO_MUSIC);
+        assert(!microphoneInput.running());
+        analyzer.onEnter();analyzer.unload();assert(manager.releases==0 && manager.source==AUDIO_MUSIC);
+        assert(preferenceWrites==0);analyzer.flushPreferences();assert(preferenceWrites==0);
+        manager.playing=false;analyzer.flushPreferences();assert(preferenceWrites>0);
+    } else if(!strcmp(argv[1],"playback-rate-and-transition")) {
+        manager.source=AUDIO_MUSIC;manager.playing=true;speakerAmp=true;tuner.load();
+        int16_t stereo[4410*2];
+        for(int tick=0;tick<8;++tick) {
+            for(int i=0;i<4410;++i) stereo[2*i]=stereo[2*i+1]=(int16_t)(12000*sin(6.28318530718*440*(tick*4410+i)/44100));
+            playbackAudioTap.writeStereo(stereo,4410,44100);testMillis+=100;tuner.update();
+        }
+        auto state=tuner.status();assert(state.sampleRate==44100 && !strcmp(state.inputSource,"MUSIC"));
+        assert(fabs(state.displayed.frequency-440)<.3 && !state.automaticGain && !microphoneInput.running());
+        assert(gfx.text.find("MUSIC PCM")!=std::string::npos);
+        tuner.onRight();assert(manager.source==AUDIO_MUSIC && manager.requests==0);
+        manager.playing=false;speakerAmp=false;testMillis+=1000;tuner.update();
+        assert(manager.source==AUDIO_MUSIC && !microphoneInput.running() && !tuner.status().hasResult);
+        manager.source=AUDIO_NONE;testMillis+=100;tuner.update();
+        assert(manager.source==AUDIO_MIC && !strcmp(tuner.status().inputSource,"MIC"));
+        assert(tuner.status().sampleRate==48000 && microphoneInput.running());
+        manager.incoming=true;testMillis+=100;tuner.update();
+        assert(manager.source==AUDIO_SSYNC && !microphoneInput.running());
+        assert(!strcmp(tuner.status().inputSource,"SSYNC")); // Allow time for output to prime.
+        tuner.unload();assert(manager.source==AUDIO_SSYNC);
+    } else if(!strcmp(argv[1],"music-starts-during-microphone")) {
+        analyzer.load();assert(microphoneInput.running() && manager.requests==1);
+        manager.source=AUDIO_MUSIC;manager.playing=true;microphoneInput.active=false;speakerAmp=true;
+        testMillis+=100;analyzer.update();
+        assert(!strcmp(analyzer.status().inputSource,"MUSIC") && analyzer.isCapturing());
+        assert(manager.requests==1 && manager.source==AUDIO_MUSIC);
+        analyzer.unload();assert(manager.source==AUDIO_MUSIC && manager.releases==0);
+    } else if(!strcmp(argv[1],"overrun-clears-reading")) {
         tuner.load();for(int i=0;i<3;++i){testMillis+=100;tuner.update();}
         assert(tuner.status().displayed.frequency>0);
         microphoneInput.noData=true;++microphoneInput.overflowCount;testMillis+=100;tuner.update();

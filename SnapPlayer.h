@@ -111,6 +111,7 @@ private:
     std::atomic<bool> _reconnectRequested{false};
     std::atomic<bool> _playStarted{false};
     std::atomic<uint32_t> _lastAudibleMs{0};
+    std::atomic<uint32_t> _lastIncomingAudibleMs{0};
     std::atomic<bool> _playReleased{false};
     std::atomic<bool> _isSuspended{false};
     std::atomic<bool> _suspendDrainRequested{false};
@@ -423,6 +424,7 @@ public:
     bool isAudioActive() const;
 
     bool isPlaying() const;
+    bool hasIncomingAudioSince(uint32_t sinceMs) const;
     bool isSuspended() const;
     bool isSyncing() const;
     int  getVolume() const;

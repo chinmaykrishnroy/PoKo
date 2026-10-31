@@ -24,12 +24,13 @@ struct MicrophoneInput {
     bool running() const { return active; }
 } microphoneInput;
 struct SnapPlayer {
-    bool loaded = true, suspended = false, forceTimeout = false;
+    bool loaded = true, suspended = false, forceTimeout = false, incoming=false;
     std::atomic<bool> done{false};
     int waitTimeouts = 0;
     std::thread worker;
     void (*releaseFn)() = nullptr;
     bool isLoaded() { return loaded; }
+    bool hasIncomingAudioSince(uint32_t) const { return incoming; }
     bool isSuspended() { return suspended; }
     bool isPlaying() { return loaded && !suspended; }
     bool isMuted() { return false; }

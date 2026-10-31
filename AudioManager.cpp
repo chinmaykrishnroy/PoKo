@@ -127,6 +127,13 @@ AudioSource AudioManager::getPhysicalOwner() const { MutexLock lock(_mutex); ret
 
 void AudioManager::setPhysicalOwner(AudioSource src) { MutexLock lock(_mutex); _physicalOwner = src; }
 
+bool AudioManager::resumeIncomingPlayback(uint32_t sinceMs) {
+    if (activeSource()!=AUDIO_MIC || suspendedSource()!=AUDIO_SSYNC ||
+        !_snapPlayer || !_snapPlayer->hasIncomingAudioSince(sinceMs)) return false;
+    release(AUDIO_MIC);
+    return activeSource()==AUDIO_SSYNC;
+}
+
 bool AudioManager::request(AudioSource requested) {
         if (requested == AUDIO_NONE) {
             stopAll();

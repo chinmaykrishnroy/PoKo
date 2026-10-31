@@ -293,6 +293,9 @@ void finishBootSplash() {
 
 void onAppChange(AppState newState) {
     finishBootSplash();
+    // Also covers OTA's "stop audio, return Home" path when already on Home.
+    if(analyzerAppInstance) analyzerAppInstance->flushPreferences();
+    if(tunerAppInstance) tunerAppInstance->flushPreferences();
     if (newState == activeApp) return;
 
     if (!ensureNetworkReady(newState)) return;
@@ -864,6 +867,10 @@ void setup() {
     // Register display wake callback to immediately repaint the active app
     if (powerManager) {
         powerManager->setNetworkCallbacks(hibernateNetwork, wakeNetwork);
+        powerManager->setPowerDownCallback([]() {
+            if(analyzerAppInstance) { analyzerAppInstance->unload();analyzerAppInstance->flushPreferences(); }
+            if(tunerAppInstance) { tunerAppInstance->unload();tunerAppInstance->flushPreferences(); }
+        });
         powerManager->setWakeCallback([]() {
             if (bootSplashVisible) { finishBootSplash(); return; }
             wakeNetwork();
@@ -935,6 +942,8 @@ void loop() {
     // Process button input and combos
     btnInput.update();
     if (audioManager) audioManager->update();
+    if (analyzerAppInstance) analyzerAppInstance->flushPreferences();
+    if (tunerAppInstance) tunerAppInstance->flushPreferences();
     if (powerManager) {
         ProtectedActivityKind protectedKind = PROTECTED_NONE;
         if (snapService && snapService->isPlaying()) protectedKind = PROTECTED_SSYNC;

@@ -17,6 +17,7 @@ public:
     };
     explicit AcousticDSP(bool collectBass = true);
     void resetInputHistory();
+    bool setSampleRate(uint32_t rate);
     void push(const int16_t* samples, size_t count);
     bool analyze(size_t window, bool pitch, bool chord, bool bass = false);
     const Result& result() const;
@@ -36,7 +37,7 @@ private:
     size_t _bassWrite, _bassCount;
     unsigned _decimationPhase, _rawClipAge;
     bool _bass, _collectBass;
-    float _sampleRate, _frequencyMax, _tonalMaximum, _tonalNoise;
+    float _inputRate, _sampleRate, _frequencyMax, _tonalMaximum, _tonalNoise;
     float _windowEnergy, _spectralMaximum;
     Result _result;
     int16_t sample(size_t offset) const;

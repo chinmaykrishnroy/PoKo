@@ -1,3 +1,4 @@
+#include "PlaybackAudioTap.h"
 #include "SnapPlayer.h"
 #include "AudioActivity.h"
 
@@ -264,6 +265,10 @@ void SnapPlayer::requestProducerResync(const char* reason) {
 
 bool SnapPlayer::writeRingExact(const uint8_t* data, size_t bytes) {
         if (bytes == 0) return true;
+        // Ingress is distinct from rendering. Keep this observation alive even
+        // when a suspended output has filled its ring and awaits resync.
+        bool audible=pcm16HasAudibleSignal(data,bytes);
+        if(audible) { uint32_t now=millis();_lastIncomingAudibleMs.store(now?now:1,std::memory_order_release); }
         uint32_t generation = _resyncGeneration;
         if (_producerAwaitingResync) {
             _decodeWriteFailed = true;
@@ -282,7 +287,7 @@ bool SnapPlayer::writeRingExact(const uint8_t* data, size_t bytes) {
         }
 
         if (sent == bytes) {
-            if (pcm16HasAudibleSignal(data, bytes)) {
+            if (audible) {
                 uint32_t audibleAt = millis();
                 _lastAudibleMs.store(audibleAt == 0 ? 1 : audibleAt,
                                      std::memory_order_release);
@@ -397,6 +402,7 @@ bool SnapPlayer::primeI2SPath(uint32_t sampleRate) {
             size_t bytes = (size_t)frames * 2U * sizeof(int16_t);
             size_t written = 0;
             esp_err_t err = i2s_channel_write(poko_tx_handle, silence, bytes, &written, pdMS_TO_TICKS(50));
+            playbackAudioTap.writeStereo(silence,written/4,sampleRate,millis());
             if (err != ESP_OK || written != bytes) {
                 return false;
             }
@@ -1575,6 +1581,7 @@ void SnapPlayer::audioTask() {
                 const size_t requestedBytes = outFrames * sizeof(int16_t) * 2U;
                 size_t written = 0;
                 esp_err_t err = poko_tx_handle ? i2s_channel_write(poko_tx_handle, pcmOut, requestedBytes, &written, pdMS_TO_TICKS(30)) : ESP_FAIL;
+                playbackAudioTap.writeStereo(pcmOut,written/4,activeRate,millis());
                 if (err != ESP_OK || written != requestedBytes) {
                     _i2sShortWrites.fetch_add(1, std::memory_order_relaxed);
                     Serial.printf("[snap] I2S short write: err=%d %u/%u\n",
@@ -1977,6 +1984,13 @@ bool SnapPlayer::isPlaying() const {
                !_isSuspended.load(std::memory_order_relaxed) &&
                !_serverMuted.load(std::memory_order_relaxed);
     }
+
+bool SnapPlayer::hasIncomingAudioSince(uint32_t sinceMs) const {
+    uint32_t last=_lastIncomingAudibleMs.load(std::memory_order_acquire);
+    uint32_t now=millis();
+    return last && now-last<1000 && (now-sinceMs>=1000 || (int32_t)(last-sinceMs)>0) &&
+           _connected.load(std::memory_order_acquire) && !_serverMuted.load(std::memory_order_relaxed);
+}
 
 bool SnapPlayer::isSuspended() const { return _isSuspended; }
 

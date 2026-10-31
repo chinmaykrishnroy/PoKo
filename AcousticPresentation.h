@@ -12,6 +12,7 @@ private:
     AcousticDSP::Result _display;
     float _history[3];
     unsigned _historyCount,_historyWrite,_candidateCount;
+    float _candidateConfidence;
     int _candidateRoot;
     AcousticDSP::Chord _candidateChord;
     uint32_t _lastNote,_lastChord,_lastCandidate;

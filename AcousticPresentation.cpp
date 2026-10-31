@@ -6,7 +6,7 @@ AcousticTunerReading::AcousticTunerReading() { reset(); }
 void AcousticTunerReading::reset() {
     _display={};_display.midi=_display.root=-1;_display.chord=AcousticDSP::NONE;
     _historyCount=_historyWrite=_candidateCount=0;_candidateRoot=-1;_candidateChord=AcousticDSP::NONE;
-    _lastNote=_lastChord=_lastCandidate=0;
+    _lastNote=_lastChord=_lastCandidate=0;_candidateConfidence=0;
 }
 const AcousticDSP::Result& AcousticTunerReading::result() const { return _display; }
 void AcousticTunerReading::update(const AcousticDSP::Result& signal,uint32_t now,bool fresh) {
@@ -28,10 +28,14 @@ void AcousticTunerReading::update(const AcousticDSP::Result& signal,uint32_t now
             _lastChord=now;_display.chordConfidence+=0.35f*(signal.chordConfidence-_display.chordConfidence);
         }
         if(_candidateRoot!=signal.root || _candidateChord!=signal.chord || now-_lastCandidate>350) {
-            _candidateRoot=signal.root;_candidateChord=signal.chord;_candidateCount=0;
+            _candidateRoot=signal.root;_candidateChord=signal.chord;_candidateCount=0;_candidateConfidence=0;
         }
-        _lastCandidate=now;_candidateCount=std::min(2u,_candidateCount+1);
-        if(_candidateCount>=2) {
+        _lastCandidate=now;_candidateCount=std::min(3u,_candidateCount+1);
+        // Changing quality on the same root needs one extra confirmation:
+        // decaying guitar partials must not briefly invent/remove a seventh.
+        unsigned required=_display.chord!=AcousticDSP::NONE && signal.root==_display.root && signal.chord!=_display.chord?3:2;
+        _candidateConfidence=std::min(3.0f,_candidateConfidence+signal.chordConfidence);
+        if(_candidateCount>=required && _candidateConfidence>=(required==3?2.0f:1.2f)) {
             _display.root=signal.root;_display.chord=signal.chord;
             _display.chordConfidence=signal.chordConfidence;_lastChord=now;
         }
@@ -55,7 +59,9 @@ void AcousticAutoGain::reset(uint32_t now) { _noiseDb=-80;_lastChange=now;_manua
 void AcousticAutoGain::manualOverride(uint32_t now) { _manual=true;_manualAt=_lastChange=now; }
 bool AcousticAutoGain::automatic(uint32_t now) const { return !_manual || now-_manualAt>=5000; }
 int AcousticAutoGain::update(const AcousticDSP::Result& signal,int gain,uint32_t now) {
-    if(signal.tonality<12) _noiseDb+=0.05f*(signal.rmsDb-_noiseDb);
+    bool recognized=(signal.frequency>0 && signal.confidence>=0.85f) ||
+        (signal.chord!=AcousticDSP::NONE && signal.chordConfidence>=0.45f);
+    if(!recognized) _noiseDb+=0.05f*(signal.rmsDb-_noiseDb);
     if(!automatic(now)) return gain;
     if((signal.clipped || signal.peakDb>-2) && now-_lastChange>=250 && gain>0) {
         _lastChange=now;_noiseDb-=3;return std::max(0,gain-3);
@@ -63,7 +69,7 @@ int AcousticAutoGain::update(const AcousticDSP::Result& signal,int gain,uint32_t
     if(signal.rmsDb>-15 && now-_lastChange>=500 && gain>0) {
         _lastChange=now;_noiseDb-=3;return std::max(0,gain-3);
     }
-    if(signal.tonality>=12 && signal.rmsDb>_noiseDb+8 && signal.rmsDb<-30 &&
+    if(recognized && signal.tonality>=12 && signal.rmsDb>_noiseDb+8 && signal.rmsDb<-30 &&
        now-_lastChange>=1000 && gain<30) {
         _lastChange=now;_noiseDb+=3;return std::min(30,gain+3);
     }

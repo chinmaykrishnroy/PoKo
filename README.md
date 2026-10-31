@@ -67,11 +67,21 @@ window and first when moving back past it.
 
 ### Microphone Analyzer and Tuner
 
-These tools use the board's **ES7210 microphone input**, not a copy of playback.
-They work without a media server. `2R` cycles Analyzer's Scope → Log FFT → Octave
+These tools automatically observe **Music or active SSync playback PCM** without
+stopping it, changing its volume, or taking its I²S ownership. The header shows
+`MUSIC PCM` / `SSYNC PCM`. With no playing stream, they use the board's **ES7210
+microphone** and work without a media server. Music retains PCM observation
+through pauses; it shows `--` while no samples arrive. Idle SSync can yield to
+the microphone; new audible SSync input automatically resumes output and switches
+the tool back to PCM. Microphone gain controls apply only to microphone input. Starting Music from
+an updated server while a tool is open keeps the tool visible and switches its
+input to PCM.
+
+`2R` cycles Analyzer's Scope → Log FFT → Octave
 → Level modes, or Tuner's Note → Chord modes; `2L` returns home. Single `L`/`R`
 adjusts microphone gain in 3 dB steps (0–30 dB; default 18 dB). Tuner also uses
-automatic gain: it raises quiet tonal input gradually, does not raise gain on
+automatic gain: it raises a quiet recognized note/chord above the learned ambient
+floor gradually; tonal interference alone is insufficient, and it does not raise gain on
 silence/broadband noise, and reduces gain quickly on clipping. `AUTO` shows the current gain;
 manual changes override it for five seconds (`MAN`). Automatic gain changes are
 not saved to preferences; your explicit manual gain is saved.
@@ -94,8 +104,10 @@ Axes remain labeled in dBFS. The scope also shows the smoothed measured period (
 when a periodic signal is detected; FFT shows its strongest peak frequency in
 small type (`Pk`, Hz), including fractional Hz below 1 kHz. Normal FFT spans
 20 Hz–20 kHz on a logarithmic axis (8192 samples at 48 kHz give 5.86 Hz bins).
-Holding R beyond 8192 selects **Bass**: 20–2,000 Hz, a 63-tap anti-alias filter and
-12 kHz analysis rate give **1.46 Hz bins** from about **0.68 seconds** of history.
+Holding R beyond 8192 selects **Bass**: 20–2,000 Hz and a 63-tap anti-alias filter.
+At the microphone's 48 kHz clock, its 12 kHz analysis rate gives **1.46 Hz bins**
+from about **0.68 seconds** of history. At 44.1 kHz playback the bins are **1.35 Hz**
+from about **0.74 seconds**; labels follow the actual clock.
 Decimal peaks are sub-bin estimates, not a promise of 0.01 Hz resolution.
 Octave centers span 31.25 Hz–16 kHz. The level meter shows RMS and peak **dBFS** plus
 clipping, not calibrated acoustic dB SPL. Hold L/R in Tuner adjusts gain.
@@ -104,7 +116,9 @@ Tuner uses A4=440 Hz and displays note, octave, frequency and cents (approximate
 40–2000 Hz). Chord mode is an estimate for a clearly played chord, not polyphonic
 transcription of a full song. Noise, weak/missing notes, distortion and ambiguous
 voicings can prevent or change a match; symmetric augmented chords are named
-using the detected bass. Two agreeing detections confirm a chord; a brief hold
+using the detected bass. Two agreeing detections confirm a chord; a change of quality on the same root
+requires at least three confirmations and additional confidence for weak matches
+to reject transient upper partials. A brief hold
 bridges missed frames, then clears to `--`. A rich single note is rejected as a
 chord. Silence or unavailable input shows `--` in the same fixed layout.
 Pitch uses [YIN](https://www.ee.columbia.edu/~dpwe/papers/deChevK02-yin.pdf) with
@@ -114,23 +128,39 @@ Tuning color blends from green (within 2 cents) through amber toward red as erro
 grows. Spectrum colors run from bass cyan through blue to treble violet; level
 meter warning colors follow actual dBFS/clipping, independently of autoscaling.
 
-Input is captured at 48 kHz/16-bit stereo; analysis uses MIC1 rather than averaging
+Microphone input is captured at 48 kHz/16-bit stereo; analysis uses MIC1 rather than averaging
 the two microphones and introducing phase cancellation. The microphone takes
 exclusive ownership of I²S0: SSync is suspended and resumed on exit; Music/Video
 use their existing stop/handoff path. The speaker PA remains off during capture.
 Active capture blocks idle system sleep/auto-off above the configured battery
 threshold; display timeouts and low-battery protection still apply. Settings save
-on exit, and DSP/canvas buffers are released on exit. The tools do not auto-open
+on exit when idle; an active PCM observer defers flash writes until playback is
+idle or an orderly shutdown. DSP/canvas buffers are released on exit. The tools do not auto-open
 after reboot.
 
 Authenticated `GET /api/acoustic` reports capture state, frame count, input age,
 level, peak frequency, period, FFT bin/range, raw versus displayed tuner readings,
 automatic-gain status and speaker-PA state for on-device verification.
-It also reports RX overruns, capture timestamps and DSP duration. Capture gaps
+`input_source`, the actual `sample_rate`, and `input_overruns` distinguish
+microphone RX from the passive playback observer. Playback is analyzed at its
+actual clock (including 44.1 and 48 kHz), not relabeled as 48 kHz; a stable
+channel is selected to avoid cancellation of anti-phase stereo. Overflow of the
+observer only discards analysis copies, never playback. It also reports RX
+overruns, capture timestamps and DSP duration. Capture gaps
 invalidate the analysis history; pitch is never estimated across known lost
 samples. Tuner skips the Analyzer-only bass decimator, and RX buffers cover about
 171 ms of short service-loop stalls.
 It exposes no raw microphone recording and requires the device admin login.
+
+For opt-in hardware checks, configure the private `.env` from `.env.example`.
+`python server/deploy/verify_acoustic.py --env .env` explicitly stops device
+playback to check microphone RX continuity and repeated ownership handoffs.
+With continuous playback already running, use
+`python server/deploy/verify_passive_audio.py --source music --env .env` (or
+`--source ssync`) to verify both tools while preserving that stream. Neither
+script records microphone audio. Chord mode remains an estimate; a noisy or
+ambiguous guitar decay may deliberately show `--`.
+
 
 Hardware references: [Waveshare board documentation](https://docs.waveshare.com/ESP32-S3-LCD-0.85),
 [board schematic](https://files.waveshare.com/wiki/ESP32-S3-LCD-0.85/ESP32-S3-LCD-0.85-Schematic.pdf),

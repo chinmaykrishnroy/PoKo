@@ -27,6 +27,14 @@ int main(int argc, char** argv) {
         CHECK(stopped && microphoneInput.running() && manager.getPhysicalOwner()==AUDIO_MIC);
         manager.release(AUDIO_MIC);
         CHECK(manager.activeSource()==AUDIO_SSYNC && !snap.suspended && !microphoneInput.running());
+    } else if (!strcmp(argv[1], "mic-resumes-incoming-ssync")) {
+        CHECK(manager.request(AUDIO_MIC));
+        CHECK(!manager.resumeIncomingPlayback(100));
+        CHECK(manager.activeSource()==AUDIO_MIC && microphoneInput.running());
+        snap.incoming=true;
+        CHECK(manager.resumeIncomingPlayback(100));
+        CHECK(manager.activeSource()==AUDIO_SSYNC && !microphoneInput.running() && !snap.suspended);
+        CHECK(!manager.resumeIncomingPlayback(100));
     } else if (!strcmp(argv[1], "mic-handoff")) {
         CHECK(manager.request(AUDIO_MIC));
         CHECK(snap.suspended && microphoneInput.running());

@@ -19,14 +19,16 @@ def main() -> int:
     if not (args.onebutton / "OneButton.cpp").is_file():
         parser.error("Pass --onebutton with the installed OneButton source directory")
     BUILD.mkdir(parents=True, exist_ok=True)
-    for script in ("prepare_audio_test.py", "prepare_microphone_test.py", "prepare_acoustic_app_test.py", "prepare_capture_power_test.py", "prepare_video_test.py", "prepare_music_test.py", "prepare_library_status_test.py", "prepare_power_wake_test.py"):
+    for script in ("prepare_audio_test.py", "prepare_microphone_test.py", "prepare_acoustic_app_test.py", "prepare_capture_power_test.py", "prepare_snap_ingress_test.py", "prepare_video_test.py", "prepare_music_test.py", "prepare_library_status_test.py", "prepare_power_wake_test.py"):
         subprocess.run([sys.executable, str(HERE / script)], cwd=ROOT, check=True)
     cases = {
+        "ssync-ingress": ["full-suspended-ring", "fresh-after-long-idle"],
+        "playback-tap": ["disabled-and-copy", "overflow-and-rate-change", "pause-discards-history", "silent-channel-handoff", "producer-consumer"],
         "capture-power": ["capture-pa-off-and-lock", "capture-stop-and-playback"],
-        "acoustic-app": ["overrun-clears-reading", "auto-gain-persistence", "render-preview", "right-footer-and-fft-headroom", "quiet-placeholder", "scope-connected-trace", "modes-and-holds", "tuner-and-stale-input", "failure-and-retry", "external-stop-and-reload"],
+        "acoustic-app": ["playback-preserved", "playback-rate-and-transition", "music-starts-during-microphone", "overrun-clears-reading", "auto-gain-persistence", "render-preview", "right-footer-and-fft-headroom", "quiet-placeholder", "scope-connected-trace", "modes-and-holds", "tuner-and-stale-input", "failure-and-retry", "external-stop-and-reload"],
         "microphone": ["no-clock-steal", "failure-cleanup", "capture-and-stop", "gain"],
         "launcher-window": ["scroll-and-wrap"],
-        "acoustic-dsp": ["tuner-history-without-bass", "scope-trace-math", "fft-headroom", "reading-hysteresis", "auto-gain", "semantic-colors", "bass-resolution", "harmonic-note-rejection", "pitch", "spectrum-levels", "chords", "silence-noise", "scope-period", "adaptive-scale", "weak-chord", "uneven-chord", "pitch-with-transient", "scale-headroom"],
+        "acoustic-dsp": ["playback-sample-rates", "tuner-history-without-bass", "scope-trace-math", "fft-headroom", "reading-hysteresis", "quality-change-confirmation", "auto-gain", "semantic-colors", "bass-resolution", "bass-playback-clock", "harmonic-note-rejection", "pitch", "spectrum-levels", "chords", "silence-noise", "scope-period", "adaptive-scale", "weak-chord", "uneven-chord", "weak-subharmonic-chord", "open-voicing-chord", "rich-chords", "bright-chord-missing-third", "weak-fundamental-single-note", "pitch-with-transient", "scale-headroom"],
         "power-wake": ["held-power", "held-combo", "released", "rtc-restore-before-boot"],
         "boot-splash": ["white-first", "fusion-randomized", "allocation-fallback", "nonblocking-finish", "visible-duration", "slow-startup", "clock-wrap"],
         "library-status": ["empty", "offline", "error", "missing", "loading", "populated", "invalidated-cache"],
@@ -36,7 +38,7 @@ def main() -> int:
                     "wake-left", "wake-right", "wake-power", "music-hold", "single-left", "single-right",
                     "busy-main-loop", "bounce", "overflow", "combo-click", "combo-double",
                     "combo-reboot", "combo-drivers", "combo-emergency"],
-        "audio": ["mic-from-music", "mic-from-video", "mic-handoff", "mic-failure-restores-ssync", "mic-stop-all", "mic-handoff-timeout", "suspend-transition", "suspend-timeout", "stop-all", "silent-video-is-not-audio"],
+        "audio": ["mic-resumes-incoming-ssync", "mic-from-music", "mic-from-video", "mic-handoff", "mic-failure-restores-ssync", "mic-stop-all", "mic-handoff-timeout", "suspend-transition", "suspend-timeout", "stop-all", "silent-video-is-not-audio"],
         "music": ["terminal-release", "handoff-defers-release", "handoff-timeout-retries", "shutdown-timeout-retains-owner", "startup-timeout-releases", "blocked-loop-clock", "remote-metadata", "remote-listener-failure", "server-handoff-no-stop"],
         "video": ["next", "next-page", "page-failure", "http-failure", "missing-refresh", "missing-empty", "load-failure", "stop-timeout", "next-stop-timeout", "fit-query", "async-rejected", "async-failed", "async-stale-result", "remote-metadata", "remote-listener-failure", "server-handoff-no-stop"],
         "marquee": ["scroll-and-wrap"],
@@ -53,8 +55,10 @@ def main() -> int:
         "audio-activity": ["silence", "audible-positive", "audible-negative"],
     }
     sources = {
+        "ssync-ingress": [ROOT / "build/snap-ingress-test.cpp", ROOT / "AudioActivity.cpp"],
+        "playback-tap": [HERE / "playback_audio_tap.cpp", ROOT / "PlaybackAudioTap.cpp"],
         "capture-power": [ROOT / "build/capture-power-test.cpp", ROOT / "PowerPolicy.cpp"],
-        "acoustic-app": [ROOT / "build/acoustic-app-test.cpp", ROOT / "AcousticDSP.cpp", ROOT / "AcousticPresentation.cpp"],
+        "acoustic-app": [ROOT / "build/acoustic-app-test.cpp", ROOT / "AcousticDSP.cpp", ROOT / "AcousticPresentation.cpp", ROOT / "PlaybackAudioTap.cpp"],
         "microphone": [ROOT / "build/microphone-test.cpp"],
         "launcher-window": [HERE / "launcher_window.cpp", ROOT / "LauncherWindow.cpp"],
         "acoustic-dsp": [HERE / "acoustic_dsp.cpp", ROOT / "AcousticDSP.cpp", ROOT / "AcousticPresentation.cpp"],
@@ -93,7 +97,7 @@ def main() -> int:
             continue
         exe = BUILD / (name + (".exe" if os.name == "nt" else ""))
         case_includes = ([HERE / "security_stubs"] if name == "device-security" else []) + includes
-        if name == "acoustic-app":
+        if name in ("acoustic-app", "playback-tap"):
             case_includes.insert(0, HERE / "acoustic_stubs")
         if name == "boot-splash":
             case_includes.insert(0, HERE / "splash_stubs")

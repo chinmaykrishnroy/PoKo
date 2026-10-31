@@ -28,21 +28,27 @@ def main():
     initial_uptime = original["uptime_ms"]
     report = []
     try:
+        # Auto input normally preserves playback. This opt-in test explicitly
+        # stops it to exercise the physical microphone instead of the PCM tap.
+        get("/api/audio/stop")
         get("/api/power?screen=on")
         for name, app_id, modes in (("analyzer", 9, 4), ("tuner", 10, 2)):
             get("/api/app?set=" + name)
             time.sleep(1)
             first = get("/api/acoustic")
             assert first["capturing"] and not first["error"], first
-            start = time.monotonic()
-            time.sleep(2)
+            assert first["input_source"] == "MIC" and first["sample_rate"] == 48000
+            time.sleep(5)
             current = get("/api/acoustic")
-            rate = (current["frames"] - first["frames"]) / (time.monotonic() - start)
-            assert 38000 < rate < 58000, ("unexpected physical RX throughput", rate)
+            elapsed = ((current["captured_at_ms"] - first["captured_at_ms"]) & 0xffffffff) / 1000
+            assert elapsed > 0
+            rate = ((current["frames"] - first["frames"]) & 0xffffffff) / elapsed
+            assert 47000 < rate < 49000, ("unexpected physical RX throughput", rate)
+            assert current["rx_overruns"] == first["rx_overruns"], "microphone lost samples during steady capture"
             visited = set()
             for _ in range(modes):
                 current = get("/api/acoustic")
-                assert current["app_state"] == app_id and current["capturing"], current
+                assert current["app_state"] == app_id and current["capturing"] and current["input_source"] == "MIC", current
                 assert current["has_result"] and current["last_data_age_ms"] < 500, current
                 assert not current["speaker_amp"] and not current["error"], current
                 visited.add(current["mode"])

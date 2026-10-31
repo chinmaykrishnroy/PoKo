@@ -9,7 +9,9 @@ inline uint16_t pokoClrErr() { return 0xF800; }
 inline uint16_t pokoClrGreen() { return 0x07E0; }
 inline uint16_t pokoClrCyan() { return 0x07FF; }
 inline bool isDarkTheme() { return true; }
-enum AudioSource { AUDIO_NONE,AUDIO_MIC };
+enum AudioSource { AUDIO_NONE,AUDIO_SSYNC,AUDIO_MUSIC,AUDIO_VIDEO,AUDIO_BLUETOOTH,AUDIO_MIC };
+inline bool speakerAmp=false;
+inline bool isSpeakerAmpEnabled() { return speakerAmp; }
 struct MicrophoneInput {
     bool active=false,noData=false,failGain=false,quiet=false;
     bool chord=false;
@@ -33,11 +35,13 @@ struct MicrophoneInput {
     }
 } microphoneInput;
 struct AudioManager {
-    bool fail=false;
+    bool fail=false,playing=false,incoming=false;
     int requests=0,releases=0;
     AudioSource source=AUDIO_NONE;
     bool request(AudioSource s) { ++requests;if(fail) return false;source=s;microphoneInput.active=true;return true; }
     void release(AudioSource s) { if(source==s) { ++releases;source=AUDIO_NONE;microphoneInput.active=false; } }
     AudioSource activeSource() const { return source; }
+    bool isSoundPlaying() const { return playing; }
+    bool resumeIncomingPlayback(uint32_t) { if(!incoming || source!=AUDIO_MIC) return false;incoming=false;source=AUDIO_SSYNC;microphoneInput.active=false;return true; }
 } manager;
 inline AudioManager* audioManager=&manager;

@@ -48,7 +48,7 @@ void PokoAPI::begin() {
             json += "\"last_wake_cause\":" + String((int)esp_sleep_get_wakeup_cause()) + ",";
             json += "\"last_ext1_wake_mask\":" + String((unsigned long)esp_sleep_get_ext1_wakeup_status()) + ",";
             json += "\"cpu_mhz\":" + String(getCpuFrequencyMhz()) + ",";
-            json += "\"firmware_version\":\"v2.4.3\",";
+            json += "\"firmware_version\":\"v2.5.0\",";
             json += "\"app_state\":" + String((int)activeApp) + ",";
             json += "\"theme\":\"" + String(isDarkTheme() ? "dark" : "light") + "\",";
             json += "\"master_vol\":" + String(getMasterVolumeLimit()) + ",";
@@ -622,9 +622,11 @@ void PokoAPI::begin() {
             musicAppInstance->setServerTransition(true);
             videoAppInstance->setServerTransition(true);
             AppState target = audio ? STATE_MUSIC_UI : STATE_VIDEO_UI;
-            onAppChange(target);
-            bool ready = activeApp == target && (audio ? musicAppInstance->prepareRemoteMedia(media)
-                                                       : videoAppInstance->prepareRemoteMedia(media));
+            bool observingAudio = audio && (activeApp == STATE_ANALYZER || activeApp == STATE_TUNER);
+            if (!observingAudio) onAppChange(target);
+            bool ready = (activeApp == target || observingAudio) &&
+                         (audio ? musicAppInstance->prepareRemoteMedia(media)
+                                : videoAppInstance->prepareRemoteMedia(media));
             if (!ready) {
                 _server->send(503, "application/json", "{\"ok\":false,\"error\":\"media listener unavailable\"}");
                 return;
@@ -691,7 +693,9 @@ void PokoAPI::begin() {
             json += ",\"capturing\":" + String(app && state.capturing ? "true" : "false");
             json += ",\"has_result\":" + String(app && state.hasResult ? "true" : "false");
             json += ",\"mode\":" + String(state.mode);
-            json += ",\"sample_rate\":" + String(MicrophoneInput::SAMPLE_RATE);
+            json += ",\"sample_rate\":" + String(state.sampleRate);
+            json += ",\"input_source\":\"" + String(state.inputSource ? state.inputSource : "NONE") + "\"";
+            json += ",\"input_overruns\":" + String(state.inputOverruns);
             json += ",\"gain_db\":" + String(microphoneInput.gain());
             json += ",\"auto_gain\":" + String(state.automaticGain ? "true" : "false");
             json += ",\"frames\":" + String(state.frames);

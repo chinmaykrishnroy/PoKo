@@ -1,3 +1,4 @@
+#include "PlaybackAudioTap.h"
 #include "SyncedAVPlayer.h"
 #include "AudioActivity.h"
 
@@ -257,6 +258,7 @@ void SyncedAVPlayer::audioTask() {
                     size_t written = 0;
                     if (poko_tx_handle) {
                         i2s_channel_write(poko_tx_handle, stereo, sizeof(stereo), &written, pdMS_TO_TICKS(20));
+                        playbackAudioTap.writeStereo(stereo,written/4,44100,millis());
                     }
                     _samplesPlayed.fetch_add(written / 8, std::memory_order_relaxed);
                     _audioUnderruns.fetch_add(1, std::memory_order_relaxed);
@@ -286,6 +288,7 @@ void SyncedAVPlayer::audioTask() {
             }
             if (poko_tx_handle && _isRunning) {
                 i2s_channel_write(poko_tx_handle, stereo, outIdx * sizeof(int16_t), &written, pdMS_TO_TICKS(30));
+                playbackAudioTap.writeStereo(stereo,written/4,44100,millis());
             }
             // Account for confirmed DAC writes, not decoded-but-dropped PCM.
             _samplesPlayed.fetch_add(written / 8, std::memory_order_relaxed);

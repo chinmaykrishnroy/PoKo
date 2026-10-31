@@ -19,7 +19,18 @@ void tone(AcousticDSP& dsp,const double* frequencies,int count,float amplitude=0
 int main(int argc,char** argv) {
     assert(argc==2);
     auto dsp=std::make_unique<AcousticDSP>();
-    if(!strcmp(argv[1],"tuner-history-without-bass")) {
+    if(!strcmp(argv[1],"playback-sample-rates")) {
+        int16_t data[8192];
+        for(uint32_t rate:{22050u,44100u,48000u,96000u}) {
+            assert(dsp->setSampleRate(rate));
+            for(int i=0;i<8192;++i) data[i]=(int16_t)(12000*sin(2*PI*440*i/rate));
+            dsp->push(data,8192);assert(dsp->analyze(8192,true,false));auto r=dsp->result();
+            printf("rate=%u tuner=%.3f peak=%.3f\n",rate,r.frequency,r.spectralPeakHz);
+            assert(fabs(r.frequency-440)<.3 && fabs(r.spectralPeakHz-440)<.3);
+            assert(fabs(r.periodMs-1000.0/440)<.003);
+        }
+        assert(!dsp->setSampleRate(0));
+    } else if(!strcmp(argv[1],"tuner-history-without-bass")) {
         auto tuner=std::make_unique<AcousticDSP>(false);double f=440;
         for(int i=0;i<5;++i) tone(*tuner,&f,1);
         assert(!tuner->analyze(8192,false,false,true));
@@ -50,12 +61,31 @@ int main(int argc,char** argv) {
         reading.update(gap,751,true);assert(reading.result().chord==AcousticDSP::NONE && reading.result().frequency==0);
         r.frequency=523.25f;reading.update(r,800,true);assert(fabs(reading.result().frequency-523.25f)<.01f);
         reading.update(r,900,false);assert(reading.result().frequency==0 && reading.result().chord==AcousticDSP::NONE);
+    } else if(!strcmp(argv[1],"quality-change-confirmation")) {
+        AcousticTunerReading reading;AcousticDSP::Result r={};
+        r.root=0;r.chord=AcousticDSP::MAJOR;r.chordConfidence=.9f;
+        reading.update(r,100,true);reading.update(r,200,true);
+        assert(reading.result().chord==AcousticDSP::MAJOR);
+        r.chord=AcousticDSP::MAJOR7;r.chordConfidence=.7f;
+        reading.update(r,300,true);reading.update(r,400,true);
+        assert(reading.result().chord==AcousticDSP::MAJOR); // A brief extra partial is not a new quality.
+        reading.update(r,500,true);assert(reading.result().chord==AcousticDSP::MAJOR7);
+        r.chord=AcousticDSP::NONE;reading.update(r,1000,true);
+        assert(reading.result().chord==AcousticDSP::NONE);
+        reading.reset();r.chord=AcousticDSP::MAJOR;r.chordConfidence=.9f;
+        reading.update(r,100,true);reading.update(r,200,true);
+        r.chord=AcousticDSP::MAJOR7;r.chordConfidence=.55f;
+        reading.update(r,300,true);reading.update(r,400,true);reading.update(r,500,true);
+        assert(reading.result().chord==AcousticDSP::MAJOR);
+        reading.update(r,600,true);assert(reading.result().chord==AcousticDSP::MAJOR7);
     } else if(!strcmp(argv[1],"auto-gain")) {
         AcousticAutoGain gain;AcousticDSP::Result r={};r.rmsDb=-120;r.peakDb=-120;
         assert(gain.update(r,18,2000)==18);
         r.rmsDb=-70;r.peakDb=-50;r.tonality=3;
         assert(gain.update(r,18,3000)==18);
         r.tonality=50;r.rmsDb=-60;r.peakDb=-50;
+        assert(gain.update(r,18,3500)==18); // Tonal interference alone is insufficient.
+        r.frequency=440;r.confidence=.99f;
         assert(gain.update(r,18,4000)==21);
         assert(gain.update(r,21,4500)==21);
         assert(gain.update(r,21,5000)==24);
@@ -82,6 +112,12 @@ int main(int argc,char** argv) {
         assert(fabs(dsp->result().spectralPeakHz-55)<.05); // Anti-alias filter.
         data.back()=32767;dsp->push(data.data(),data.size());dsp->analyze(8192,false,false,true);
         assert(dsp->result().clipped); // Filtering must not hide ADC clipping.
+    } else if(!strcmp(argv[1],"bass-playback-clock")) {
+        dsp->setSampleRate(44100);std::vector<int16_t> data(32768+128);
+        for(size_t i=0;i<data.size();++i) data[i]=(int16_t)(32767*.1*sin(2*PI*41.20344*i/44100));
+        dsp->push(data.data(),data.size());assert(dsp->analyze(8192,false,false,true));
+        assert(fabs(dsp->result().binHz-1.345825195)<.00001);
+        assert(fabs(dsp->result().spectralPeakHz-41.20344)<.05);
     } else if(!strcmp(argv[1],"harmonic-note-rejection")) {
         int16_t data[8192];const int harmonics[]={1,2,3,4,5,7,9,11,13};
         for(int i=0;i<8192;++i) {
@@ -155,6 +191,64 @@ int main(int argc,char** argv) {
         dsp->push(data,8192);dsp->analyze(8192,false,true);
         printf("uneven C major: chord=%d\n",dsp->result().chord);
         assert(dsp->result().root==0 && dsp->result().chord==AcousticDSP::MAJOR);
+    } else if(!strcmp(argv[1],"weak-subharmonic-chord")) {
+        // A quiet low rumble must not classify all genuine upper chord tones
+        // as its harmonics simply because their frequencies are near multiples.
+        int16_t data[8192];
+        for(int i=0;i<8192;++i) data[i]=(int16_t)(32767*(.004*sin(2*PI*65.406391*i/48000)+.15*sin(2*PI*261.625565*i/48000)+.12*sin(2*PI*329.627557*i/48000)+.15*sin(2*PI*391.995436*i/48000)));
+        dsp->push(data,8192);dsp->analyze(8192,false,true);
+        printf("C major + weak subharmonic: root=%d chord=%d\n",dsp->result().root,dsp->result().chord);
+        assert(dsp->result().root==0 && dsp->result().chord==AcousticDSP::MAJOR);
+    } else if(!strcmp(argv[1],"open-voicing-chord")) {
+        const double voicings[][3]={{65.406391,82.406889,97.998859},{130.812783,329.627557,391.995436},{130.812783,164.813778,391.995436},{164.813778,195.997718,261.625565}};
+        for(const auto& f:voicings) {
+            tone(*dsp,f,3,.5f);dsp->analyze(8192,false,true);
+            printf("open C major: root=%d chord=%d\n",dsp->result().root,dsp->result().chord);
+            assert(dsp->result().root==0 && dsp->result().chord==AcousticDSP::MAJOR);
+        }
+    } else if(!strcmp(argv[1],"rich-chords")) {
+        const int pattern[8][4]={{0,4,7,-1},{0,3,7,-1},{0,2,7,-1},{0,5,7,-1},{0,4,7,10},{0,4,7,11},{0,3,7,10},{0,4,8,-1}};
+        int16_t data[8192];
+        for(int root=0;root<12;++root) for(int quality=0;quality<8;++quality) {
+            for(int i=0;i<8192;++i) {
+                double v=0;
+                for(int n=0;n<4;++n) if(pattern[quality][n]>=0) {
+                    double f=440*pow(2.0,(60+root+pattern[quality][n]-69)/12.0);
+                    for(int h=1;h<=8;++h) v+=.065/h*sin(2*PI*f*h*i/48000+n*.7+h*.2);
+                }
+                data[i]=(int16_t)(32767*v);
+            }
+            dsp->push(data,8192);dsp->analyze(8192,false,true);auto r=dsp->result();
+            if(r.root!=root || r.chord!=quality) {printf("FAIL rich root=%d quality=%d -> root=%d quality=%d\n",root,quality,r.root,r.chord);return 1;}
+        }
+    } else if(!strcmp(argv[1],"bright-chord-missing-third")) {
+        // A guitar/small-speaker response can favor high partials while its
+        // third partial is absent. Those partials must not invent a seventh.
+        const int patterns[8][4]={{0,4,7,-1},{0,3,7,-1},{0,2,7,-1},{0,5,7,-1},{0,4,7,10},{0,4,7,11},{0,3,7,10},{0,4,8,-1}};
+        const int harmonics[]={1,2,4,5,6,8,10,12};
+        const double levels[]={.02,.03,.03,.04,.015,.06,.08,.02};
+        int16_t data[8192];
+        for(int root=0;root<12;++root) for(int quality=0;quality<8;++quality) {
+            for(int i=0;i<8192;++i) {
+                double v=0;
+                for(int n=0;n<4;++n) if(patterns[quality][n]>=0) {
+                    double f=440*pow(2.0,(48+root+patterns[quality][n]-69)/12.0);
+                    for(int h=0;h<8;++h) v+=levels[h]/2*sin(2*PI*f*harmonics[h]*i/48000+n*.7+h*.2);
+                }
+                data[i]=(int16_t)(32767*v);
+            }
+            dsp->push(data,8192);dsp->analyze(8192,false,true);auto r=dsp->result();
+            if(r.root!=root || r.chord!=quality) {printf("FAIL bright root=%d quality=%d -> root=%d quality=%d\n",root,quality,r.root,r.chord);return 1;}
+        }
+    } else if(!strcmp(argv[1],"weak-fundamental-single-note")) {
+        int16_t data[8192];
+        for(int i=0;i<8192;++i) {
+            double f=261.625565;double v=.005*sin(2*PI*f*i/48000);
+            for(int h=2;h<=10;++h) v+=.24/h*sin(2*PI*f*h*i/48000);
+            data[i]=(int16_t)(32767*v);
+        }
+        dsp->push(data,8192);dsp->analyze(8192,false,true);
+        assert(dsp->result().chord==AcousticDSP::NONE);
     } else if(!strcmp(argv[1],"pitch-with-transient")) {
         int16_t data[8192];
         for(int i=0;i<8192;++i) data[i]=(int16_t)(32767*(.005*sin(2*PI*440*i/48000)+.002*sin(2*PI*330*i/48000)));

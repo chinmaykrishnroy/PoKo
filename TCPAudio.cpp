@@ -1,3 +1,4 @@
+#include "PlaybackAudioTap.h"
 #include "TCPAudio.h"
 #include <new>
 
@@ -292,7 +293,8 @@ bool TCPAudio::AudioOutputPokoI2S::begin() {
 
 bool TCPAudio::AudioOutputPokoI2S::SetRate(int hz) {
             if (hz > 0) {
-                ensureAudioOutput((uint32_t)hz);
+                if (!ensureAudioOutput((uint32_t)hz)) return false;
+                _tapRate=(uint32_t)hz;
             }
             return true;
         }
@@ -312,6 +314,7 @@ bool TCPAudio::AudioOutputPokoI2S::ConsumeSample(int16_t sample[2]) {
                 size_t written = 0;
                 if (poko_tx_handle) {
                     i2s_channel_write(poko_tx_handle, _buffer, sizeof(_buffer), &written, pdMS_TO_TICKS(100));
+                    playbackAudioTap.writeStereo(_buffer,written/4,_tapRate,millis());
                 }
                 _bufIndex = 0;
             }
@@ -323,6 +326,7 @@ bool TCPAudio::AudioOutputPokoI2S::stop() {
                 size_t written = 0;
                 if (poko_tx_handle) {
                     i2s_channel_write(poko_tx_handle, _buffer, _bufIndex * sizeof(int16_t), &written, pdMS_TO_TICKS(100));
+                    playbackAudioTap.writeStereo(_buffer,written/4,_tapRate,millis());
                 }
                 _bufIndex = 0;
             }

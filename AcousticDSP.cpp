@@ -10,19 +10,26 @@ float magnitude(float re, float im) { return sqrtf(re * re + im * im); }
 }
 
 AcousticDSP::AcousticDSP(bool collectBass) : _write(0), _count(0), _window(0), _bassWrite(0), _bassCount(0),
-    _decimationPhase(0), _rawClipAge(MAX_SAMPLES*4), _bass(false), _collectBass(collectBass), _sampleRate(RATE), _frequencyMax(20000),
+    _decimationPhase(0), _rawClipAge(MAX_SAMPLES*4), _bass(false), _collectBass(collectBass), _inputRate(0), _sampleRate(RATE), _frequencyMax(20000),
     _tonalMaximum(0), _tonalNoise(0), _windowEnergy(1), _spectralMaximum(0) {
     _result={};_result.rmsDb=_result.peakDb=-120;_result.midi=_result.root=-1;_result.chord=NONE;
     for (float& v : _spectrum) v = -120;
-    if(!_collectBass) return;
+    setSampleRate(48000);
+}
+bool AcousticDSP::setSampleRate(uint32_t rate) {
+    if(rate<8000 || rate>192000) return false;
+    if(_inputRate==rate) return true;
+    _inputRate=(float)rate;resetInputHistory();
+    if(!_collectBass) return true;
     // 63-tap Hamming low-pass before 4:1 decimation. Bass mode observes 683 ms
     // at 12 kHz with 8192 points (1.465 Hz bins), rather than zero padding.
     float sum=0;
     for(int i=0;i<63;++i) {
-        int x=i-31;float sinc=x?sinf(2*PI*3000/RATE*x)/(PI*x):2*3000/RATE;
+        int x=i-31;float sinc=x?sinf(2*PI*std::min(3000.0f,_inputRate/10)/_inputRate*x)/(PI*x):2*std::min(3000.0f,_inputRate/10)/_inputRate;
         _decimator[i]=sinc*(0.54f-0.46f*cosf(2*PI*i/62));sum+=_decimator[i];
     }
     for(float& coefficient:_decimator) coefficient/=sum;
+    return true;
 }
 void AcousticDSP::resetInputHistory() {
     _write=_count=_bassWrite=_bassCount=0;_decimationPhase=0;_rawClipAge=MAX_SAMPLES*4;
@@ -52,7 +59,7 @@ const float* AcousticDSP::spectrum() const { return _spectrum; }
 
 bool AcousticDSP::analyze(size_t window, bool pitch, bool chord, bool bass) {
     if(window<1024 || window>MAX_SAMPLES || (window&(window-1)) || (bass?_bassCount:_count)<window) return false;
-    _bass=bass;_sampleRate=bass?RATE/4:RATE;_frequencyMax=bass?2000.0f:20000.0f;
+    _bass=bass;_sampleRate=bass?_inputRate/4:_inputRate;_frequencyMax=std::min(bass?2000.0f:20000.0f,_sampleRate/2);
     _window=window;
     float mean=0;
     for(size_t i=0;i<window;++i) mean+=sample(i)/32768.0f;
@@ -171,10 +178,11 @@ float AcousticDSP::octaveDb(unsigned band,unsigned divisions) const {
 }
 
 void AcousticDSP::detectPitch() {
-    size_t n=_window/4;
+    size_t stride=std::max<size_t>(4,(size_t)ceilf(_sampleRate/12000));
+    size_t n=_window/stride;float pitchRate=_sampleRate/stride;
     for(size_t i=0;i<n;++i) {
-        float sum=0;for(size_t j=0;j<4;++j) sum+=sample(i*4+j)/32768.0f;
-        _pitchSamples[i]=sum*0.25f;
+        float sum=0;for(size_t j=0;j<stride;++j) sum+=sample(i*stride+j)/32768.0f;
+        _pitchSamples[i]=sum/stride;
     }
     const size_t length=std::min<size_t>(512,n/2);
     const size_t maximum=std::min<size_t>(300,n-length-1);
@@ -187,7 +195,7 @@ void AcousticDSP::detectPitch() {
         _difference[lag]=cumulative>1e-12f ? difference*lag/cumulative : 1;
     }
     size_t selected=0;
-    for(size_t lag=6;lag<maximum;++lag) if(_difference[lag]<0.15f) {
+    for(size_t lag=std::max<size_t>(2,(size_t)(pitchRate/2000));lag<maximum;++lag) if(_difference[lag]<0.15f) {
         while(lag+1<maximum && _difference[lag+1]<_difference[lag]) ++lag;
         selected=lag;break;
     }
@@ -196,7 +204,7 @@ void AcousticDSP::detectPitch() {
     float denominator=a-2*b+c;
     float fraction=fabsf(denominator)>1e-9f ? 0.5f*(a-c)/denominator : 0;
     fraction=std::max(-1.0f,std::min(1.0f,fraction));
-    float frequency=(_sampleRate/4)/(selected+fraction);
+    float frequency=pitchRate/(selected+fraction);
     if(frequency<40 || frequency>2000) return;
     // Short periods make a quadratic YIN lag estimate biased at high notes.
     // Refine the already-selected fundamental with a log-Hann spectral peak.
@@ -225,38 +233,94 @@ void AcousticDSP::detectPitch() {
 void AcousticDSP::detectChord() {
     struct Peak { float frequency,amplitude; } peaks[64];
     size_t count=0;
-    float strongest=_tonalMaximum,noise=_tonalNoise;
+    float strongest=0,noise=0;
     size_t first=std::max<size_t>(2,(size_t)(55*_window/_sampleRate));
     size_t last=std::min(_window/2-1,(size_t)(4000*_window/_sampleRate));
+    for(size_t k=first;k<last;++k) { float v=magnitude(_real[k],_imag[k]);strongest=std::max(strongest,v);noise+=v; }
+    noise/=std::max<size_t>(1,last-first);
     for(size_t k=first;k<last && count<64;++k) {
         float a=magnitude(_real[k-1],_imag[k-1]),b=magnitude(_real[k],_imag[k]),c=magnitude(_real[k+1],_imag[k+1]);
         if(b<a || b<=c || b<std::max(strongest*0.02f,noise*4.0f)) continue;
         a=logf(a+1e-12f);c=logf(c+1e-12f);float center=logf(b+1e-12f),d=a-2*center+c;
         float delta=fabsf(d)>1e-9f ? 0.5f*(a-c)/d : 0;
-        peaks[count++]={(k+std::max(-0.5f,std::min(0.5f,delta)))*_sampleRate/_window,b};
+        float frequency=(k+std::max(-0.5f,std::min(0.5f,delta)))*_sampleRate/_window;
+        // At bass frequencies, require a clear pitch-class center rather than
+        // allowing slightly drifting room/mains rumble to invent a chord tone.
+        if(frequency<80) {
+            float note=69+12*log2f(frequency/440);
+            if(fabsf(note-roundf(note))>0.15f) continue;
+        }
+        peaks[count++]={frequency,b};
     }
-    float chroma[12]={};
+    // A weak/missing fundamental may be absent from the peak list entirely.
+    // Its 2nd and 3rd partials still define it. Reject a single harmonic series
+    // before chord matching; upper partial pitch classes are not extra voices.
+    float peakPower=0;for(size_t i=0;i<count;++i) peakPower+=peaks[i].amplitude*peaks[i].amplitude;
+    for(size_t i=0;i<count;++i) for(size_t j=i+1;j<count;++j) {
+        float ratio=peaks[j].frequency/peaks[i].frequency;
+        if(ratio>1.512f) break; // Peaks are in ascending frequency order.
+        if(fabsf(ratio-1.5f)>0.012f) continue;
+        float fundamental=(peaks[i].frequency/2+peaks[j].frequency/3)*0.5f;
+        float explained=0;unsigned partials=0;
+        for(size_t k=0;k<count;++k) {
+            float h=peaks[k].frequency/fundamental,nearest=roundf(h);
+            if(nearest>=1 && nearest<=16 && fabsf(h-nearest)<0.008f*nearest) {
+                explained+=peaks[k].amplitude*peaks[k].amplitude;++partials;
+            }
+        }
+        if(partials>=3 && explained>peakPower*0.97f) return;
+    }
+    // A weak low-frequency spur cannot explain much louder upper notes. Use
+    // a harmonic roll-off bound and corroborating low/higher partials. A
+    // 2nd+3rd pair can also support an attenuated fundamental.
+    float parentStrength[64];bool supportedParent[64];
+    for(size_t i=0;i<count;++i) {
+        float second=0,third=0;unsigned higher=0;
+        for(size_t j=i+1;j<count;++j) {
+            float ratio=peaks[j].frequency/peaks[i].frequency,nearest=roundf(ratio);
+            if(fabsf(ratio-2)<0.024f) second=std::max(second,peaks[j].amplitude);
+            if(fabsf(ratio-3)<0.036f) third=std::max(third,peaks[j].amplitude);
+            if(nearest>=4 && nearest<=16 && fabsf(ratio-nearest)<0.012f*nearest) higher|=1u<<(unsigned)nearest;
+        }
+        supportedParent[i]=(second>0 && (third>0 || higher)) || (third>0 && higher);
+        parentStrength[i]=peaks[i].amplitude;
+        float inferred=std::min(2*second,3*third);
+        if(second>0 && third>0 && peaks[i].amplitude<0.25f*inferred)
+            parentStrength[i]=inferred;
+    }
+    float chroma[12]={};size_t roots[64];
     int bass=-1;unsigned independent=0;
     for(size_t i=0;i<count;++i) {
-        // Compress amplitude before harmonic weighting: room/mic response can
-        // attenuate a genuine chord tone without changing its pitch class.
-        float weight=sqrtf(peaks[i].amplitude/strongest);
-        bool harmonic=false;
-        for(size_t j=0;j<i;++j) {
+        roots[i]=i;
+        // Prefer the nearest credible parent (usually an octave), rather than
+        // assigning every upper partial to an unrelated low subharmonic.
+        for(size_t j=i;j-->0;) {
             float ratio=peaks[i].frequency/peaks[j].frequency,nearest=roundf(ratio);
-            if(nearest>=2 && nearest<=16 && fabsf(ratio-nearest)<0.018f*nearest) { weight*=0.22f;harmonic=true;break; }
+            if(nearest>=2 && nearest<=16 && fabsf(ratio-nearest)<0.012f*nearest &&
+               (peaks[i].amplitude<=2*parentStrength[j]/nearest || (nearest>=4 && supportedParent[j]))) {
+                roots[i]=roots[j];break;
+            }
         }
-        float note=69+12*log2f(peaks[i].frequency/440.0f);
+        float note=69+12*log2f(peaks[roots[i]].frequency/440.0f);
         int midi=(int)lroundf(note);
         if(fabsf(note-midi)>0.35f) continue;
         int pc=(midi%12+12)%12;
-        if(!harmonic) independent|=1u<<pc;
+        if(roots[i]==i) independent|=1u<<pc;
         if(bass<0 && peaks[i].amplitude>strongest*0.06f) bass=pc;
-        chroma[pc]+=weight;
+        // A bright partial supports its own fundamental's pitch class. It is
+        // neither an extra chord note nor discarded evidence of a quiet voice.
+        chroma[pc]=std::max(chroma[pc],sqrtf(peaks[i].amplitude/strongest));
     }
     unsigned independentCount=0;for(unsigned bits=independent;bits;bits>>=1) independentCount+=bits&1u;
     if(independentCount<3) return; // A single rich note is not a chord.
     float maximum=0,total=0;for(float v:chroma) maximum=std::max(maximum,v);
+    if(maximum<=0) return;
+    float background[12];for(int i=0;i<12;++i) background[i]=chroma[i];
+    std::sort(background,background+12);
+    float floor=(background[5]+background[6])*0.5f;
+    if(floor>maximum*0.62f) return;
+    maximum=0;
+    for(float& v:chroma) { v=std::max(0.0f,v-floor);maximum=std::max(maximum,v); }
     if(maximum<=0) return;
     int present=0;for(float& v:chroma) { v/=maximum;total+=v;present+=v>0.18f; }
     if(present<3 || present>7) return;
@@ -270,7 +334,9 @@ void AcousticDSP::detectChord() {
         }
         if(weakest<0.18f) continue;
         float coverage=inside/total;
-        float score=inside/notes-0.6f*(total-inside)/(12-notes);
+        // Reward explained evidence as well as per-note strength; a genuine
+        // quieter fourth voice must not always lose to its louder triad.
+        float score=coverage*inside/notes;
         if(root==bass) score+=0.015f;
         if(coverage>=0.7f && score>best) {
             best=score;_result.root=root;_result.chord=(Chord)quality;

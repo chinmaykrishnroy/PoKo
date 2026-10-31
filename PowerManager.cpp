@@ -297,6 +297,8 @@ void PowerManager::toggleScreen() {
         }
     }
 
+void PowerManager::setPowerDownCallback(std::function<void()> cb) { _powerDownCb=cb; }
+
 void PowerManager::powerOff(bool restart) {
         Serial.printf("[power] Starting graceful %s...\n", restart ? "reboot" : "power-off");
 
@@ -310,6 +312,7 @@ void PowerManager::powerOff(bool restart) {
         // 2. Stop audio pipelines and fully power down codec/I2S
         if (_audio) _audio->stopAll();
         shutdownAudioOutputHardware();
+        if (_powerDownCb) _powerDownCb();
 
         // 3. Turn off LEDs
         turnOffLEDs();
@@ -397,6 +400,7 @@ void PowerManager::_enterDeepIdle(uint32_t idleMs) {
                       (unsigned long)idleMs);
         if (_audio) _audio->stopAll();
         shutdownAudioOutputHardware();
+        if (_powerDownCb) _powerDownCb();
         turnOffLEDs();
         setBacklight(0);
         displaySleep();
