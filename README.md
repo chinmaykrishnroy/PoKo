@@ -160,6 +160,9 @@ With continuous playback already running, use
 `--source ssync`) to verify both tools while preserving that stream. Neither
 script records microphone audio. Chord mode remains an estimate; a noisy or
 ambiguous guitar decay may deliberately show `--`.
+The [v2.5.0 hardware validation](docs/acoustic-validation-v2.5.0.md) records
+passed playback checks and a remaining microphone chord-identification failure;
+chord accuracy is not yet verified for general instrument use.
 
 
 Hardware references: [Waveshare board documentation](https://docs.waveshare.com/ESP32-S3-LCD-0.85),

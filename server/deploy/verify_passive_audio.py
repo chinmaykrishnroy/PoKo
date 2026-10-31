@@ -34,7 +34,9 @@ def main():
         if expected == "MUSIC":
             return get("/api/health").get("music_playing", False)
         snap = get("/api/snap")
-        return snap.get("connected") and not snap.get("suspended") and snap.get("audio_active")
+        # Ownership alone is also true for an idle, silent Snapclient.
+        return (snap.get("connected") and not snap.get("suspended")
+                and snap.get("audio_active") and snap.get("playing"))
 
     assert playing(), "Start continuous " + expected + " playback before running this test"
     reports = []
