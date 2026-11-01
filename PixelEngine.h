@@ -4,6 +4,7 @@
 #include <Preferences.h>
 #include <atomic>
 #include "PokoPins.h"
+#include "ReactiveLights.h"
 
 // ─────────────────────────────────────────────────────────────
 //  PixelEngine — Central WS2812B 8-LED Ring Lighting Engine
@@ -46,6 +47,8 @@ enum SSyncEffectPreset : uint8_t {
     SSYNC_FX_CYAN,           // Neon Cyan beat pulse
     SSYNC_FX_MAGENTA,        // Vivid Magenta beat pulse
     SSYNC_FX_AMBER,          // Warm Amber beat pulse
+    SSYNC_FX_PRISM,          // Three-band pulses, flowing arcs and treble sparkles
+    SSYNC_FX_SPECTRUM,       // Eight frequency bands, one per LED
     SSYNC_FX_COUNT
 };
 
@@ -79,13 +82,19 @@ private:
 
     // SSync reactive settings
     bool              _ssyncLightOn = true;
-    SSyncEffectPreset _ssyncEffect = SSYNC_FX_VOL_HUE;
+    SSyncEffectPreset _ssyncEffect = SSYNC_FX_PRISM;
 
     // Audio Frequency Response Filter
     std::atomic<FreqResponse> _freqResp{FREQ_RESP_LOW};
     portMUX_TYPE _audioFilterMux = portMUX_INITIALIZER_UNLOCKED;
     float _lp1 = 0.0f, _lp2 = 0.0f;
     float _hp = 0.0f, _prevIn = 0.0f;
+    std::atomic<uint32_t> _reactiveMaxUs{0};
+    std::atomic<uint8_t> _reactiveMode{0}; // 0=off, 1=Prism, 2=Spectrum
+    ReactiveLightInput _reactiveInput; // Only SnapPlayer's output task touches filters.
+    ReactiveLightInput::Frame _reactiveFrame; // Protected by _audioFilterMux.
+    uint32_t _reactiveFrameMs=0;
+    ReactiveLightPattern _reactivePattern; // Main loop only.
 
     // Album art 2-color extraction
     CRGB _artColor1 = CRGB(0x16, 0x8B, 0xFF); // Vibrant Azure Blue
@@ -179,6 +188,9 @@ public:
     // ── Frequency Filter & Audio Reactivity ──────────────────────
     void feedAudioSample(int16_t left, int16_t right);
 
+    void feedReactiveAudio(const int16_t* stereo,size_t frames,uint32_t rate,bool audible=true);
+
+    uint32_t getReactiveAnalysisMaxUs() const;
     float getAudioLevel() const;
 
     // ── Web OTA & ArduinoOTA Visualizer ──────────────────────────

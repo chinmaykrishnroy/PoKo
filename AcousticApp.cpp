@@ -311,8 +311,12 @@ void AcousticApp::drawSpectrum(bool octave) {
         if(peakHz>0) snprintf(b,sizeof(b),peakHz<1000?"Pk %.2fHz":"Pk %.0fHz",peakHz);
         else snprintf(b,sizeof(b),"Pk --Hz");
         text(4,34,b,t.text);
-        snprintf(b,sizeof(b),"%.0f/%.0f",top,bottom);
-        int16_t x1,y1;uint16_t w,h;_canvas->getTextBounds(b,0,0,&x1,&y1,&w,&h);text(125-w-x1,34,b,t.muted);
+        // FULL owns the right-hand slot while present. The complete canvas
+        // redraw restores the scale as soon as the full-scale flag clears.
+        if(!_dsp->result().atFullScale) {
+            snprintf(b,sizeof(b),"%.0f/%.0f",top,bottom);
+            int16_t x1,y1;uint16_t w,h;_canvas->getTextBounds(b,0,0,&x1,&y1,&w,&h);text(125-w-x1,34,b,t.muted);
+        }
     }
     // Label the actual FFT range, including non-48-kHz playback clocks.
     if(octave) {

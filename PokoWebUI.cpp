@@ -643,6 +643,8 @@ async function renderControls(){
               <option value="cyan" ${d.ssync_effect===2?'selected':''}>Cyan Beat Pulse</option>
               <option value="magenta" ${d.ssync_effect===3?'selected':''}>Magenta Beat Pulse</option>
               <option value="amber" ${d.ssync_effect===4?'selected':''}>Amber Glow</option>
+              <option value="prism" ${d.ssync_effect===5?'selected':''}>Prism Flow (Bass, Melody &amp; Sparkles)</option>
+              <option value="spectrum" ${d.ssync_effect===6?'selected':''}>Spectrum Ring (8 Frequency Bands)</option>
             </select>
           </div>
 

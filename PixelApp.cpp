@@ -158,6 +158,8 @@ void PixelApp::renderToCanvas() {
                         case SSYNC_FX_CYAN:    snprintf(valBuf, sizeof(valBuf), "Cyan"); break;
                         case SSYNC_FX_MAGENTA: snprintf(valBuf, sizeof(valBuf), "Magenta"); break;
                         case SSYNC_FX_AMBER:   snprintf(valBuf, sizeof(valBuf), "Amber"); break;
+                        case SSYNC_FX_PRISM:   snprintf(valBuf, sizeof(valBuf), "Prism"); break;
+                        case SSYNC_FX_SPECTRUM:snprintf(valBuf, sizeof(valBuf), "Spectrum"); break;
                         default:               snprintf(valBuf, sizeof(valBuf), "Vol Hue"); break;
                     }
                     break;

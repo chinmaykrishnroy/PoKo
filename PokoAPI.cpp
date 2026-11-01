@@ -49,7 +49,7 @@ void PokoAPI::begin() {
             json += "\"last_wake_cause\":" + String((int)esp_sleep_get_wakeup_cause()) + ",";
             json += "\"last_ext1_wake_mask\":" + String((unsigned long)esp_sleep_get_ext1_wakeup_status()) + ",";
             json += "\"cpu_mhz\":" + String(getCpuFrequencyMhz()) + ",";
-            json += "\"firmware_version\":\"v2.6.0\",";
+            json += "\"firmware_version\":\"v2.7.0\",";
             json += "\"app_state\":" + String((int)activeApp) + ",";
             json += "\"theme\":\"" + String(isDarkTheme() ? "dark" : "light") + "\",";
             json += "\"master_vol\":" + String(getMasterVolumeLimit()) + ",";
@@ -925,6 +925,8 @@ void PokoAPI::begin() {
                 else if (fx == "cyan" || fx == "2")    pixelEngine.setSSyncEffect(SSYNC_FX_CYAN);
                 else if (fx == "magenta" || fx == "3") pixelEngine.setSSyncEffect(SSYNC_FX_MAGENTA);
                 else if (fx == "amber" || fx == "4")   pixelEngine.setSSyncEffect(SSYNC_FX_AMBER);
+                else if (fx == "prism" || fx == "5")   pixelEngine.setSSyncEffect(SSYNC_FX_PRISM);
+                else if (fx == "spectrum" || fx == "6")pixelEngine.setSSyncEffect(SSYNC_FX_SPECTRUM);
                 changed = true;
             }
 
@@ -969,6 +971,13 @@ void PokoAPI::begin() {
             json += "\"freq_resp\":" + String((int)pixelEngine.getFreqResponse()) + ",";
             json += "\"art_color1\":\"" + String(art1Buf) + "\",";
             json += "\"art_color2\":\"" + String(art2Buf) + "\",";
+            json += "\"light_analysis_max_ms\":" + String(pixelEngine.getReactiveAnalysisMaxUs()/1000.0f,3) + ",";
+            json += "\"rendered_colors\":[";
+            for(unsigned i=0;i<POKO_LED_COUNT;++i) {
+                CRGB c=pixelEngine.getPixelColor(i);if(i)json+=",";
+                json+="["+String(c.r)+","+String(c.g)+","+String(c.b)+"]";
+            }
+            json += "],";
             json += "\"audio_level\":" + String(pixelEngine.getAudioLevel(), 2);
             json += "}";
             _server->send(200, "application/json", json);

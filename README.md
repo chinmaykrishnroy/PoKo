@@ -65,6 +65,23 @@ The launcher keeps **eight visible navigation dots** for ten apps. The represent
 window scrolls at its edges: the selected dot stays last when advancing past the
 window and first when moving back past it.
 
+### SSync lighting
+
+Choose **Prism Flow** in Pixels → SSync Effect or the device Web UI. Low produces
+blue/violet bass pulses, Mid flowing teal/magenta arcs, High gold/pink treble
+sparkles, and All combines the layers. **Spectrum Ring** assigns eight roughly
+octave-spaced bands to the eight LEDs; Low/Mid/High select their corresponding
+sections. Brightness follows band energy, with adaptive headroom, a noise gate
+and smooth decay. Volume, ring brightness, speed and LED selection remain active.
+
+Both effects analyze stereo PCM at its actual sample rate, without another FFT
+or changing playback data. Prism uses a lightweight three-band path; Spectrum
+runs its separate eight-band bank only while selected. Existing presets retain
+their IDs. New installations default to Prism; existing saved effects are kept.
+Use `/api/pixels?ssync_effect=prism` or `ssync_effect=spectrum` to select them.
+The authenticated response includes `rendered_colors` and `light_analysis_max_ms`
+for checking the current output and processing cost.
+
 ### Microphone Analyzer and Tuner
 
 These tools automatically observe **Music or active SSync playback PCM** without

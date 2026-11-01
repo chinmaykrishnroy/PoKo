@@ -27,6 +27,7 @@ MIGRATED = (
     "DeviceWebSession",
     "PixelApp",
     "PixelEngine",
+    "ReactiveLights",
     "PokoAPI",
     "PokoAppState",
     "PokoDrivers",

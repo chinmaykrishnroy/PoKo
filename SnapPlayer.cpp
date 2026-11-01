@@ -1527,6 +1527,7 @@ void SnapPlayer::audioTask() {
             }
 
             float muteGain = _serverMuted.load(std::memory_order_relaxed) ? 0.0f : 1.0f;
+            pixelEngine.feedReactiveAudio(pcmIn,samples,activeRate,muteGain>0);
             uint32_t outFrames = 0;
             uint32_t correctionPos = samples / 2U;
 

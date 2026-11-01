@@ -22,10 +22,11 @@ def main() -> int:
     for script in ("prepare_audio_test.py", "prepare_microphone_test.py", "prepare_acoustic_app_test.py", "prepare_capture_power_test.py", "prepare_snap_ingress_test.py", "prepare_video_test.py", "prepare_music_test.py", "prepare_library_status_test.py", "prepare_power_wake_test.py"):
         subprocess.run([sys.executable, str(HERE / script)], cwd=ROOT, check=True)
     cases = {
+        "reactive-lights": ["frequency-bands-and-clocks", "prism-groups-stereo-and-dc", "gap-rate-and-mode-reset", "pattern-focus-mask-volume-and-silence", "motion-and-filter-isolation"],
         "ssync-ingress": ["full-suspended-ring", "fresh-after-long-idle"],
         "playback-tap": ["disabled-and-copy", "overflow-and-rate-change", "pause-discards-history", "silent-channel-handoff", "producer-consumer"],
         "capture-power": ["capture-pa-off-and-lock", "capture-stop-and-playback"],
-        "acoustic-app": ["tuner-calibration-persistence", "chord-performance-lease", "full-scale-ui-labels", "calibration-preserves-playback", "playback-preserved", "playback-rate-and-transition", "playback-full-scale-no-auto-gain", "music-starts-during-microphone", "overrun-clears-reading", "auto-gain-persistence", "render-preview", "right-footer-and-fft-headroom", "quiet-placeholder", "scope-connected-trace", "modes-and-holds", "tuner-and-stale-input", "failure-and-retry", "external-stop-and-reload"],
+        "acoustic-app": ["tuner-calibration-persistence", "chord-performance-lease", "full-scale-ui-labels", "fft-full-scale-label-slot", "calibration-preserves-playback", "playback-preserved", "playback-rate-and-transition", "playback-full-scale-no-auto-gain", "music-starts-during-microphone", "overrun-clears-reading", "auto-gain-persistence", "render-preview", "right-footer-and-fft-headroom", "quiet-placeholder", "scope-connected-trace", "modes-and-holds", "tuner-and-stale-input", "failure-and-retry", "external-stop-and-reload"],
         "microphone": ["no-clock-steal", "failure-cleanup", "capture-and-stop", "gain"],
         "launcher-window": ["scroll-and-wrap"],
         "acoustic-dsp": ["independent-fundamentals", "missing-fundamental-notes", "multi-resolution-bass", "manual-reference-and-profiles", "expanded-vocabulary", "keyboard-vocabulary", "slash-chords", "held-notes-cannot-create-chord", "analysis-memory-budget", "sample-headroom-with-dc", "bass-clock-and-inversions", "playback-sample-rates", "tuner-history-without-bass", "scope-trace-math", "fft-headroom", "reading-hysteresis", "quality-change-confirmation", "auto-gain", "semantic-colors", "bass-resolution", "bass-playback-clock", "harmonic-note-rejection", "pitch", "spectrum-levels", "chords", "detuned-chords", "silence-noise", "scope-period", "adaptive-scale", "weak-chord", "uneven-chord", "weak-subharmonic-chord", "open-voicing-chord", "rich-chords", "bright-chord-missing-third", "open-wide-voicing", "extreme-wide-voicing", "sparse-single-harmonic-note", "chord-decision-evidence", "progression-and-silence", "sparse-harmonic-chord", "weak-fundamental-single-note", "pitch-with-transient", "scale-headroom"],
@@ -55,6 +56,7 @@ def main() -> int:
         "audio-activity": ["silence", "audible-positive", "audible-negative"],
     }
     sources = {
+        "reactive-lights": [HERE / "reactive_lights.cpp", ROOT / "ReactiveLights.cpp"],
         "ssync-ingress": [ROOT / "build/snap-ingress-test.cpp", ROOT / "AudioActivity.cpp"],
         "playback-tap": [HERE / "playback_audio_tap.cpp", ROOT / "PlaybackAudioTap.cpp"],
         "capture-power": [ROOT / "build/capture-power-test.cpp", ROOT / "PowerPolicy.cpp"],

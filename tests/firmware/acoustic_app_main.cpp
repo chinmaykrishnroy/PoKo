@@ -44,6 +44,37 @@ int main(int argc,char** argv) {
         assert(located);analyzer.onEnter();analyzer.onEnter();testMillis+=100;analyzer.update();
         assert(gfx.text.find("Peak 0.0 FULL")!=std::string::npos);
         analyzer.unload();
+    } else if(!strcmp(argv[1],"fft-full-scale-label-slot")) {
+        for(AudioSource source:{AUDIO_MUSIC,AUDIO_SSYNC}) {
+            manager.source=source;manager.playing=true;speakerAmp=true;analyzer.load();
+            while(analyzer.status().mode!=1) analyzer.onEnter();
+            int16_t stereo[4800*2];
+            auto feed=[&](int amplitude) {
+                for(int i=0;i<4800;++i) stereo[2*i]=stereo[2*i+1]=(int16_t)(i%48<24?amplitude:-amplitude);
+                for(int tick=0;tick<3;++tick) {
+                    playbackAudioTap.writeStereo(stereo,4800,48000);testMillis+=100;analyzer.update();
+                }
+            };
+            auto checkFull=[&]() {
+                assert(analyzer.status().signal.atFullScale);
+                bool found=false;
+                for(const auto& label:gfx.labels) if(label.value=="FULL") {
+                    found=true;
+                    for(const auto& other:gfx.labels) if(other.value!="FULL" && other.y==label.y)
+                        assert(other.x+(int)other.value.size()*5<=label.x || other.x>=label.x+20);
+                }
+                assert(found);
+            };
+            feed(32767);checkFull(); // Full-scale indication owns the range slot.
+            feed(8000);assert(!analyzer.status().signal.atFullScale);
+            bool rangeRestored=false;
+            for(const auto& label:gfx.labels) {
+                assert(label.value!="FULL");
+                if(label.y==34 && label.value.find('/')!=std::string::npos) rangeRestored=true;
+            }
+            assert(rangeRestored); // Next redraw restores the range without stale FULL text.
+            feed(32767);checkFull();analyzer.unload();
+        }
     } else if(!strcmp(argv[1],"calibration-preserves-playback")) {
         manager.source=AUDIO_MUSIC;manager.playing=true;speakerAmp=true;tuner.load();
         int writes=preferenceWrites;assert(tuner.setTuning(432,NoteEstimator::KEYBOARD));

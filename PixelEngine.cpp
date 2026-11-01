@@ -38,7 +38,7 @@ void PixelEngine::loadFromPreferences(Preferences& prefs) {
         _musicLightOn = prefs.getBool("px_mus_on", true);
         _musicEffect = (MusicEffectPreset)constrain(prefs.getInt("px_mus_eff", 0), 0, (int)MUSIC_FX_COUNT - 1);
         _ssyncLightOn = prefs.getBool("px_ssy_on", true);
-        _ssyncEffect = (SSyncEffectPreset)constrain(prefs.getInt("px_ssy_eff", 0), 0, (int)SSYNC_FX_COUNT - 1);
+        _ssyncEffect = (SSyncEffectPreset)constrain(prefs.getInt("px_ssy_eff", (int)SSYNC_FX_PRISM), 0, (int)SSYNC_FX_COUNT - 1);
         _freqResp = (FreqResponse)constrain(prefs.getInt("px_freq", 0), 0, (int)FREQ_RESP_COUNT - 1);
 
         if (_initialized) {
@@ -164,13 +164,16 @@ void PixelEngine::setSSyncLightOn(bool on) { _ssyncLightOn = on; }
 
 SSyncEffectPreset PixelEngine::getSSyncEffect() const { return _ssyncEffect; }
 
-void PixelEngine::setSSyncEffect(SSyncEffectPreset fx) { _ssyncEffect = fx; }
+void PixelEngine::setSSyncEffect(SSyncEffectPreset fx) {
+    _ssyncEffect=(SSyncEffectPreset)constrain((int)fx,0,(int)SSYNC_FX_COUNT-1);
+    _reactivePattern=ReactiveLightPattern();
+}
 
 FreqResponse PixelEngine::getFreqResponse() const {
         return _freqResp.load(std::memory_order_relaxed);
     }
 
-void PixelEngine::setFreqResponse(FreqResponse f) { _freqResp = f; }
+void PixelEngine::setFreqResponse(FreqResponse f) { _freqResp = f;_reactivePattern=ReactiveLightPattern(); }
 
 CRGB PixelEngine::getArtColor1() const { return _artColor1; }
 
@@ -223,6 +226,21 @@ void PixelEngine::feedAudioSample(int16_t left, int16_t right) {
                                                   std::memory_order_release,
                                                   std::memory_order_relaxed)) {}
     }
+
+void PixelEngine::feedReactiveAudio(const int16_t* stereo,size_t frames,uint32_t rate,bool audible) {
+    uint8_t mode=_reactiveMode.load(std::memory_order_acquire);
+    if(!mode) return;
+    uint32_t started=micros();
+    auto frame=_reactiveInput.process(stereo,frames,rate,mode==2,millis(),audible);
+    uint32_t elapsed=micros()-started,previous=_reactiveMaxUs.load(std::memory_order_relaxed);
+    while(elapsed>previous && !_reactiveMaxUs.compare_exchange_weak(previous,elapsed,std::memory_order_relaxed)) {}
+    // Filter the block outside the critical section; publish only its envelope.
+    portENTER_CRITICAL(&_audioFilterMux);
+    _reactiveFrame=frame;_reactiveFrameMs=millis();
+    portEXIT_CRITICAL(&_audioFilterMux);
+}
+
+uint32_t PixelEngine::getReactiveAnalysisMaxUs() const { return _reactiveMaxUs.load(std::memory_order_relaxed); }
 
 float PixelEngine::getAudioLevel() const { return _audioLevel.load(std::memory_order_acquire); }
 
@@ -374,6 +392,10 @@ void PixelEngine::update(bool isMusicPlaying, bool isSSyncPlaying) {
         if (!_initialized) return;
 
         uint32_t now = millis();
+
+        bool reactive=!_otaActive && !isMusicPlaying && isSSyncPlaying && _ssyncLightOn;
+        uint8_t mode=reactive?(_ssyncEffect==SSYNC_FX_PRISM?1:_ssyncEffect==SSYNC_FX_SPECTRUM?2:0):0;
+        _reactiveMode.store(mode,std::memory_order_release);
 
         // Check OTA states first
         if (_otaErrorActive) {
@@ -623,6 +645,18 @@ void PixelEngine::renderMusicSync(uint32_t now, float volScale) {
     }
 
 void PixelEngine::renderSSyncSync(uint32_t now, float volScale) {
+        if(_ssyncEffect==SSYNC_FX_PRISM || _ssyncEffect==SSYNC_FX_SPECTRUM) {
+            bool spectrum=_ssyncEffect==SSYNC_FX_SPECTRUM;
+            ReactiveLightInput::Frame frame;
+            portENTER_CRITICAL(&_audioFilterMux);
+            if(now-_reactiveFrameMs<=100 && _reactiveFrame.spectrum==spectrum) frame=_reactiveFrame;
+            portEXIT_CRITICAL(&_audioFilterMux);
+            ReactiveLightPattern::RGB colors[8];
+            _reactivePattern.render(frame,spectrum,(uint8_t)getFreqResponse(),volScale,_speedMs,_targetMask,now,colors);
+            for(unsigned i=0;i<POKO_LED_COUNT;++i) _leds[i]=CRGB(colors[i].r,colors[i].g,colors[i].b);
+            return;
+        }
+
         float baselineGlow = 0.08f * volScale;
         float beatGlow = _audioLevel * volScale;
         float totalIntensity = constrain(baselineGlow + beatGlow * 0.92f, 0.0f, 1.0f);

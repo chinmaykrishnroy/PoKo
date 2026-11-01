@@ -7,6 +7,23 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v2.7.0] — 2026-11-01
+
+- Add SSync **Prism Flow**: blue/violet bass pulses, teal/magenta midrange arcs
+  and gold/pink treble sparkles. Low/Mid/High isolate layers; All combines them.
+- Add **Spectrum Ring**, using eight octave-spaced envelope bands across the
+  LEDs. Both effects respect brightness, volume, speed and the selected LED mask;
+  gated envelopes fade on silence and missing input without another FFT.
+- Analyze new LED effects at the actual stereo PCM rate before sample skipping;
+  preserve anti-phase material and publish only bounded envelope snapshots.
+  Prism runs a small three-band path; the eight-band bank runs only for Spectrum.
+  Existing preset IDs and Music lighting remain compatible.
+- Expose both presets in Pixels/Web UI/API, plus rendered LED colours and peak
+  LED-analysis duration for verification. New installations default to Prism.
+- Give FULL exclusive use of the FFT range-label slot and restore the range as
+  soon as FULL clears. Add production rendering, filter, stereo, silence, mask,
+  sample-clock and motion regressions.
+
 ## [v2.6.0] — 2026-11-01
 
 - Replace greedy peak grouping with an allocation-free notes-first estimator:
